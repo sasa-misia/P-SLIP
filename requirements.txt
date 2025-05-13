@@ -1,0 +1,7 @@
+numpy
+scipy
+matplotlib
+pandas
+rasterio
+scikit-image
+scikit-learn
