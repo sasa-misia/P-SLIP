@@ -16,7 +16,7 @@ import logging
 import argparse
 import pandas as pd
 from dataclasses import dataclass, asdict, field
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 
 # Add the parent directory to the system path (temporarily)
 # This allows importing modules from the parent directory
@@ -32,24 +32,20 @@ class AnalysisEnvironment:
     # Metadata
     case_name: str
     user: str
-    os_slash: str
+    os_separator: str
     creation_time: str = field(default_factory=lambda: pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
     
-    # Main directory
-    base_dir: str = field(default_factory=os.getcwd)
+    # Main directory as dict with 'path'
+    base_dir: Dict[str, str] = field(default_factory=lambda: {'path': os.getcwd()})
     
-    # Folder paths
-    inp_dir: Optional[str] = None
-    var_dir: Optional[str] = None
-    res_dir: Optional[str] = None
-    usr_dir: Optional[str] = None
-    out_dir: Optional[str] = None
-    log_dir: Optional[str] = None
-    
-    # Subfolder paths
-    inp_sub: Dict[str, str] = field(default_factory=dict)
-    out_sub: Dict[str, str] = field(default_factory=dict)
-    res_sub: Dict[str, str] = field(default_factory=dict)
+    # Folder paths as nested dicts
+    # Remember to modify in case of changes in ANALYSIS_FOLDER_STRUCTURE!
+    inp_dir: Dict[str, Any] = field(default_factory=dict)
+    var_dir: Dict[str, Any] = field(default_factory=dict)
+    res_dir: Dict[str, Any] = field(default_factory=dict)
+    usr_dir: Dict[str, Any] = field(default_factory=dict)
+    out_dir: Dict[str, Any] = field(default_factory=dict)
+    log_dir: Dict[str, Any] = field(default_factory=dict)
     
     def to_json(self, file_path):
         """Save the environment to a JSON file."""
@@ -64,7 +60,8 @@ class AnalysisEnvironment:
         return cls(**data)
 
 
-def check_libraries(required_file=config.LIBRARIES_CONFIG['required_file'], optional_file=config.LIBRARIES_CONFIG['optional_file']):
+# The following method checks if the required and optional libraries are installed (private).
+def _check_libraries(required_file=config.LIBRARIES_CONFIG['required_file'], optional_file=config.LIBRARIES_CONFIG['optional_file']):
     """
     Verify if the required and optional libraries are installed.
     If any required library is missing, an ImportError is raised.
@@ -79,12 +76,17 @@ def check_libraries(required_file=config.LIBRARIES_CONFIG['required_file'], opti
     # Load the configuration files
     # Assuming the config files are in the parent directory of this script
     config_dir = Path(__file__).parent.parent
-    
-    with open(config_dir / required_file, 'r') as f:
-        required_libs = [line.strip() for line in f.readlines() if line.strip()] # Remove empty lines and strip whitespace
-    
-    with open(config_dir / optional_file, 'r') as f:
-        optional_libs = [line.strip() for line in f.readlines() if line.strip()] # Remove empty lines and strip whitespace
+
+    def _parse_libs(file_path):
+        with open(file_path, 'r') as f:
+            return [
+                line.strip()
+                for line in f.readlines()
+                if line.strip() and not line.strip().startswith('#')
+            ]
+
+    required_libs = _parse_libs(config_dir / required_file)
+    optional_libs = _parse_libs(config_dir / optional_file)
     
     # Check required libraries
     # Try to import each library and catch ImportError
@@ -116,6 +118,37 @@ def check_libraries(required_file=config.LIBRARIES_CONFIG['required_file'], opti
     return (len(missing_required) == 0, len(missing_optional) == 0)
 
 
+# The following method creates nested folders based on a given structure (private).
+def _create_nested_folders(base_path, structure, logger):
+    """
+    Recursive helper to create nested folders and return a dict with their paths.
+
+    Args:
+        base_path: the parent directory
+        structure: list of str or dict (for subfolders)
+
+    Returns: dict with 'path' and subfolder keys
+    """
+    result = {'path': base_path}
+    if not os.path.exists(base_path):
+        os.makedirs(base_path)
+        logger.info(f"New folder created: {base_path}")
+    if isinstance(structure, list):
+        for item in structure:
+            if isinstance(item, str):
+                sub_path = os.path.join(base_path, item)
+                result[item] = {'path': sub_path}
+                if not os.path.exists(sub_path):
+                    os.makedirs(sub_path)
+                    logger.info(f"New subfolder created: {sub_path}")
+            elif isinstance(item, dict):
+                for subkey, subval in item.items():
+                    sub_path = os.path.join(base_path, subkey)
+                    result[subkey] = _create_nested_folders(sub_path, subval, logger)
+    return result
+
+
+# The following method creates the folder structure for the analysis (public).
 def create_folder_structure(case_name=None, base_dir=None):
     """
     Create the folder structure for the analysis.
@@ -146,92 +179,60 @@ def create_folder_structure(case_name=None, base_dir=None):
     
     # Separator
     sl = os.path.sep
-    
+
     # Library check
     logger.info("Check of required and optional libraries...")
-    check_libraries()
+    _check_libraries()
     logger.info("Check of libraries completed.")
-    
+
     # If no case name is provided, use the default
     if case_name is None:
         case_name = config.DEFAULT_CASE_NAME
-    
+
     # Create the analysis environment object
     env = AnalysisEnvironment(
         case_name=case_name,
         user=user,
-        os_slash=sl
+        os_separator=sl
     )
-    
+
     # Select the base directory
-    # If no base directory is provided, ask the user for it
     if base_dir is None:
         base_dir = input("Enter the base directory for the analysis (or press Enter to use the current directory): ")
-        if not base_dir.strip(): # If the user pressed Enter and leave it blank, use the current directory
+        if not base_dir.strip():
             base_dir = os.getcwd()
     elif not os.path.isdir(base_dir):
         raise ValueError(f"The specified base directory does not exist: {base_dir}")
-    
-    env.base_dir = base_dir
-    
-    # Main directories
-    env.inp_dir = os.path.join(base_dir, 'inputs')
-    env.var_dir = os.path.join(base_dir, 'variables')
-    env.res_dir = os.path.join(base_dir, 'results')
-    env.usr_dir = os.path.join(base_dir, 'user_control')
-    env.out_dir = os.path.join(base_dir, 'outputs')
-    env.log_dir = os.path.join(base_dir, 'logs')
-    
-    # Create the main directories if they do not exist
-    main_dirs = [env.inp_dir, env.var_dir, env.res_dir, 
-                    env.usr_dir, env.out_dir, env.log_dir]
-    
-    for dir_path in main_dirs:
-        if not os.path.exists(dir_path):
-            os.makedirs(dir_path)
-            logger.info(f"New main folder created: {dir_path}")
-    
-    # Create the input subdirectories if they do not exist
-    inp_sub = config.ANALYSIS_FOLDER_STRUCTURE['inputs']
-    
-    for subfolder in inp_sub:
-        path = os.path.join(env.inp_dir, subfolder)
-        env.inp_sub[subfolder] = path
-        if not os.path.exists(path):
-            os.makedirs(path)
-            logger.info(f"New input folder created: {path}")
-    
-    # Create the output subdirectories if they do not exist
-    out_sub = config.ANALYSIS_FOLDER_STRUCTURE['outputs']
-    
-    for subfolder in out_sub:
-        path = os.path.join(env.out_dir, subfolder)
-        env.out_sub[subfolder] = path
-        if not os.path.exists(path):
-            os.makedirs(path)
-            logger.info(f"New output folder created: {path}")
-    
-    # Create the result subdirectories if they do not exist
-    res_sub = config.ANALYSIS_FOLDER_STRUCTURE['results']
-    
-    for subfolder in res_sub:
-        path = os.path.join(env.res_dir, subfolder)
-        env.res_sub[subfolder] = path
-        if not os.path.exists(path):
-            os.makedirs(path)
-            logger.info(f"New result folder created: {path}")
-    
-    # Create the input_files.csv file
-    # This file will be used to store the paths of the input files
+
+    env.base_dir = {'path': base_dir}
+
+    # Dynamically create main directories and nested subfolders from ANALYSIS_FOLDER_STRUCTURE 
+    # Remember to modify in case of changes in ANALYSIS_FOLDER_STRUCTURE!
+    folder_attr_map = {
+        'inputs': 'inp_dir',
+        'variables': 'var_dir',
+        'results': 'res_dir',
+        'user_control': 'usr_dir',
+        'outputs': 'out_dir',
+        'logs': 'log_dir'
+    }
+    for key, attr in folder_attr_map.items():
+        main_path = os.path.join(base_dir, key)
+        structure = config.ANALYSIS_FOLDER_STRUCTURE.get(key, [])
+        nested_dict = _create_nested_folders(main_path, structure, logger)
+        setattr(env, attr, nested_dict)
+
+    # Create the input_files.csv file in the main input folder
     input_files_df = pd.DataFrame(columns=config.INPUT_FILES_COLUMNS)
-    input_files_path = os.path.join(env.inp_dir, 'input_files.csv')
+    input_files_path = env.inp_dir['path'] if 'path' in env.inp_dir else os.path.join(base_dir, 'inputs')
+    input_files_path = os.path.join(input_files_path, 'input_files.csv')
     input_files_df.to_csv(input_files_path, index=False)
     logger.info(f"File input_files.csv created: {input_files_path}")
     
     # Save the environment to a JSON file
     # This file will contain the details of the analysis environment
     # and can be used for future reference or loading
-    env_file_path = os.path.join(env.base_dir, 'analysis_environment.json')
+    env_file_path = os.path.join(env.base_dir['path'], 'analysis_environment.json')
     env.to_json(env_file_path)
     logger.info(f"Analysis environment saved to: {env_file_path}")
     
@@ -239,6 +240,7 @@ def create_folder_structure(case_name=None, base_dir=None):
     return env
 
 
+# The following method is the main function of the module.
 def main(case_name=None, gui_mode=False, base_dir=None):
     """
     Main function of the module.
@@ -262,13 +264,13 @@ def main(case_name=None, gui_mode=False, base_dir=None):
     return env
 
 
+# This block allows the script to be run from the command line with parameters.
 if __name__ == "__main__":
     # Parse command line arguments
-    # This allows the script to be run from the command line with parameters
     parser = argparse.ArgumentParser(description="Create the folder structure for the analysis.")
     parser.add_argument("--case_name", help="Case study name", default=None)
     parser.add_argument("--base_dir", help="Base directory for the analysis", default=None)
     args = parser.parse_args()
     
     # Call the main function with the provided arguments
-    main(args.case_name, base_dir=args.base_dir)
+    curr_env = main(case_name=args.case_name, base_dir=args.base_dir)

@@ -36,7 +36,10 @@ ANALYSIS_FOLDER_STRUCTURE = {
     ],
     'user_control': [],
     'outputs': [
-        'figures',
+        {'figures': [
+            'susceptibility_maps',
+        ]
+        },
         'tables'
     ],
     'logs': []
@@ -75,6 +78,6 @@ INPUT_FILES_COLUMNS = ['path', 'type', 'internal']
 # Libraries to check
 # This dictionary contains the required and optional libraries for the project.
 LIBRARIES_CONFIG = {
-    'required_file': 'required_libraries.txt',
-    'optional_file': 'optional_libraries.txt'
+    'required_file': 'requirements.txt',
+    'optional_file': 'requirements_opt.txt'
 }
