@@ -16,7 +16,7 @@ import logging
 import argparse
 import pandas as pd
 from dataclasses import dataclass, asdict, field
-from typing import Dict, Optional, Any
+from typing import Dict, Any
 
 # Add the parent directory to the system path (temporarily)
 # This allows importing modules from the parent directory

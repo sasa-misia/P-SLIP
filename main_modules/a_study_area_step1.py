@@ -6,6 +6,7 @@ import shapely.ops as ops
 import geopandas as gpd
 from main_modules._analysis_init import load_or_create_analysis
 import pandas as pd
+from psliptools.utilities.pathutils import get_raw_path  # Import from pslip toolbox
 
 def study_area_step1(
     file_name_study_area,
@@ -24,23 +25,8 @@ def study_area_step1(
     env = load_or_create_analysis(case_name=case_name, base_dir=base_dir)
     fold_var = env.var_dir['path']
 
-    # Find fold_raw_mun from input_files.csv where type == 'raw_mun'
-    input_files_path = os.path.join(env.inp_dir['path'], 'input_files.csv')
-    if not os.path.exists(input_files_path):
-        raise FileNotFoundError(f"input_files.csv not found at {input_files_path}")
-    input_files_df = pd.read_csv(input_files_path)
-    raw_mun_row = input_files_df[input_files_df['type'] == 'raw_mun']
-    if raw_mun_row.empty:
-        raise ValueError("No entry with type 'raw_mun' found in input_files.csv")
-    if len(raw_mun_row) > 1:
-        raise ValueError("Multiple entries with type 'raw_mun' found in input_files.csv. Please ensure only one exists.")
-    # Use the only match
-    raw_mun_path = raw_mun_row.iloc[0]['path']
-    # If the path is relative, make it absolute with respect to the inputs folder
-    if not os.path.isabs(raw_mun_path):
-        fold_raw_mun = os.path.abspath(os.path.join(env.inp_dir['path'], raw_mun_path))
-    else:
-        fold_raw_mun = raw_mun_path
+    # Get the absolute path to the raw municipality shapefile
+    fold_raw_mun = get_raw_path(env.inp_dir['path'], 'raw_mun')
 
     sl = env.os_separator if hasattr(env, 'os_separator') else os.sep
     study_area_polygon_excluded = geom.Polygon()
@@ -75,7 +61,7 @@ def study_area_step1(
 
     pol_window = None
     if specific_window:
-        print("Creation of specific window...")
+        print("Creating specific window...")
         if choice_window == 'SingleWindow':
             lon_min = float(input("Lon min [°]: "))
             lon_max = float(input("Lon max [°]: "))
@@ -163,7 +149,7 @@ def study_area_step1(
 
 def polyshapes_from_shapefile(shapefile_path, field_name, sel_filter=None, points_lim=500000):
     """
-    Loads shapefile with geopandas, filters and returns a list of shapely Polygons and MunSel.
+    Loads a shapefile with geopandas, filters and returns a list of shapely Polygons and MunSel.
     """
     gdf = gpd.read_file(shapefile_path)
     if sel_filter is not None and len(sel_filter) > 0:
