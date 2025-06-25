@@ -4,7 +4,7 @@ import numpy as np
 import shapely.geometry as geom
 import shapely.ops as ops
 import geopandas as gpd
-from main_modules._analysis_init import load_or_create_analysis
+from config.analysis_init import get_analysis_environment
 import pandas as pd
 from psliptools.utilities.pathutils import get_raw_path  # Import from pslip toolbox
 
@@ -13,8 +13,7 @@ def study_area_step1(
     mun_field_name,
     mun_sel,
     specific_window,
-    case_name=None,
-    base_dir=None,
+    analysis_dir,
     earth_radius=6371000
 ):
     """
@@ -22,7 +21,7 @@ def study_area_step1(
     Loads folder paths from the analysis environment and input_files.csv.
     """
     # Load analysis environment
-    env = load_or_create_analysis(case_name=case_name, base_dir=base_dir)
+    env = get_analysis_environment(base_dir=analysis_dir)
     fold_var = env.var_dir['path']
 
     # Get the absolute path to the raw municipality shapefile
@@ -159,3 +158,67 @@ def polyshapes_from_shapefile(shapefile_path, field_name, sel_filter=None, point
     polygons = [geom.shape(geom_) if not isinstance(geom_, geom.Polygon) else geom_ for geom_ in gdf.geometry]
     mun_sel = gdf[field_name].tolist()
     return polygons, mun_sel
+
+def main(
+    file_name_study_area=None,
+    mun_field_name=None,
+    mun_sel=None,
+    specific_window=False,
+    case_name=None,
+    base_dir=None,
+    earth_radius=6371000,
+    gui_mode=False
+):
+    """
+    Main entrypoint for study area step. Can be called from CLI, GUI, or as a module.
+    """
+    # If not in GUI mode, prompt for missing arguments
+    if not gui_mode:
+        if file_name_study_area is None:
+            file_name_study_area = input("Shapefile name for study area (or 'None'/'None of these'): ")
+        if mun_field_name is None:
+            mun_field_name = input("Field name for municipality selection: ")
+        if mun_sel is None:
+            mun_sel = input("Municipality selection (comma separated): ").split(",")
+        if specific_window is None:
+            specific_window = input("Specific window? [y/N]: ").strip().lower() == "y"
+        if case_name is None:
+            case_name = input("Case name (optional): ") or None
+        if base_dir is None:
+            base_dir = input("Base directory (optional): ") or None
+
+    study_area_step1(
+        file_name_study_area=file_name_study_area,
+        mun_field_name=mun_field_name,
+        mun_sel=mun_sel,
+        specific_window=specific_window,
+        case_name=case_name,
+        base_dir=base_dir,
+        earth_radius=earth_radius
+    )
+    
+    if not gui_mode:
+        print("Study area step completed.")
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Define the study area and save main variables.")
+    parser.add_argument("--file_name_study_area", type=str, help="Shapefile name for study area (or 'None'/'None of these')")
+    parser.add_argument("--mun_field_name", type=str, help="Field name for municipality selection")
+    parser.add_argument("--mun_sel", type=str, nargs='*', help="Municipality selection (space separated)")
+    parser.add_argument("--specific_window", action="store_true", help="Use specific window")
+    parser.add_argument("--case_name", type=str, default=None, help="Case name")
+    parser.add_argument("--base_dir", type=str, default=None, help="Base directory")
+    parser.add_argument("--earth_radius", type=float, default=6371000, help="Earth radius in meters")
+    args = parser.parse_args()
+
+    main(
+        file_name_study_area=args.file_name_study_area,
+        mun_field_name=args.mun_field_name,
+        mun_sel=args.mun_sel,
+        specific_window=args.specific_window,
+        case_name=args.case_name,
+        base_dir=args.base_dir,
+        earth_radius=args.earth_radius,
+        gui_mode=False
+    )
