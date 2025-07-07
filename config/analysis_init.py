@@ -27,6 +27,9 @@ from config import (
     DEFAULT_CASE_NAME,
 )
 
+# Import utility functions
+from psliptools.utilities import parse_csv_internal_path_field
+
 @dataclass
 class AnalysisEnvironment:
     """Class to store the analysis environment details."""
@@ -212,61 +215,21 @@ def _create_inputs_csv(inp_csv_base_dir: str) -> str:
     logger.info(f"Input CSV created at: {inp_csv_path}")
     return inp_csv_path
 
-def _is_relative_path(raw_inp_path: str, raw_inp_base_dir: str) -> bool:
-    """
-    Check if the given path is relative to the base directory.
-
-    Args:
-        raw_inp_path (str): Input file path.
-        raw_inp_base_dir (str): Base directory.
-
-    Returns:
-        bool: True if the path is relative to the base directory, False otherwise.
-    """
-    abs_pth = os.path.abspath(os.path.join(raw_inp_base_dir, raw_inp_path)) if not os.path.isabs(raw_inp_path) else raw_inp_path
-    abs_inp = os.path.abspath(raw_inp_base_dir)
-    return abs_pth.startswith(abs_inp)
-
-def _parse_internal(value: str | int | float, raw_inp_path: str, raw_inp_base_dir: str) -> bool:
-    """
-    Parse the 'internal' field from the input CSV.
-
-    Args:
-        value (str|int|float): Value from the 'internal' column.
-        raw_inp_path (str): Path from the CSV.
-        raw_inp_base_dir (str): Base directory.
-
-    Returns:
-        bool: True if internal, False otherwise.
-    """
-    if isinstance(value, str):
-        val_lower = value.strip().lower()
-        if val_lower in ("true", "1"):
-            return True
-        elif val_lower in ("false", "0"):
-            return False
-    elif isinstance(value, (int, float)):
-        if value in (1, 0):
-            return bool(value)
-    # If value is missing or not recognized, fallback to path check
-    return _is_relative_path(raw_inp_path, raw_inp_base_dir)
-
-def _check_inputs_csv(inp_csv_path: str, inp_csv_base_dir: str) -> bool:
+def _check_inputs_csv(inp_csv_path: str) -> bool:
     """
     Check the input CSV for required columns and external files, and warn the user if found.
 
     Args:
         inp_csv_path (str): Path to the input CSV.
-        inp_csv_base_dir (str): Base directory for the input CSV.
 
     Returns:
         bool: True if all input files are internal, False otherwise.
     """
-    # Get a logger for this module
     logger = logging.getLogger(__name__)
     logger.info(f"Checking input files CSV: {inp_csv_path}")
 
-    # Check if the input CSV exists
+    inp_csv_base_dir = os.path.dirname(inp_csv_path)
+
     if not os.path.exists(inp_csv_path):
         logger.warning(f"File {RAW_INPUT_FILENAME} does not exist in {inp_csv_base_dir}.")
         raise FileNotFoundError(f"The file {RAW_INPUT_FILENAME} does not exist in the specified directory: {inp_csv_base_dir}")
@@ -282,19 +245,19 @@ def _check_inputs_csv(inp_csv_path: str, inp_csv_base_dir: str) -> bool:
 
     # Identify rows where the file is not internal (i.e., external files)
     external_mask = ~input_files_df.apply(
-        lambda row: _parse_internal(row['internal'], row['path'], inp_csv_base_dir), axis=1
+        lambda row: parse_csv_internal_path_field(row['internal'], row['path'], inp_csv_base_dir), axis=1
     )
 
     # Warn if any external files are found
     if external_mask.any():
         external_paths = input_files_df.loc[external_mask, 'path'].tolist()
         logger.warning(
-            f"Some input files are external to the inputs folder: {external_paths}\n"
-            f"You must check the paths of these files in {RAW_INPUT_FILENAME}, and update them if the path is not correct."
+            f"Some input files are external to the 'inputs' folder: {external_paths}\n"
+            f"You must check the paths of these files in {RAW_INPUT_FILENAME}, and update them, if the path is not correct."
         )
         return False
     else:
-        logger.info(f"All input files of {RAW_INPUT_FILENAME} are internal to the inputs folder.")
+        logger.info(f"All input files of {RAW_INPUT_FILENAME} are internal to the 'inputs' folder.")
         return True
 
 def _create_folder_structure(base_dir: str, case_name: str) -> AnalysisEnvironment:
@@ -392,7 +355,7 @@ def create_analysis_environment(base_dir: str, case_name: Optional[str] = None) 
 
     return _create_folder_structure(base_dir=base_dir, case_name=case_name)
 
-def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
+def get_analysis_environment(base_dir: str) -> tuple[AnalysisEnvironment, str]:
     """
     Load an existing analysis environment from the specified directory.
 
@@ -400,7 +363,9 @@ def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
         base_dir (str): Base directory of the analysis. Must exist.
 
     Returns:
-        AnalysisEnvironment: Object with the details of the analysis environment.
+        tuple: (AnalysisEnvironment, env_file_path)
+            AnalysisEnvironment: Object with the details of the analysis environment.
+            env_file_path (str): Path to the environment file used.
     """
     logger = logging.getLogger(__name__)
     logger.info(f"Start loading environment from: {base_dir}")
@@ -441,9 +406,9 @@ def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
                 logger.info(f"File {RAW_INPUT_FILENAME} created: {inp_csv_path}")
             else:
                 logger.info(f"File {RAW_INPUT_FILENAME} already exists: {inp_csv_path}")
-                _check_inputs_csv(inp_csv_path, inp_csv_base_dir)
+                _check_inputs_csv(inp_csv_path)
         else:
             logger.info("Base directory unchanged. Environment loaded as is.")
-        return env
+        return env, env_file_path
     else:
         raise FileNotFoundError(f"No existing analysis environment found in {base_dir}.")

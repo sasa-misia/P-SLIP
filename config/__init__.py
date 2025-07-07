@@ -18,6 +18,7 @@ from .default_params import (
 )
 
 from .analysis_init import (
+    AnalysisEnvironment,
     create_analysis_environment,
     get_analysis_environment,
 )
@@ -32,6 +33,7 @@ __all__ = [
     'RAW_INPUT_FILENAME',
     'RAW_INPUT_CSV_COLUMNS',
     'LIBRARIES_CONFIG',
+    'AnalysisEnvironment',
     'create_analysis_environment',
     'get_analysis_environment'
 ]

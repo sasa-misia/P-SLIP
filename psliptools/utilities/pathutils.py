@@ -3,18 +3,25 @@ import os
 
 def _resolve_path(base_dir: str, path: str) -> str:
     """
-    Returns the absolute path, joining with base_dir if path is relative.
+    Resolve a path to an absolute path, joining with base_dir if path is relative.
+
+    Args:
+        base_dir (str): The base directory to join with if path is relative.
+        path (str): The path to resolve.
+
+    Returns:
+        str: The absolute path.
     """
     if not os.path.isabs(path):
         return os.path.abspath(os.path.join(base_dir, path))
     return path
 
-def get_raw_path(base_dir: str, folder_type: str, csv_filename: str = 'input_files.csv') -> str:
+def get_raw_path(base_inp_dir: str, folder_type: str, csv_filename: str = 'input_files.csv') -> str:
     """
-    Returns the absolute path to the specified folder type as defined in the input CSV file.
+    Get the absolute path to a specified P-SLIP folder type as defined in the CSV file containing the list of inputs.
 
     Args:
-        base_dir (str): Directory where the CSV file is located and used as the root for relative paths.
+        base_inp_dir (str): Directory where the CSV file is located and used as the root for relative paths.
         folder_type (str): The type of folder to search for (e.g., 'raw_mun').
         csv_filename (str): The name of the CSV file (default: 'input_files.csv').
 
@@ -23,9 +30,9 @@ def get_raw_path(base_dir: str, folder_type: str, csv_filename: str = 'input_fil
 
     Raises:
         FileNotFoundError: If the CSV file does not exist.
-        ValueError: If no or multiple entries for the folder_type are found.
+        ValueError: If no or multiple entries for the folder_type are found, or if the path is invalid.
     """
-    input_files_path = os.path.join(base_dir, csv_filename)
+    input_files_path = os.path.join(base_inp_dir, csv_filename)
     if not os.path.exists(input_files_path):
         raise FileNotFoundError(f"{csv_filename} not found at {input_files_path}")
     input_files_df = pd.read_csv(input_files_path)
@@ -37,12 +44,11 @@ def get_raw_path(base_dir: str, folder_type: str, csv_filename: str = 'input_fil
     folder_path = matches.iloc[0]['path']
     if not isinstance(folder_path, str) or not folder_path.strip():
         raise ValueError(f"The value in column 'path' is empty or invalid for folder type '{folder_type}'.")
-    return _resolve_path(base_dir, folder_path)
+    return _resolve_path(base_inp_dir, folder_path)
 
 def get_path_from_csv(csv_path: str, key_column: str, key_value: str, path_column: str) -> str:
     """
-    Searches the CSV file for the row where key_column == key_value and returns the value of path_column.
-    Returns the absolute path, joining with the directory of the CSV if the path is relative.
+    Search a CSV file for the row where key_column == key_value and return the value of path_column.
 
     Args:
         csv_path (str): Path to the CSV file.
