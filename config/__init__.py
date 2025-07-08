@@ -14,13 +14,17 @@ from .default_params import (
     LOG_CONFIG,
     RAW_INPUT_FILENAME,
     RAW_INPUT_CSV_COLUMNS,
-    LIBRARIES_CONFIG
+    LIBRARIES_CONFIG,
+    VAR_FILES_KEY,
+    USER_CONTROL_CONFIG
 )
 
 from .analysis_init import (
     AnalysisEnvironment,
     create_analysis_environment,
     get_analysis_environment,
+    save_variable,
+    load_variable
 )
 
 __all__ = [
@@ -33,7 +37,11 @@ __all__ = [
     'RAW_INPUT_FILENAME',
     'RAW_INPUT_CSV_COLUMNS',
     'LIBRARIES_CONFIG',
+    'VAR_FILES_KEY',
+    'USER_CONTROL_CONFIG',
     'AnalysisEnvironment',
     'create_analysis_environment',
-    'get_analysis_environment'
+    'get_analysis_environment',
+    'save_variable',
+    'load_variable'
 ]

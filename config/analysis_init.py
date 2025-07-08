@@ -5,6 +5,7 @@
 Module for creating the folder structure for the analysis.
 """
 
+#%% Import necessary modules
 import os
 import platform
 import importlib
@@ -12,9 +13,11 @@ import warnings
 import json
 import logging
 import pandas as pd
+import copy
+import pickle
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Union
 
 # Import default configuration
 from config import (
@@ -25,11 +28,14 @@ from config import (
     ANALYSIS_FOLDER_ATTRIBUTE_MAPPER,
     LIBRARIES_CONFIG,
     DEFAULT_CASE_NAME,
+    VAR_FILES_KEY,
+    USER_CONTROL_CONFIG
 )
 
 # Import utility functions
 from psliptools.utilities import parse_csv_internal_path_field
 
+#%% Define the AnalysisEnvironment dataclass
 @dataclass
 class AnalysisEnvironment:
     """Class to store the analysis environment details."""
@@ -40,6 +46,7 @@ class AnalysisEnvironment:
     os_separator: str
     creation_time: str = field(default_factory=lambda: pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
     base_dir: Dict[str, str] = field(default_factory=lambda: {'path': os.getcwd()})
+    user_control: dict = field(default_factory=lambda: copy.deepcopy(USER_CONTROL_CONFIG))
 
     def __post_init__(self):
         # Dynamically ensure all folder attributes exist and are dicts
@@ -48,6 +55,11 @@ class AnalysisEnvironment:
                 setattr(self, attr, {})
             elif not isinstance(getattr(self, attr), dict):
                 setattr(self, attr, {})
+        # Ensure user_control is always a dict (deepcopy for safety)
+        if not hasattr(self, 'user_control_config') or self.user_control is None:
+            self.user_control = copy.deepcopy(USER_CONTROL_CONFIG)
+        elif not isinstance(self.user_control, dict):
+            self.user_control = copy.deepcopy(USER_CONTROL_CONFIG)
 
     def to_json(self, file_path: str) -> None:
         """Save the environment to a JSON file, including dynamic attributes."""
@@ -69,6 +81,7 @@ class AnalysisEnvironment:
                 setattr(obj, k, v)
         return obj
 
+#%% Helper functions
 def _import_corrected_name(lib: str) -> str:
     """
     Import a library by its name, handling special cases for hyphenated names.
@@ -326,6 +339,32 @@ def _create_folder_structure(base_dir: str, case_name: str) -> AnalysisEnvironme
     logger.info(f"Analysis folder structure created successfully for: {case_name}")
     return env
 
+def _update_env_file(env: AnalysisEnvironment) -> None:
+    """
+    Save the current analysis environment to a JSON file.
+    
+    Args:
+        env (AnalysisEnvironment): Analysis environment object to save.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Updating the analysis environment file...")
+
+    if not isinstance(env, AnalysisEnvironment):
+        raise TypeError("env must be an instance of AnalysisEnvironment.")
+    
+    if not hasattr(env, 'base_dir') or not isinstance(env.base_dir, dict) or 'path' not in env.base_dir:
+        raise ValueError("env.base_dir must be a dictionary with a 'path' key.")
+    
+    try:
+        env_file_path = os.path.join(env.base_dir['path'], ENVIRONMENT_FILENAME)
+        env.to_json(env_file_path)
+        
+        logger.info(f"Environment saved to {env_file_path}")
+    except Exception as e:
+        logger.error(f"Error saving the environment: {e}")
+        raise IOError(f"Errore nel salvare l'ambiente: {e}")
+
+#%% Functions to create or get the analysis environment
 def create_analysis_environment(base_dir: str, case_name: Optional[str] = None) -> AnalysisEnvironment:
     """
     Create a new analysis and its folder structure.
@@ -412,3 +451,136 @@ def get_analysis_environment(base_dir: str) -> tuple[AnalysisEnvironment, str]:
         return env, env_file_path
     else:
         raise FileNotFoundError(f"No existing analysis environment found in {base_dir}.")
+    
+#%% # Main functions for saving and loading analysis variables
+def save_variable(
+        env: AnalysisEnvironment, 
+        variable_to_save: Dict[str, Any], 
+        filename: str, 
+        var_type: str
+    ) -> AnalysisEnvironment:
+    """
+    saves variables in a pickle file and updates the user_control dictionary in the environment.
+    
+    Args:
+        env (AnalysisEnvironment): environment object containing the user_control dictionary and var_dir path.
+        variable_to_save (Dict[str, Any]): dictionary of variables to save.
+        filename (str): filename to save the variables, must end with '.pkl' (e.g., 'study_area_vars.pkl').
+        var_type (str): string representing the type of control, as described in env.user_control (e.g., 'study_area', 'land_use', etc.).
+    
+    Raises:
+        ValueError: if var_type is not present in env.user_control.
+        TypeError: if variable_to_save is not a dictionary.
+        FileNotFoundError: if the directory var_dir does not exist.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Start saving variable to {filename} in control type '{var_type}'")
+    
+    # Verify that variable_to_save is a dictionary
+    if not isinstance(variable_to_save, dict):
+        logger.error(f"variable_to_save must be a dictionary, received: {type(variable_to_save)}")
+        raise TypeError(f"variable_to_save must be a dictionary, received: {type(variable_to_save)}")
+    
+    # Verify that var_type is a valid key in env.user_control
+    if var_type not in env.user_control:
+        logger.error(f"var_type '{var_type}' not found in env.user_control. Available types: {list(env.user_control.keys())}")
+        raise ValueError(f"var_type '{var_type}' not found in env.user_control. Available types: {list(env.user_control.keys())}")
+    
+    # Verify that var_dir exists
+    var_dir_attr = ANALYSIS_FOLDER_ATTRIBUTE_MAPPER['variables']
+    var_dir_path = getattr(env, var_dir_attr)['path']
+    if not os.path.exists(var_dir_path):
+        logger.error(f"var_dir directory not found: {var_dir_path}")
+        raise FileNotFoundError(f"var_dir directory not found: {var_dir_path}")
+    
+    # Construct the full file path
+    file_path = os.path.join(var_dir_path, filename)
+    
+    # Save the variable to a pickle file
+    try:
+        with open(file_path, 'wb') as f:
+            pickle.dump(variable_to_save, f)
+        logger.info(f"Variables saved successfully in: {file_path}")
+    except Exception as e:
+        logger.error(f"Error during file saving {file_path}: {e}")
+        raise IOError(f"Error during file saving {file_path}: {e}")
+    
+    # Update env.user_control[var_type]['var_files']
+    if VAR_FILES_KEY not in env.user_control[var_type]:
+        env.user_control[var_type][VAR_FILES_KEY] = {}
+    
+    # Extract the variable keys and save them in the user_control dictionary
+    variable_keys = list(variable_to_save.keys())
+    env.user_control[var_type][VAR_FILES_KEY][filename] = variable_keys
+
+    _update_env_file(env)
+
+    logger.info(f"Updated env.user_control['{var_type}']['{VAR_FILES_KEY}'] with {len(variable_keys)} variables")
+    return env
+
+def load_variable(
+        env: AnalysisEnvironment, 
+        filename: str, 
+        var_type: str
+    ) -> Dict[str, Any]:
+    """
+    Load variables from a pickle file and return them as a dictionary.
+    
+    Args:
+        env (AnalysisEnvironment): environment object containing the user_control dictionary and var_dir path.
+        filename (str): name of the file to load, must end with '.pkl' (e.g., 'study_area_vars.pkl').
+        var_type (str): string representing the type of variable, as described in env.user_control (e.g., 'study_area', 'land_use', etc.).
+    
+    Returns:
+        Dict[str, Any]: dictionary containing the loaded variables.
+    
+    Raises:
+        ValueError: if var_type is not present in env.user_control.
+        FileNotFoundError: if the file does not exist in the specified var_dir.
+        KeyError: if the filename is not found in the var_files of the specified var_type.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Start loading variable from {filename} in var type '{var_type}'")
+    
+    # Verify that var_type is a valid key in env.user_control
+    if var_type not in env.user_control:
+        logger.error(f"var_type '{var_type}' not found in env.user_control. Available types: {list(env.user_control.keys())}")
+        raise ValueError(f"var_type '{var_type}' not found in env.user_control. "
+                         f"Available types: {list(env.user_control.keys())}")
+    
+    # Verify that filename is present in the var_files of the specified var_type
+    if VAR_FILES_KEY not in env.user_control[var_type]:
+        logger.error(f"Key '{VAR_FILES_KEY}' not found in user_control for '{var_type}'. "
+                     f"Available keys: {list(env.user_control[var_type].keys())}")
+        raise KeyError(f"Key '{VAR_FILES_KEY}' not found in user_control for '{var_type}'. "
+                       f"Available keys: {list(env.user_control[var_type].keys())}")
+    var_files = env.user_control[var_type][VAR_FILES_KEY]
+    if filename not in var_files:
+        logger.error(f"File '{filename}' not found in user_control['{var_type}']['{VAR_FILES_KEY}']. "
+                     f"Available files: {list(var_files.keys())}")
+        raise KeyError(f"File '{filename}' not found in user_control['{var_type}']['{VAR_FILES_KEY}']. "
+                       f"Available files: {list(var_files.keys())}")
+    
+    # Construct the full file path
+    var_dir_attr = ANALYSIS_FOLDER_ATTRIBUTE_MAPPER['variables']
+    var_dir_path = getattr(env, var_dir_attr)['path']
+    file_path = os.path.join(var_dir_path, filename)
+    
+    # Verify that the file exists
+    if not os.path.exists(file_path):
+        logger.error(f"File does not exist: {file_path}")
+        raise FileNotFoundError(f"File does not exist: {file_path}")
+    
+    # Load the variable from the pickle file
+    logger.info(f"Loading variables from: {file_path}")
+    try:
+        with open(file_path, 'rb') as f:
+            variable_data = pickle.load(f)
+        logger.info(f"Variables loaded successfully from: {file_path}")
+        if not isinstance(variable_data, dict):
+            logger.error(f"Loaded data from {file_path} is not a dictionary: {type(variable_data)}")
+            raise TypeError(f"Loaded data from {file_path} is not a dictionary: {type(variable_data)}")
+        return variable_data
+    except Exception as e:
+        logger.error(f"Error loading file {file_path}: {e}")
+        raise IOError(f"Error loading file {file_path}: {e}")

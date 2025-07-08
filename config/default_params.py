@@ -106,3 +106,26 @@ LIBRARIES_CONFIG = {
     'required_file': 'requirements.txt',
     'optional_file': 'requirements_opt.txt'
 }
+
+# User control configuration
+# This dictionary contains the default user control settings.
+VAR_FILES_KEY = 'var_files'  # Key for variable files in user control
+USER_CONTROL_CONFIG = {
+    'study_area': {
+        'source_type': None, # It can be 'shapefile' or 'rectangle'
+        'source_path': None, # Path to the raw shapefile or None if using rectangles
+        'source_field': None, # Field name to select polygons from the shapefile
+        'source_selection': None, # List of values to select from the source_field
+        'remove_source' : None, # It can be land use, vegetation, soil, or other polygons
+        'poly_mask': None, # Polygon to mask the study area (optional)
+        VAR_FILES_KEY: {}
+    },
+    'land_use': {
+        'source_type': None, # It can be 'shapefile' or other
+        'source_path': None, # Path to the raw land use source
+        'source_field': None, # Field name to select land use classes
+        'source_selection': None, # List of land use classes to select
+        'poly_mask': None, # Polygon to mask the land use (optional)
+        VAR_FILES_KEY: {}
+    }
+}

@@ -1,24 +1,25 @@
+#%% Import necessary modules
 import argparse
 import logging
 import os
-import sys
 
 # Add the parent directory to the system path (temporarily)
 # This allows importing modules from the parent directory (like config and psliptools)
 # This is necessary for the script to run correctly when executed directly.
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config.analysis_init import create_analysis_environment, get_analysis_environment, AnalysisEnvironment
 from config.default_params import LOG_CONFIG, ENVIRONMENT_FILENAME, DEFAULT_CASE_NAME
 
 
-# Set up logging configuration
+#%% Set up logging configuration
 # This will log messages to the console and can be modified to log to a file if needed
 logging.basicConfig(level=logging.INFO,
                     format=LOG_CONFIG['format'], 
                     datefmt=LOG_CONFIG['date_format'])
 
-# The following method is the main function of the module.
+#%% Main function to initialize or load the analysis environment
+# This function is responsible for creating or loading the analysis environment based on user input.
 def main(case_name=None, gui_mode=False, base_dir=None) -> AnalysisEnvironment:
     """
     Main function for initializing or loading the analysis environment.
@@ -60,6 +61,7 @@ def main(case_name=None, gui_mode=False, base_dir=None) -> AnalysisEnvironment:
 
     return env
 
+#%% Command line interface
 # This block allows the script to be run from the command line with parameters.
 if __name__ == "__main__":
     # Parse command line arguments
