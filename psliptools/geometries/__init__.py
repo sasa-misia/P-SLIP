@@ -5,6 +5,7 @@ Provides functions for importing and generating geometric objects (e.g., polygon
 """
 
 from .generate_geom import (
+    get_rectangle_parameters,
     create_rectangle_polygons
 )
 
@@ -24,6 +25,7 @@ from .info_geom import (
 )
 
 __all__ = [
+    "get_rectangle_parameters",
     "create_rectangle_polygons",
     "convert_gdf_to_geo",
     "load_shapefile_polygons_simple",

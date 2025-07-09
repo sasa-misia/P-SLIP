@@ -82,3 +82,64 @@ def update_csv_path_field(csv_path: str, path_field: str = 'path') -> bool:
     else:
         print(f"All input files of {csv_filename} are internal to the 'inputs' folder.")
         return False
+    
+def check_raw_path(csv_path: str, file_type: str) -> bool:
+    """
+    Check if a specified P-SLIP folder type exists in the CSV file containing the list of inputs.
+
+    Args:
+        csv_path (str): Path to the CSV file.
+        file_type (str): The type of file to check for (e.g., 'study_area').
+
+    Returns:
+        bool: True if the folder type exists, False otherwise.
+
+    Raises:
+        FileNotFoundError: If the CSV file does not exist.
+    """
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV file not found at {csv_path}")
+    input_files_df = pd.read_csv(csv_path)
+    return file_type in input_files_df['type'].values
+
+def add_row_to_csv(csv_path: str, path_to_add: str, path_type: str, force_rewrite: bool) -> bool:
+    """
+    Add a new row to the CSV file containing the list of inputs.
+
+    Args:
+        csv_path (str): Path to the CSV file.
+        path_to_add (str): Path to the file to add.
+        path_type (str): Type of the file to add (e.g., 'study_area').
+        force_rewrite (bool): If True, will overwrite the existing row if it exists.
+
+    Returns:
+        bool: True if the row was added, False if it already exists.
+    """
+
+    # Read the CSV into a DataFrame
+    csv_df = pd.read_csv(csv_path)
+
+    csv_base_dir = os.path.dirname(csv_path)
+
+    is_internal = _is_relative_path(path_to_add, csv_base_dir)
+    if is_internal:
+        path_to_add = os.path.relpath(path_to_add, csv_base_dir)
+
+    # Check if the row already exists
+    row_exists = any(csv_df["type"] == path_type)
+
+    # If the row doesn't exist, add it
+    if not row_exists:
+        csv_df = csv_df.append({"path": path_to_add, "type": path_type, "internal": is_internal}, ignore_index=True)
+        csv_df.to_csv(csv_path, index=False)
+        return True
+    elif row_exists and force_rewrite:
+        # If the row exists and force_rewrite is True, update the existing row
+        row_index = csv_df[csv_df["type"] == path_type].index[0]
+        csv_df.at[row_index, "path"] = path_to_add
+        csv_df.at[row_index, "type"] = path_type
+        csv_df.at[row_index, "internal"] = is_internal
+        csv_df.to_csv(csv_path, index=False)
+        return True
+    else:
+        return False

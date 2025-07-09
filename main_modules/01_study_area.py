@@ -1,19 +1,18 @@
 #%% # Import necessary modules
 import os
-import json
-import shapely.geometry as geom
 import shapely.ops as ops
-import geopandas as gpd
 import pandas as pd
-import numpy as np
+import argparse
+from typing import Dict
 
 # Importing necessary modules from config
-from config import get_analysis_environment, AnalysisEnvironment
+from config import get_analysis_environment, AnalysisEnvironment, save_variable
 
 # Importing necessary modules from psliptools
 from psliptools.utilities import get_raw_path
 from psliptools.geometries import (
-    load_shapefile_polygons, 
+    load_shapefile_polygons,
+    get_rectangle_parameters,
     create_rectangle_polygons, 
     intersect_polygons,
     union_polygons,
@@ -58,72 +57,54 @@ def define_study_area_from_rectangles(rectangle_polygons):
     }
     return study_area_vars
 
-def update_env_study_area(env: AnalysisEnvironment, save_path: str, study_area_choices, study_area_vars_file, landuse_vars_file):
-    """Update the analysis environment with study area info."""
-    env.study_area = {
-        "choices": study_area_choices,
-        "study_area_vars_file": study_area_vars_file,
-        "landuse_vars_file": landuse_vars_file
-    }
-    env.to_json(save_path)
-    return env
-
 #%% # Main function to define the study area
-def main(base_dir=None):
+def main(gui_mode=False, base_dir=None) -> Dict[str, object]:
     """Main function to define the study area."""
     # --- Initialize environment ---
-    env, env_path = get_analysis_environment(base_dir=base_dir)
+    env, _ = get_analysis_environment(base_dir=base_dir)
+
+    src_type = 'study_area'
 
     # --- User choices section ---
-    study_area_file = input("Study area shapefile name (e.g. comuni.shp): ")
-    mun_field = input("Municipality field name: ")
-    mun_selection = input("Municipalities to select (comma separated): ").split(",")
-    use_window = input("Define study area using rectangles? [y/N]: ").strip().lower() == "y"
-    rectangle_polygons = []
-    rectangle_params = []
-    
-    if use_window:
-        n_rectangles = int(input("How many rectangles? [1]: ") or "1")
-        for i in range(n_rectangles):
-            print(f"Rectangle {i+1}:")
-            lon_min = float(input("  Lon min [°]: "))
-            lon_max = float(input("  Lon max [°]: "))
-            lat_min = float(input("  Lat min [°]: "))
-            lat_max = float(input("  Lat max [°]: "))
-            rectangle_params.append((lon_min, lon_max, lat_min, lat_max))
-        rectangle_polygons = create_rectangle_polygons(rectangle_params)
+    if gui_mode:
+        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+    else:
+        use_window = input("Define study area using rectangles? [y/N]: ").strip().lower() == "y"
+        if not(use_window):
+            src_mode = 'shapefile'
+            src_path = input("Study area shapefile name (e.g. study_area.shp) or full path: ")
+            cls_fld = input("Field name containing class names: ")
+            cls_sel = input("Classes to select (comma separated): ").split(",")
+        else:
+            src_mode = 'rectangle'
+            src_path = None
+            cls_fld = None
+            cls_sel = None
+            n_rectangles = int(input("How many rectangles? [1]: ") or "1")
+            rec_polys = create_rectangle_polygons(get_rectangle_parameters(n_rectangles))
 
     # --- Step 1: Study area definition ---
     if use_window:
-        study_area_vars, mun_names = define_study_area_from_rectangles(rectangle_polygons)
+        study_area_vars = define_study_area_from_rectangles(rec_polys)
     else:
         # If you want to clip with rectangles, pass rectangle_polygons as clip_polygons
-        study_area_vars, mun_names = define_study_area_from_shapefile(
-            env, study_area_file, mun_field, mun_selection, clip_polygons=rectangle_polygons if rectangle_polygons else None
+        study_area_vars = define_study_area_from_shapefile(
+            study_area_filename=src_path, 
+            id_field=cls_fld, id_selection=cls_sel
         )
 
-    # Initialize removed_areas if not present
-    if 'removed_areas' not in env:
-        env['removed_areas'] = []
-
-    # --- Save all choices in env.study_area ---
-    study_area_choices = {
-        "study_area_file": study_area_file,
-        "mun_field": mun_field,
-        "mun_selection": mun_selection,
-        "use_window": use_window,
-        "rectangle_params": rectangle_params,
-        "mun_names": mun_names
-    }
-    study_area_vars_file = os.path.join(fold_var, 'study_area_vars.pkl')
-    # Removed landuse_vars_file as it is no longer used
-    update_env_study_area(env, study_area_choices, study_area_vars_file, None)
-
-    # Save env
-    with open(env_path, 'w', encoding='utf-8') as f:
-        json.dump(env, f, indent=2, ensure_ascii=False)
-
-    print("Study area updated. Land use import and removal are now handled in separate modules.")
+    env.user_control[src_type]['source_mode'] = src_mode
+    env.user_control[src_type]['source_type'] = src_type
+    env.user_control[src_type]['source_field'] = cls_fld
+    env.user_control[src_type]['source_selection'] = cls_sel
+    
+    save_variable(analysis_env=env, variable_to_save=study_area_vars, filename="study_area_vars.json", var_type="study_area")
+    return study_area_vars
 
 if __name__ == "__main__":
-    main()
+    # Command line interface
+    parser = argparse.ArgumentParser(description="Define the study area for the analysis.")
+    parser.add_argument('--base_dir', type=str, default=None, help="Base directory for the analysis.")
+    args = parser.parse_args()
+
+    study_area_vars = main(base_dir=args.base_dir, gui_mode=False)

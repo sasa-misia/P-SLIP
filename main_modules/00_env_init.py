@@ -71,4 +71,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Call the main function with the provided arguments
-    curr_env = main(case_name=args.case_name, base_dir=args.base_dir)
+    curr_env = main(case_name=args.case_name, base_dir=args.base_dir, gui_mode=False)
