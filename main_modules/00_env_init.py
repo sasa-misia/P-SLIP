@@ -2,11 +2,12 @@
 import argparse
 import logging
 import os
+import sys
 
 # Add the parent directory to the system path (temporarily)
 # This allows importing modules from the parent directory (like config and psliptools)
 # This is necessary for the script to run correctly when executed directly.
-# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config.analysis_init import create_analysis_environment, get_analysis_environment, AnalysisEnvironment
 from config.default_params import LOG_CONFIG, ENVIRONMENT_FILENAME, DEFAULT_CASE_NAME

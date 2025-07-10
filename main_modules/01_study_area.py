@@ -4,12 +4,22 @@ import shapely.ops as ops
 import pandas as pd
 import argparse
 from typing import Dict
+import sys
+import logging
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
-from config import get_analysis_environment, AnalysisEnvironment, save_variable
+from config import (
+    AnalysisEnvironment,
+    get_analysis_environment,
+    add_input_file,
+    save_variable, 
+    LOG_CONFIG
+)
 
 # Importing necessary modules from psliptools
-from psliptools.utilities import get_raw_path
+from psliptools.utilities import get_raw_fold
 from psliptools.geometries import (
     load_shapefile_polygons,
     get_rectangle_parameters,
@@ -19,14 +29,22 @@ from psliptools.geometries import (
     get_polygon_extremes
 )
 
+#%% Set up logging configuration
+# This will log messages to the console and can be modified to log to a file if needed
+logging.basicConfig(level=logging.INFO,
+                    format=LOG_CONFIG['format'], 
+                    datefmt=LOG_CONFIG['date_format'])
+
 #%% # Define study area functions
-def define_study_area_from_shapefile(study_area_fold, study_area_filename, id_field, id_selection, clip_polygons=None):
+def define_study_area_from_shapefile(shapefile_path, id_field, id_selection, clip_polygons=None):
     """Define study area from a shapefile, optionally clipping with custom polygons."""
-    shapefile_path = os.path.join(study_area_fold, study_area_filename)
+    if not os.path.exists(shapefile_path):
+        raise FileNotFoundError(f"Shapefile not found: {shapefile_path}")
     study_area_df = load_shapefile_polygons(shapefile_path, field_name=id_field, sel_filter=id_selection)
+    id_polys = study_area_df['geometry']
     if clip_polygons:
         clip_union = ops.unary_union(clip_polygons)
-        id_polys = intersect_polygons(study_area_df['geometry'], clip_union)
+        id_polys = intersect_polygons(id_polys, clip_union)
     study_area_poly = union_polygons(id_polys)
     study_area_extremes = get_polygon_extremes(study_area_poly)
     study_area_vars = {
@@ -60,15 +78,16 @@ def define_study_area_from_rectangles(rectangle_polygons):
 #%% # Main function to define the study area
 def main(gui_mode=False, base_dir=None) -> Dict[str, object]:
     """Main function to define the study area."""
-    # --- Initialize environment ---
-    env, _ = get_analysis_environment(base_dir=base_dir)
-
     src_type = 'study_area'
 
     # --- User choices section ---
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
+        if base_dir is None:
+            base_dir = input(f"Enter the base directory for the analysis (or press Enter to use the current directory {os.getcwd()}): ")
+            if not base_dir.strip():
+                base_dir = os.getcwd()
         use_window = input("Define study area using rectangles? [y/N]: ").strip().lower() == "y"
         if not(use_window):
             src_mode = 'shapefile'
@@ -82,23 +101,31 @@ def main(gui_mode=False, base_dir=None) -> Dict[str, object]:
             cls_sel = None
             n_rectangles = int(input("How many rectangles? [1]: ") or "1")
             rec_polys = create_rectangle_polygons(get_rectangle_parameters(n_rectangles))
+    
+    # Get the analysis environment
+    env, _ = get_analysis_environment(base_dir=base_dir)
 
     # --- Step 1: Study area definition ---
     if use_window:
         study_area_vars = define_study_area_from_rectangles(rec_polys)
     else:
         # If you want to clip with rectangles, pass rectangle_polygons as clip_polygons
+        _, cust_id = add_input_file(env, file_path=src_path, file_type='study_area')
         study_area_vars = define_study_area_from_shapefile(
-            study_area_filename=src_path, 
-            id_field=cls_fld, id_selection=cls_sel
+            shapefile_path=src_path, 
+            id_field=cls_fld, 
+            id_selection=cls_sel
         )
 
-    env.user_control[src_type]['source_mode'] = src_mode
-    env.user_control[src_type]['source_type'] = src_type
-    env.user_control[src_type]['source_field'] = cls_fld
-    env.user_control[src_type]['source_selection'] = cls_sel
+    env.config['inputs'][src_type]['1']['settings'] = {
+        'source_mode': src_mode,
+        'source_field': cls_fld,
+        'source_selection': cls_sel
+    }
+    env.config['inputs'][src_type]['1']['custom_id'] = [cust_id]
+    env.collect_input_files(multi_extension=True)
     
-    save_variable(analysis_env=env, variable_to_save=study_area_vars, filename="study_area_vars.json", var_type="study_area")
+    save_variable(analysis_env=env, variable_to_save=study_area_vars, filename="study_area_vars.json")
     return study_area_vars
 
 if __name__ == "__main__":

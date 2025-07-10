@@ -16,7 +16,7 @@ def _resolve_path(base_dir: str, path: str) -> str:
         return os.path.abspath(os.path.join(base_dir, path))
     return path
 
-def get_raw_path(base_inp_dir: str, file_type: str, csv_filename: str = 'input_files.csv') -> str:
+def get_raw_fold(csv_path: str, fold_type: str, fold_subtype: str = None) -> str:
     """
     Get the absolute path to a specified P-SLIP folder type as defined in the CSV file containing the list of inputs.
 
@@ -32,23 +32,71 @@ def get_raw_path(base_inp_dir: str, file_type: str, csv_filename: str = 'input_f
         FileNotFoundError: If the CSV file does not exist.
         ValueError: If no or multiple entries for the file_type are found, or if the path is invalid.
     """
-    input_files_path = os.path.join(base_inp_dir, csv_filename)
-    if not os.path.exists(input_files_path):
-        raise FileNotFoundError(f"{csv_filename} not found at {input_files_path}")
-    input_files_df = pd.read_csv(input_files_path)
-    matches = input_files_df[input_files_df['type'] == file_type]
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV file not found at {csv_path}")
+
+    input_files_df = pd.read_csv(csv_path)
+    if fold_subtype:
+        matches = input_files_df[(input_files_df['type'] == fold_type) & (input_files_df['subtype'] == fold_subtype)]
+    else:
+        matches = input_files_df[input_files_df['type'] == fold_type]
+
     if matches.empty:
-        raise ValueError(f"No entry with type '{file_type}' found in {csv_filename}")
+        raise ValueError(f"No entry with type '{fold_type}' found in {csv_path}")
     if len(matches) > 1:
-        raise ValueError(f"Multiple entries with type '{file_type}' found in {csv_filename}. Please ensure only one exists.")
+        raise ValueError(f"Multiple entries with type '{fold_type}' found in {csv_path}. Please ensure only one folder exists.")
     folder_path = matches.iloc[0]['path']
     if not isinstance(folder_path, str) or not folder_path.strip():
-        raise ValueError(f"The value in column 'path' is empty or invalid for folder type '{file_type}'.")
-    return _resolve_path(base_inp_dir, folder_path)
+        raise ValueError(f"The value in column 'path' is empty or invalid for folder type '{fold_type}'.")
+    
+    resolved_path = _resolve_path(os.path.dirname(csv_path), folder_path)
 
-def get_path_from_csv(csv_path: str, key_column: str, key_value: str, path_column: str) -> str:
+    if os.path.isdir(resolved_path):
+        return resolved_path
+    else:
+        raise ValueError(f"The value in column 'path' is not a valid directory for folder type '{fold_type}'.")
+
+def get_raw_files(csv_path: str, file_type: str, file_subtype: str = None) -> list[str]:
     """
-    Search a CSV file for the row where key_column == key_value and return the value of path_column.
+    Get the absolute paths to specified P-SLIP folder types as defined in the CSV file containing the list of inputs.
+
+    Args:
+        csv_path (str): Path to the CSV file.
+        file_type (str): The type of file to search for (e.g., 'study_area').
+        file_subtype (str, optional): The subtype of file to search for.
+
+    Returns:
+        list[str]: A list of absolute paths to the specified folder types.
+
+    Raises:
+        FileNotFoundError: If the CSV file does not exist.
+        ValueError: If no entries for the file_type are found, or if any path is invalid.
+    """
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV file not found at {csv_path}")
+    input_files_df = pd.read_csv(csv_path)
+    if file_subtype:
+        matches = input_files_df[(input_files_df['type'] == file_type) & (input_files_df['subtype'] == file_subtype)]
+    else:
+        matches = input_files_df[input_files_df['type'] == file_type]
+    
+    if matches.empty:
+        raise ValueError(f"No entry with type '{file_type}' found in {csv_path}")
+
+    base_dir = os.path.dirname(csv_path)
+    folder_paths = matches['path'].tolist()
+    
+    resolved_paths = [_resolve_path(base_dir, p) for p in folder_paths if isinstance(p, str) and p.strip()]
+    
+    if not resolved_paths:
+        raise ValueError(f"All paths are empty or invalid for folder type '{file_type}'.")
+    
+    return resolved_paths
+
+def get_fold_from_csv(csv_path: str, key_column: str, key_value: str, path_column: str) -> str:
+    """
+    Search a CSV file for the row where key_column == key_value (only unique match 
+    is accepted) and return the value of path_column.`
 
     Args:
         csv_path (str): Path to the CSV file.

@@ -1,5 +1,6 @@
 import pandas as pd
 import shapely.geometry as geom
+import shapely.ops as ops
 
 def intersect_polygons(polygons: list, mask: geom.Polygon) -> list:
     """Intersect a list of polygons with a mask polygon (or MultiPolygon)."""
@@ -15,11 +16,11 @@ def intersect_polygons(polygons: list, mask: geom.Polygon) -> list:
 
 def union_polygons(polygons: list) -> geom.Polygon:
     """Union a list of polygons (or MultiPolygon) into a single polygon (or MultiPolygon)."""
-    if not polygons:
-        raise ValueError("No polygons provided for union.")
     if isinstance(polygons, pd.Series):
         polygons = polygons.tolist()
+    if not polygons:
+        raise ValueError("No polygons provided for union.")
     for p in polygons:
         if not isinstance(p, (geom.Polygon, geom.MultiPolygon)):
             raise ValueError("All elements must be shapely Polygon or MultiPolygon objects.")
-    return geom.unary_union(polygons)
+    return ops.unary_union(polygons)

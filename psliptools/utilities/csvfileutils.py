@@ -75,7 +75,7 @@ def update_csv_path_field(csv_path: str, path_field: str = 'path') -> bool:
             old_path = csv_df.at[idx, path_field]
             new_path = input(f"Enter new absolute path for file '{old_path}': ").strip()
             if new_path:
-                csv_df.at[idx, 'path'] = new_path
+                csv_df.at[idx, path_field] = new_path
         csv_df.to_csv(csv_path, index=False)
         print(f"{csv_filename} updated with new paths.")
         return True
@@ -83,13 +83,14 @@ def update_csv_path_field(csv_path: str, path_field: str = 'path') -> bool:
         print(f"All input files of {csv_filename} are internal to the 'inputs' folder.")
         return False
     
-def check_raw_path(csv_path: str, file_type: str) -> bool:
+def check_raw_path(csv_path: str, type: str, subtype: str = None) -> bool:
     """
-    Check if a specified P-SLIP folder type exists in the CSV file containing the list of inputs.
+    Check if a specified P-SLIP folder/file exists in the CSV file containing the list of inputs.
 
     Args:
         csv_path (str): Path to the CSV file.
-        file_type (str): The type of file to check for (e.g., 'study_area').
+        type (str): The type of folder/file to check for (e.g., 'study_area').
+        subtype (str, optional): The subtype of folder/file to check for.
 
     Returns:
         bool: True if the folder type exists, False otherwise.
@@ -100,9 +101,19 @@ def check_raw_path(csv_path: str, file_type: str) -> bool:
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV file not found at {csv_path}")
     input_files_df = pd.read_csv(csv_path)
-    return file_type in input_files_df['type'].values
 
-def add_row_to_csv(csv_path: str, path_to_add: str, path_type: str, force_rewrite: bool) -> bool:
+    entry_exists = type in input_files_df['type'].values
+    if subtype:
+        entry_exists = entry_exists and subtype in input_files_df['subtype'].values
+    return entry_exists
+
+def add_row_to_csv(
+        csv_path: str, 
+        path_to_add: str, 
+        path_type: str, 
+        path_subtype: str = None, 
+        force_rewrite: bool = True
+    ) -> tuple[bool, str]:
     """
     Add a new row to the CSV file containing the list of inputs.
 
@@ -113,11 +124,15 @@ def add_row_to_csv(csv_path: str, path_to_add: str, path_type: str, force_rewrit
         force_rewrite (bool): If True, will overwrite the existing row if it exists.
 
     Returns:
-        bool: True if the row was added, False if it already exists.
+        bool: True if the row was added successfully, False if it already exists and force_rewrite is False.
+        str: The new ID of the added row.
+
+    Raises:
+        FileNotFoundError: If the CSV file does not exist.
     """
 
     # Read the CSV into a DataFrame
-    csv_df = pd.read_csv(csv_path)
+    csv_df = pd.read_csv(csv_path, header=0)
 
     csv_base_dir = os.path.dirname(csv_path)
 
@@ -126,20 +141,39 @@ def add_row_to_csv(csv_path: str, path_to_add: str, path_type: str, force_rewrit
         path_to_add = os.path.relpath(path_to_add, csv_base_dir)
 
     # Check if the row already exists
-    row_exists = any(csv_df["type"] == path_type)
+    row_matches = csv_df["type"] == path_type # Logical
+    if path_subtype:
+        row_matches = row_matches and any(csv_df["subtype"] == path_subtype)
+    
+    row_index = csv_df[row_matches].index
+
+    # Generate a new ID
+    prefix_len = 3
+    existing_ids = csv_df[csv_df["type"] == path_type]["custom_id"]
+    if not existing_ids.empty:
+        new_id = f"{path_type[:prefix_len].upper()}{str(int(existing_ids.max()[prefix_len:]) + 1).zfill(prefix_len)}"
+    else:
+        new_id = f"{path_type[:prefix_len].upper()}001"
 
     # If the row doesn't exist, add it
-    if not row_exists:
-        csv_df = csv_df.append({"path": path_to_add, "type": path_type, "internal": is_internal}, ignore_index=True)
+    if not any(row_matches):
+        new_row = {"custom_id": new_id, "path": path_to_add, "type": path_type, "internal": is_internal}
+        if path_subtype:
+            new_row["subtype"] = path_subtype
+        csv_df = pd.concat([csv_df, pd.DataFrame([new_row])], ignore_index=True)
         csv_df.to_csv(csv_path, index=False)
-        return True
-    elif row_exists and force_rewrite:
+        return (True, new_id)
+    elif any(row_matches) and force_rewrite:
         # If the row exists and force_rewrite is True, update the existing row
-        row_index = csv_df[csv_df["type"] == path_type].index[0]
-        csv_df.at[row_index, "path"] = path_to_add
-        csv_df.at[row_index, "type"] = path_type
-        csv_df.at[row_index, "internal"] = is_internal
+        if len(row_index) > 1:
+            raise ValueError(f"Multiple rows found for {path_type} with subtype {path_subtype}")
+        csv_df.loc[row_index[0], ["custom_id", "path", "type", "internal"]] = [new_id, path_to_add, path_type, is_internal]
+        if path_subtype:
+            csv_df.at[row_index[0], "subtype"] = path_subtype
         csv_df.to_csv(csv_path, index=False)
-        return True
+        return (True, new_id)
+    elif any(row_matches) and not force_rewrite:
+        print(f"Row for {path_type} with subtype {path_subtype} already exists in {csv_path}. Use --force to overwrite.")
+        return (False, None)
     else:
-        return False
+        raise ValueError(f"Row for {path_type} with subtype {path_subtype} not added in {csv_path}")

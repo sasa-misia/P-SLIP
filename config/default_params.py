@@ -15,27 +15,33 @@ DEFAULT_CASE_NAME = 'Not Defined - Standalone'
 # This is the name of the file that contains the analysis environment details.
 ENVIRONMENT_FILENAME = 'analysis_environment.json'
 
+# Input types and subfolders for dynamic inputs
+KNOWN_STATIC_INPUT_TYPES = [
+    'study_area',
+    'dtm',
+    'landslides',
+    'soil',
+    'vegetation',
+    'infrastructures',
+    'land_uses',
+]
+KNOWN_DYNAMIC_INPUT_TYPES = [
+    'rainfalls', 
+    'temperature'
+]
+DYNMIC_SUBFOLDERS = [
+    'recordings', 
+    'forecast'
+]
+GENERIC_INPUT_TYPE = ['miscellaneous']
+
 # Configuration for the folder structure
 # This dictionary defines the folder structure for the project.
 ANALYSIS_FOLDER_STRUCTURE = {
     'inputs': [
-        {'rainfalls': [
-            'recordings', 
-            'forecast'
-        ]},
-        'landslides',
-        'study_area',
-        'satellite_images',
-        'dtm',
-        'soil',
-        'vegetation',
-        'roads',
-        'land_uses',
-        {'temperature': [
-            'recordings', 
-            'forecast'
-        ]},
-        'miscellaneous'
+        *KNOWN_STATIC_INPUT_TYPES,
+        {name: DYNMIC_SUBFOLDERS for name in KNOWN_DYNAMIC_INPUT_TYPES},
+        *GENERIC_INPUT_TYPE
     ],
     'variables': [],
     'results': [
@@ -77,28 +83,11 @@ if structure_keys != map_keys:
     )
 # --- END CHECK ---
 
-# Plotting configuration
-# This dictionary contains default settings for plotting.
-PLOT_CONFIG = {
-    'default_figsize': (10, 6),
-    'default_dpi': 300,
-    'default_style': 'seaborn-v0_8-whitegrid',
-    'default_cmap': 'viridis'
-}
-
-# Logging configuration
-# This dictionary contains default settings for logging.
-LOG_CONFIG = {
-    'level': 'INFO',
-    'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    'date_format': '%Y-%m-%d %H:%M:%S'
-}
-
 # Raw input files configuration
 # This is the name of the CSV file that contains the raw input files.
 RAW_INPUT_FILENAME = 'input_files.csv'
 # This dictionary contains the expected columns for various input files.
-RAW_INPUT_CSV_COLUMNS = ['path', 'type', 'internal']
+RAW_INPUT_CSV_COLUMNS = ['custom_id', 'path', 'type', 'subtype', 'internal']
 
 # Libraries to check
 # This dictionary contains the required and optional libraries for the project.
@@ -107,25 +96,55 @@ LIBRARIES_CONFIG = {
     'optional_file': 'requirements_opt.txt'
 }
 
-# User control configuration
-# This dictionary contains the default user control settings.
-VAR_FILES_KEY = 'var_files'  # Key for variable files in user control
-USER_CONTROL_CONFIG = {
-    'study_area': {
-        'source_mode': None, # It can be 'shapefile' or 'rectangle'
-        'source_type': None, # It must be the same type specified in input_files.csv
-        'source_field': None, # Field name to select polygons from the shapefile
-        'source_selection': None, # List of values to select from the source_field
-        'poly_mask': None, # Polygon to mask the study area (optional)
-        'remove_source' : None, # It can be land use, vegetation, soil, or other polygons
-        VAR_FILES_KEY: {}
+# Plotting configuration
+# This dictionary contains default settings for plotting.
+DEFAULT_PLOT_CONFIG = {
+    'default': {
+        'figsize': (10, 6),
+        'dpi': 300,
+        'style': 'seaborn-v0_8-whitegrid',
+        'cmap': 'viridis'
+    }
+}
+
+# Logging configuration
+# This dictionary contains default settings for logging.
+LOG_CONFIG = {
+    'level': 'INFO',
+    'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    'date_format': '%Y-%m-%d %H:%M:%S',
+}
+
+# User analysis configuration
+# This dictionary contains the analysis configuration template.
+ANALYSIS_CONFIGURATION = {
+    'inputs': { # Here all the settings used to import the various files
+        **{k: {1: {'settings': {}, 'custom_id': []}} for k in KNOWN_STATIC_INPUT_TYPES},
+        **{k: {1: {'settings': {}, 'custom_id': []}} for k in KNOWN_DYNAMIC_INPUT_TYPES},
+        **{k: {1: {'settings': {}, 'custom_id': []}} for k in GENERIC_INPUT_TYPE}
     },
-    'land_use': {
-        'source_mode': None, # It can be 'shapefile' or 'rectangle'
-        'source_type': None, # It can be 'shapefile' or other
-        'source_field': None, # Field name to select land use classes
-        'source_selection': None, # List of land use classes to select
-        'poly_mask': None, # Polygon to mask the land use (optional)
-        VAR_FILES_KEY: {}
+    'variables': { # Here a list of variables and content (ex: {'variable.pkl': {'var1', 'var2', 'var3'}}})
+        'example.pkl': [
+            'example_var1',
+            'example_var2', 
+            'example_var3'
+        ]
+    },
+    'results': { # Here all the settings for the results are defined
+        'example_mdl_name': {
+            'settings': {},
+            'folder': None 
+        }
+    },
+    'outputs': {
+        'figures': { # Here all the settings for the figures are defined
+            'settings': DEFAULT_PLOT_CONFIG
+        },
+        'tables': { # Here all the settings for the tables are defined
+            'settings': {}
+        }
+    },
+    'logs': { # Here all the settings for the logs are defined
+        'settings': LOG_CONFIG
     }
 }
