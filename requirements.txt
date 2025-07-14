@@ -1,7 +1,11 @@
 numpy
 scipy
 matplotlib
+shapely
 pandas
+geopandas
+fiona
+gdal
 rasterio
 scikit-image
 scikit-learn

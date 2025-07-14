@@ -89,7 +89,7 @@ class AnalysisEnvironment:
             multi_extension (bool): Whether to allow multiple file extensions in the input files CSV.
 
         Returns:
-            bool: True if input files were collected successfully, False otherwise.
+            None
         """
         logger = logging.getLogger(__name__)
         logger.info("Collecting input files from the input files CSV and copying them to the input directory...")
@@ -126,14 +126,14 @@ class AnalysisEnvironment:
                     raise TypeError("file_subtype must be a list of strings.")
                 inp_files_df = inp_files_df[inp_files_df['subtype'].isin(file_subtype)]
         
-        for _, row in inp_files_df.iterrows():
+        for idx, row in inp_files_df.iterrows():
             # Parse the internal path field to get the correct file(s) path
             if multi_extension:
                 # If multi_extension is True, we need to find all files with the same basename
                 file_basename_no_ext = os.path.splitext(os.path.basename(row['path']))[0] # Also with multiple ".", splitext will split just the last "."
                 file_paths = [os.path.join(os.path.dirname(row['path']), file) 
-                            for file in os.listdir(os.path.dirname(row['path'])) 
-                            if file.startswith(file_basename_no_ext)]
+                              for file in os.listdir(os.path.dirname(row['path'])) 
+                              if file.startswith(file_basename_no_ext)]
             else:
                 file_paths = [row['path']] # Just use the single path
 
@@ -162,6 +162,14 @@ class AnalysisEnvironment:
                         raise IOError(f"Error copying file {file_path} to {dest_path}: {e}")
                 else:
                     logger.info(f"File {file_path} already exists in the input directory. Skipping copy.")
+            
+            # Update the input files DataFrame
+            main_file = os.path.join(rel_inp_dir, os.path.basename(row['path']))
+            inp_files_df.loc[idx, ['path', 'internal']] = [os.path.relpath(main_file, input_dir), True]
+
+        # Save the updated input files DataFrame
+        inp_files_df.to_csv(inp_csv_path, index=False)
+        logger.info("Input files collected and copied to the input directory successfully.")
 
     @classmethod
     def from_json(cls, file_path: str) -> "AnalysisEnvironment":

@@ -19,14 +19,15 @@ from config import (
 )
 
 # Importing necessary modules from psliptools
-from psliptools.utilities import get_raw_fold
 from psliptools.geometries import (
     load_shapefile_polygons,
     get_rectangle_parameters,
     create_rectangle_polygons, 
     intersect_polygons,
     union_polygons,
-    get_polygon_extremes
+    get_polygon_extremes,
+    get_shapefile_fields,
+    get_shapefile_field_values
 )
 
 #%% Set up logging configuration
@@ -85,15 +86,31 @@ def main(gui_mode=False, base_dir=None) -> Dict[str, object]:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
         if base_dir is None:
-            base_dir = input(f"Enter the base directory for the analysis (or press Enter to use the current directory {os.getcwd()}): ")
-            if not base_dir.strip():
+            base_dir = input(f"Enter the base directory for the analysis (or press Enter to use the current directory {os.getcwd()}): ").strip(' "')
+            if not base_dir:
                 base_dir = os.getcwd()
         use_window = input("Define study area using rectangles? [y/N]: ").strip().lower() == "y"
         if not(use_window):
             src_mode = 'shapefile'
-            src_path = input("Study area shapefile name (e.g. study_area.shp) or full path: ")
-            cls_fld = input("Field name containing class names: ")
-            cls_sel = input("Classes to select (comma separated): ").split(",")
+            src_path = input("Study area shapefile name (e.g. study_area.shp) or full path: ").strip(' "')
+
+            shp_fields, shp_types = get_shapefile_fields(src_path)
+            print("Shapefile fields and types:")
+            for i, (f, t) in enumerate(zip(shp_fields, shp_types)):
+                print(f"{i+1}. {f} ({t})")
+            cls_fld = input(f"Field name containing polygon names (or number from 1 to {len(shp_fields)}): ").strip(' "')
+            if cls_fld.isdigit() and 1 <= int(cls_fld) <= len(shp_fields):
+                cls_fld = shp_fields[int(cls_fld)-1]
+
+            shp_field_vals = get_shapefile_field_values(src_path, cls_fld, sort=True)
+            print("Available classes:")
+            for i, val in enumerate(shp_field_vals):
+                print(f"{i+1}. {val}")
+            cls_sel = input("Classes to select (also multiple, comma or semicolon separated): ").strip(' "').replace(',', ';').split(';')
+            try:
+                cls_sel = [shp_field_vals[int(x)-1] if x.isdigit() and 1 <= int(x) <= len(shp_field_vals) else x for x in cls_sel]
+            except ValueError:
+                pass
         else:
             src_mode = 'rectangle'
             src_path = None
@@ -123,9 +140,9 @@ def main(gui_mode=False, base_dir=None) -> Dict[str, object]:
         'source_selection': cls_sel
     }
     env.config['inputs'][src_type]['1']['custom_id'] = [cust_id]
-    env.collect_input_files(multi_extension=True)
+    env.collect_input_files(file_type=[src_type], multi_extension=True)
     
-    save_variable(analysis_env=env, variable_to_save=study_area_vars, filename="study_area_vars.json")
+    save_variable(analysis_env=env, variable_to_save=study_area_vars, filename="study_area_vars.pkl")
     return study_area_vars
 
 if __name__ == "__main__":

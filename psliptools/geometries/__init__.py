@@ -21,7 +21,9 @@ from .manipulate_geom import (
 )
 
 from .info_geom import (
-    get_polygon_extremes
+    get_polygon_extremes,
+    get_shapefile_fields,
+    get_shapefile_field_values
 )
 
 __all__ = [
@@ -32,5 +34,7 @@ __all__ = [
     "load_shapefile_polygons",
     "intersect_polygons",
     "union_polygons",
-    "get_polygon_extremes"
+    "get_polygon_extremes",
+    "get_shapefile_fields",
+    "get_shapefile_field_values"
 ]

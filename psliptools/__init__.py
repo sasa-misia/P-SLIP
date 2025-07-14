@@ -2,3 +2,4 @@
 
 from .utilities import *
 from .geometries import *
+from .rasters import *

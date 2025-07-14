@@ -39,13 +39,13 @@ def main(case_name=None, gui_mode=False, base_dir=None) -> AnalysisEnvironment:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
         if base_dir is None:
-            base_dir = input(f"Enter the base directory for the analysis (or press Enter to use the current directory {os.getcwd()}): ")
-            if not base_dir.strip():
+            base_dir = input(f"Enter the base directory for the analysis (or press Enter to use the current directory [{os.getcwd()}]): ").strip(' "')
+            if not base_dir:
                 base_dir = os.getcwd()
         
         if case_name is None:
-            case_name = input("Specify the analysis name (enter for default [Not Defined - Standalone]): ")
-            if not case_name.strip():
+            case_name = input("Specify the analysis name (enter for default [Not Defined - Standalone]): ").strip()
+            if not case_name:
                 case_name = DEFAULT_CASE_NAME
 
     os.makedirs(base_dir, exist_ok=True) # Ensure the base directory exists
