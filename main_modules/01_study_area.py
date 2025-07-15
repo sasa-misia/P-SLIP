@@ -106,11 +106,8 @@ def main(gui_mode=False, base_dir=None) -> Dict[str, object]:
             print("Available classes:")
             for i, val in enumerate(shp_field_vals):
                 print(f"{i+1}. {val}")
-            cls_sel = input("Classes to select (also multiple, comma or semicolon separated): ").strip(' "').replace(',', ';').split(';')
-            try:
-                cls_sel = [shp_field_vals[int(x)-1] if x.isdigit() and 1 <= int(x) <= len(shp_field_vals) else x for x in cls_sel]
-            except ValueError:
-                pass
+            cls_sel = [x.strip(' "') for x in input("Classes to select (also multiple, comma or semicolon separated): ").replace(',', ';').split(';')]
+            cls_sel = sorted(set(shp_field_vals[int(x)-1] if x.isdigit() and 1 <= int(x) <= len(shp_field_vals) else x for x in cls_sel))
         else:
             src_mode = 'rectangle'
             src_path = None

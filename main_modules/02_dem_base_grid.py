@@ -18,12 +18,11 @@ from config import (
     LOG_CONFIG
 )
 
-from psliptools import grid, morphology
+from psliptools import file_selector
 
 #%%
 # Definisci le costanti e le variabili
 FOLD_VAR = 'path/to/fold/var'
-FOLD_RAW_DTM = 'path/to/fold/raw/dtm'
 DTM_TYPE = 0  # o 1 o 2
 ORTHOPHOTO_ANSWER = True
 
@@ -86,6 +85,12 @@ def main(base_dir=None, gui_mode=False):
     
     # Get the analysis environment
     env, _ = get_analysis_environment(base_dir=base_dir)
+
+    dtm_fold = input(f"Enter the folder name where the DTM files are stored (default: {env.inp_dir['dtm']['path']}): ").strip(' "')
+    if not dtm_fold:
+        dtm_fold = env.inp_dir['dtm']['path']
+
+    dtm_paths = file_selector(base_dir=dtm_fold, src_ext=['tif', '.tiff'])
     
     dtm_files = read_dtm_files(FOLD_RAW_DTM, DTM_TYPE)
     dtm_data = process_dtm_data(dtm_files)
