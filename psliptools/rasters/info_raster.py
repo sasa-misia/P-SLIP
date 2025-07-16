@@ -5,6 +5,16 @@ import warnings
 
 #%% # Function to get raster crs
 def _get_crs(raster_path: str, set_crs: int=None) -> rasterio.crs.CRS:
+    """
+    Get the crs of a raster file.
+
+    Args:
+        raster_path (str): The path to the raster file.
+        set_crs (int, optional): The EPSG code of the coordinate reference system. Defaults to None.
+
+    Returns:
+        rasterio.crs.CRS: The crs of the raster file.
+    """
     raster_basedir = os.path.dirname(raster_path)
     raster_basename_no_ext = os.path.splitext(os.path.basename(raster_path))[0]
     raster_crs_file = os.path.join(raster_basedir, f"{raster_basename_no_ext}.prj")
@@ -21,7 +31,18 @@ def _get_crs(raster_path: str, set_crs: int=None) -> rasterio.crs.CRS:
     return crs_obj
 
 #%% # Function to get raster information
-def get_georaster_info(raster_path: str, set_crs: int=None, set_bbox: list=None):
+def get_georaster_info(raster_path: str, set_crs: int=None, set_bbox: list=None) -> dict:
+    """
+    Get information about a GeoTIFF raster file.
+
+    Args:
+        raster_path (str): The path to the GeoTIFF raster file.
+        set_crs (int, optional): The EPSG code of the coordinate reference system. Defaults to None.
+        set_bbox (list, optional): The bounding box coordinates [xmin, ymin, xmax, ymax]. Defaults to None.
+
+    Returns:
+        dict: A dictionary containing the raster profile.
+    """
     with rasterio.open(raster_path, 'r') as src: # read-only to improve performance
         src_profile = src.profile
     src.close()

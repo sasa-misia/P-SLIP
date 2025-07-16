@@ -2,23 +2,8 @@
 import rasterio
 import warnings
 import numpy as np
-import pyproj
 from rasters.info_raster import get_georaster_info
-
-#%% # Function to create bounding box from coordinates
-def create_bbox(coords_x: np.ndarray, coords_y: np.ndarray) -> np.ndarray:
-    return np.array([coords_x.min(), coords_y.min(), coords_x.max(), coords_y.max()]) # xmin, ymin, xmax, ymax
-
-#%% # Function to convert grids
-def convert_coords(
-        crs_in: int, 
-        crs_out: int, 
-        in_coords_x: np.ndarray, 
-        in_coords_y: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
-    transformer = pyproj.Transformer.from_crs(crs_in, crs_out, always_xy=True)
-    out_coords_x, out_coords_y = transformer.transform(in_coords_x, in_coords_y)
-    return out_coords_x, out_coords_y
+from rasters.manipulate_raster import convert_coords, create_bbox
 
 #%% # Function to load GeoTIFF raster
 def load_georaster(
@@ -29,7 +14,20 @@ def load_georaster(
         set_dtype: str=None,
         convert_to_geo: bool=True
     ) -> tuple[np.ndarray, dict]:
-    """Load a GeoTIFF raster as a rasterio.DatasetReader object."""
+    """
+    Load a GeoTIFF raster as a rasterio.DatasetReader object.
+
+    Args:
+        filepath (str): The path to the GeoTIFF raster file.
+        set_crs (int, optional): The EPSG code of the coordinate reference system. Defaults to None.
+        set_bbox (list, optional): The bounding box coordinates [xmin, ymin, xmax, ymax]. Defaults to None.
+        set_nodata (int, optional): The nodata value. Defaults to None.
+        set_dtype (str, optional): The data type of the raster (e.g., 'uint8', 'float32', 'int16', etc.). Defaults to None.
+        convert_to_geo (bool, optional): Whether to convert the raster to geographic coordinates. Defaults to True.
+
+    Returns:
+        tuple[np.ndarray, dict]: A tuple containing the raster data and the raster profile.
+    """
     raster_profile = get_georaster_info(raster_path=filepath, set_crs=set_crs, set_bbox=set_bbox)
     
     with rasterio.open(filepath, 'r') as src:
@@ -61,7 +59,7 @@ def load_georaster(
         )
 
     if raster_profile.get('nodata', None) is None:
-        if set_nodata is not None and isinstance(set_nodata, (int, float)):
+        if set_nodata and isinstance(set_nodata, (int, float)):
             raster_profile['nodata'] = set_nodata
         else:
             if raster_data.min() < 0:
@@ -72,7 +70,7 @@ def load_georaster(
 
     if raster_profile.get('dtype', None) is None:
         if set_dtype is not None and isinstance(set_dtype, str):
-            allowed_dtypes = ['uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32', 'int64', 'float32', 'float64']
+            allowed_dtypes = ['uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32', 'int64', 'float16', 'float32', 'float64']
             if set_dtype not in allowed_dtypes:
                 raise ValueError(f"Invalid dtype: {set_dtype}. It must be one of the following: {', '.join(allowed_dtypes)}")
             raster_profile['dtype'] = set_dtype

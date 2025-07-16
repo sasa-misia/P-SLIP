@@ -5,6 +5,7 @@ from osgeo import gdal
 import matplotlib.pyplot as plt
 import sys
 import argparse
+import logging
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -18,7 +19,13 @@ from config import (
     LOG_CONFIG
 )
 
-from psliptools import file_selector
+from psliptools import file_selector, load_georaster
+
+#%% Set up logging configuration
+# This will log messages to the console and can be modified to log to a file if needed
+logging.basicConfig(level=logging.INFO,
+                    format=LOG_CONFIG['format'], 
+                    datefmt=LOG_CONFIG['date_format'])
 
 #%%
 # Definisci le costanti e le variabili
@@ -91,6 +98,8 @@ def main(base_dir=None, gui_mode=False):
         dtm_fold = env.inp_dir['dtm']['path']
 
     dtm_paths = file_selector(base_dir=dtm_fold, src_ext=['tif', '.tiff'])
+    for dtm_path in dtm_paths:
+        load_georaster(filepath=dtm_path, set_dtype='float32', convert_to_geo=True)
     
     dtm_files = read_dtm_files(FOLD_RAW_DTM, DTM_TYPE)
     dtm_data = process_dtm_data(dtm_files)
