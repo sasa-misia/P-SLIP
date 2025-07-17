@@ -2,8 +2,8 @@
 import rasterio
 import warnings
 import numpy as np
-from rasters.info_raster import get_georaster_info
-from rasters.manipulate_raster import convert_coords, create_bbox
+from .info_raster import get_georaster_info
+from .manipulate_raster import convert_coords, create_bbox
 
 #%% # Function to load GeoTIFF raster
 def load_georaster(

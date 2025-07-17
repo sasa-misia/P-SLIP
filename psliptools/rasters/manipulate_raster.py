@@ -2,6 +2,7 @@
 import numpy as np
 import pyproj
 import rasterio
+import rasterio.warp
 
 #%% # Function to create bounding box from coordinates
 def create_bbox(
@@ -50,15 +51,17 @@ def create_grid_from_bbox(
     if not (resolution[0] == int(resolution[0]) and resolution[1] == int(resolution[1])):
         raise ValueError('Resolution must be integer values (pixels_x, pixels_y)')
     
-    x = np.linspace(bbox[0], bbox[2], resolution)
-    y = np.linspace(bbox[1], bbox[3], resolution)
+    x = np.linspace(bbox[0], bbox[2], resolution[0])
+    y = np.linspace(bbox[1], bbox[3], resolution[1])
 
     if profile:
         profile['width'] = resolution[0]
         profile['height'] = resolution[1]
         profile['blockxsize'] = resolution[0]
         profile['transform'] = rasterio.transform.from_bounds(*bbox, profile['width'], profile['height'])
-    return np.meshgrid(x, y), profile
+
+    grid_x, grid_y = np.meshgrid(x, y)
+    return grid_x, grid_y, profile
 
 #%% # Function to convert grids
 def convert_coords(
@@ -137,7 +140,7 @@ def replace_values(raster: np.ndarray, old_value: np.ndarray, new_value: np.ndar
     return raster
 
 #%% # Function to resample raster
-def resample_raster(raster: np.ndarray, profile: dict, grid_x: np.ndarray, grid_y: np.ndarray, new_size: np.ndarray=[10, 10]) -> np.ndarray:
+def resample_raster(in_raster: np.ndarray, in_profile: dict, in_grid_x: np.ndarray, in_grid_y: np.ndarray, resample_method: str='nearest', new_size: np.ndarray=[10, 10]) -> np.ndarray:
     """
     Resample a raster to a new size.
 
@@ -150,8 +153,8 @@ def resample_raster(raster: np.ndarray, profile: dict, grid_x: np.ndarray, grid_
     Returns:
         np.ndarray: The resampled raster.
     """
-    bbox = create_bbox(grid_x, grid_y)
-    if profile['crs'].is_geographic:
+    bbox = create_bbox(in_grid_x, in_grid_y)
+    if in_profile['crs'].is_geographic:
         utm_crs_list = pyproj.database.query_utm_crs_info(
             datum_name="WGS 84",
             area_of_interest=pyproj.aoi.AreaOfInterest(
@@ -164,31 +167,32 @@ def resample_raster(raster: np.ndarray, profile: dict, grid_x: np.ndarray, grid_
         utm_crs = pyproj.CRS.from_epsg(utm_crs_list[0].code)
         if not utm_crs.is_projected:
             raise ValueError('The auto-generated UTM CRS is not projected!')
-        bbox_utm = convert_bbox(profile['crs'].to_epsg(), utm_crs.to_epsg(), bbox)
+        bbox_utm = convert_bbox(in_profile['crs'].to_epsg(), utm_crs.to_epsg(), bbox)
     else:
-        utm_crs = profile['crs']
+        utm_crs = in_profile['crs']
         bbox_utm = bbox
     
-    pixel_res_x = round(abs(bbox_utm[0] - bbox_utm[2]) / new_size[0])
-    pixel_res_y = round(abs(bbox_utm[1] - bbox_utm[3]) / new_size[1])
+    out_pixel_res_x = round(abs(bbox_utm[0] - bbox_utm[2]) / new_size[0])
+    out_pixel_res_y = round(abs(bbox_utm[1] - bbox_utm[3]) / new_size[1])
 
-    res_grid_x, res_grid_y, res_profile = create_grid_from_bbox(bbox, [pixel_res_x, pixel_res_y], profile)
-    # TO CHECK!!!
-    res_raster = np.zeros((grid_x.shape[0], grid_y.shape[1]))
-    for i in range(grid_x.shape[0]):
-        for j in range(grid_y.shape[1]):
-            res_raster[i, j] = rasterio.warp.reproject(
-                raster, 
-                src_crs=profile['crs'],
-                src_transform=profile['transform'],
-                dst_crs=profile['crs'],
-                dst_transform=profile['transform'],
-                dst_resolution=(pixel_res_x, pixel_res_y),
-                src_nodata=profile['nodata'],
-                dst_nodata=profile['nodata'],
-                resampling=rasterio.warp.Resampling.bilinear,
-                dst_array=res_raster,
-                dst_index=(i, j)
-            )
+    possible_resample_methods = ['nearest', 'bilinear', 'cubic', 'cubic_spline', 'average', 'rms', 'mode', 'lanczos', 'max', 'min', 'med', 'q1', 'q3', 'sum']
+    try:
+        resample_obj = getattr(rasterio.enums.Resampling, resample_method)
+    except AttributeError:
+        raise ValueError(f"resample_method must be one of the following: {possible_resample_methods}")
     
-    return res_raster, res_profile, res_grid_x, res_grid_y
+    out_grid_x, out_grid_y, out_profile = create_grid_from_bbox(bbox, [out_pixel_res_x, out_pixel_res_y], in_profile)
+    out_raster = np.zeros((out_profile['count'], out_profile['height'], out_profile['width']), dtype=in_raster.dtype)
+    rasterio.warp.reproject(
+        in_raster, 
+        src_crs=in_profile['crs'],
+        src_transform=in_profile['transform'],
+        dst_crs=out_profile['crs'],
+        dst_transform=out_profile['transform'],
+        dst_resolution=(out_pixel_res_x, out_pixel_res_y),
+        src_nodata=in_profile['nodata'],
+        dst_nodata=out_profile['nodata'],
+        resampling=resample_obj,
+        destination=out_raster
+    )
+    return out_raster, out_profile, out_grid_x, out_grid_y
