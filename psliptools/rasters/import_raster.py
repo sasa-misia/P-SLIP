@@ -2,8 +2,8 @@
 import rasterio
 import warnings
 import numpy as np
-from .info_raster import get_georaster_info
-from .manipulate_raster import convert_coords, create_bbox
+from .info_raster import get_georaster_info, get_xy_grids_from_profile
+from .manipulate_raster import convert_coords, convert_grids_and_profile_to_geo
 
 #%% # Function to load GeoTIFF raster
 def load_georaster(
@@ -12,8 +12,8 @@ def load_georaster(
         set_bbox: list=None, 
         set_nodata: int=None, 
         set_dtype: str=None,
-        convert_to_geo: bool=True
-    ) -> tuple[np.ndarray, dict]:
+        convert_to_geo: bool=False
+    ) -> tuple[np.ndarray, dict, np.ndarray, np.ndarray]:
     """
     Load a GeoTIFF raster as a rasterio.DatasetReader object.
 
@@ -26,36 +26,21 @@ def load_georaster(
         convert_to_geo (bool, optional): Whether to convert the raster to geographic coordinates. Defaults to True.
 
     Returns:
-        tuple[np.ndarray, dict]: A tuple containing the raster data and the raster profile.
+        tuple[np.ndarray, dict, np.ndarray, np.ndarray]: Tuple containing the raster data, raster profile, x and y grids.
     """
     raster_profile = get_georaster_info(raster_path=filepath, set_crs=set_crs, set_bbox=set_bbox)
+    ref_grid_x, ref_grid_y = get_xy_grids_from_profile(raster_profile)
     
     with rasterio.open(filepath, 'r') as src:
         raster_data = src.read()
-        ref_grid_x = np.zeros((src.height, src.width))
-        ref_grid_y = np.zeros((src.height, src.width))
-        for col in range(src.width):
-            ref_grid_x[:, col], ref_grid_y[:, col] = rasterio.transform.xy(
-                raster_profile['transform'], 
-                np.arange(src.height),
-                col
-            )
     src.close()
 
     if convert_to_geo:
-        epsg_geo = 4326
-        ref_grid_x, ref_grid_y = convert_coords(
+        ref_grid_x, ref_grid_y, raster_profile = convert_grids_and_profile_to_geo(
             crs_in=raster_profile['crs'].to_epsg(),
-            crs_out=epsg_geo,
             in_coords_x=ref_grid_x,
-            in_coords_y=ref_grid_y
-        )
-        prior_bbox = create_bbox(ref_grid_x, ref_grid_y)
-        raster_profile['crs'] = rasterio.crs.CRS.from_epsg(epsg_geo)
-        raster_profile['transform'] = rasterio.transform.from_bounds(
-            *prior_bbox,
-            raster_profile['width'],
-            raster_profile['height']
+            in_coords_y=ref_grid_y,
+            profile=raster_profile
         )
 
     if raster_profile.get('nodata', None) is None:

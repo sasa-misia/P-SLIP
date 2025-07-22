@@ -1,6 +1,7 @@
 #%% # Import necessary modules
 import os
 import numpy as np
+import pandas as pd
 from osgeo import gdal
 import matplotlib.pyplot as plt
 import sys
@@ -19,7 +20,7 @@ from config import (
     LOG_CONFIG
 )
 
-from psliptools import file_selector, load_georaster
+from psliptools import file_selector, load_georaster, convert_coords_to_geo, resample_raster
 
 #%% Set up logging configuration
 # This will log messages to the console and can be modified to log to a file if needed
@@ -76,7 +77,7 @@ def visualize_results(grid, orthophoto):
     plt.show()
 
 #%% # Main function to import DEM and define base grid
-def main(base_dir=None, gui_mode=False):
+def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None):
     """Main function to define the base grid."""
     src_type_abg = 'base_gird'
     src_type_dem = 'morphology'
@@ -93,13 +94,60 @@ def main(base_dir=None, gui_mode=False):
     # Get the analysis environment
     env, _ = get_analysis_environment(base_dir=base_dir)
 
-    dtm_fold = input(f"Enter the folder name where the DTM files are stored (default: {env.inp_dir['dtm']['path']}): ").strip(' "')
-    if not dtm_fold:
-        dtm_fold = env.inp_dir['dtm']['path']
+    if gui_mode:
+        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+    else:
+        dtm_fold = input(f"Enter the folder name where the DTM files are stored (default: {env.inp_dir['dtm']['path']}): ").strip(' "')
+        if not dtm_fold:
+            dtm_fold = env.inp_dir['dtm']['path']
 
-    dtm_paths = file_selector(base_dir=dtm_fold, src_ext=['tif', '.tiff'])
+        dtm_paths = file_selector(base_dir=dtm_fold, src_ext=['tif', '.tiff'])
+
+    dtm_data = [] # Initializing an empty list
+    abg_data = [] # Initializing an empty list
     for dtm_path in dtm_paths:
-        load_georaster(filepath=dtm_path, set_dtype='float32', convert_to_geo=True)
+        raster_data, raster_profile, raster_x, raster_y = load_georaster(filepath=dtm_path, set_dtype='float32', convert_to_geo=False)
+        if resample_size:
+            raster_data, raster_profile, raster_x, raster_y = resample_raster(
+                in_raster=raster_data, 
+                in_profile=raster_profile,
+                in_grid_x=raster_x,
+                in_grid_y=raster_y,
+                resample_method='average',
+                new_size=resample_size
+            )
+        raster_lon, raster_lat = convert_coords_to_geo(
+            crs_in=raster_profile['crs'].to_epsg(), 
+            in_coords_x=raster_x, 
+            in_coords_y=raster_y
+        )
+
+        dtm_data.append({
+            'path': dtm_path,
+            'raster_data': raster_data,
+            'raster_profile': raster_profile,
+        })
+
+        abg_data.append({
+            'raster_lon': raster_lon,
+            'raster_lat': raster_lat
+        })
+    
+    dtm_df = pd.DataFrame(dtm_data) # Convert the list of dictionaries to a DataFrame
+    abg_df = pd.DataFrame(abg_data) # Convert the list of dictionaries to a DataFrame
+
+    # ==== Less efficient way
+    # # Pre-initialize the DataFrame
+    # dtm_df = pd.DataFrame(columns=['path', 
+    #                                 'raster_data', 
+    #                                 'raster_profile', 
+    #                                 'raster_x', 
+    #                                 'raster_y'], index=range(len(dtm_paths)))
+
+    # for i, dtm_path in enumerate(dtm_paths):
+    #     raster_data, raster_profile, raster_x, raster_y = load_georaster(filepath=dtm_path, set_dtype='float32', convert_to_geo=True)
+    #     dtm_df.iloc[i] = [dtm_path, raster_data, raster_profile, raster_x, raster_y]
+    # =====
     
     dtm_files = read_dtm_files(FOLD_RAW_DTM, DTM_TYPE)
     dtm_data = process_dtm_data(dtm_files)

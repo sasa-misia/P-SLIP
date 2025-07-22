@@ -142,3 +142,5 @@ def show_elevation_3d(
     elevation, x_grid, y_grid = _regularize_zxy(elevation, x_grid, y_grid)
     mlab.mesh(x_grid, y_grid, elevation, colormap='terrain')
     mlab.show()
+    
+# %%

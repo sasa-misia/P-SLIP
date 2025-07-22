@@ -2,6 +2,7 @@
 import rasterio
 import os
 import warnings
+import numpy as np
 
 #%% # Function to get raster crs
 def _get_crs(raster_path: str, set_crs: int=None) -> rasterio.crs.CRS:
@@ -66,4 +67,24 @@ def get_georaster_info(raster_path: str, set_crs: int=None, set_bbox: list=None)
         src_profile['transform'] = rasterio.transform.from_bounds(*set_bbox, src_profile['width'], src_profile['height'])
     return src_profile
 
-# %%
+#%% # Function to create xy grids from profile
+def get_xy_grids_from_profile(profile: dict) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Create x and y grids from a raster profile.
+
+    Args:
+        profile (dict): A dictionary containing the raster profile.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Tuple containing the x and y grids.
+    """
+    ref_grid_x, ref_grid_y = np.zeros((2, profile['height'], profile['width'])) # single command row and unpacked array
+    for col in range(profile['width']):
+        ref_grid_x[:, col], ref_grid_y[:, col] = rasterio.transform.xy(
+            profile['transform'], 
+            np.arange(profile['height']),
+            col
+        )
+    return ref_grid_x, ref_grid_y
+
+#%%
