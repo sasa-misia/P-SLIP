@@ -40,15 +40,16 @@ def _regularize_elevation(
     Returns:
         np.ndarray: The regularized elevation data.
     """
-    if elevation.ndim == 3:
-        elevation = elevation[0] # Only use the first layer
+    out_elevation = elevation.copy() # Create a copy to avoid modifying the original data
+    if out_elevation.ndim == 3:
+        out_elevation = out_elevation[0] # Only use the first layer
         warnings.warn('elevation is a 3D array, only the first layer will be used')
-    elif elevation.ndim == 1 and x_grid is not None and y_grid is not None:
-        elevation = elevation.reshape(x_grid.shape)
+    elif out_elevation.ndim == 1 and x_grid is not None and y_grid is not None:
+        out_elevation = out_elevation.reshape(x_grid.shape)
     
-    if not elevation.ndim == 2:
+    if not out_elevation.ndim == 2:
         raise ValueError('elevation must be a 2D array')
-    return elevation
+    return out_elevation
 
 #%% # Function to check consistency between elevation, x_grid and y_grid
 def _check_grid_consistency(
@@ -120,6 +121,31 @@ def show_elevation_isometric(
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     ax.plot_surface(x_grid, y_grid, elevation, cmap='viridis')
+    plt.show()
+
+#%% # Function to show elevation in a 2D plot
+def show_elevation_2d(
+        elevation: np.ndarray, 
+        x_grid: np.ndarray=None, 
+        y_grid: np.ndarray=None
+    ) -> None:
+    """
+    Show elevation in a 2D plot.
+
+    Args:
+        elevation (np.ndarray): The elevation data.
+        x_grid (np.ndarray): The x coordinates of the grid.
+        y_grid (np.ndarray): The y coordinates of the grid.
+        
+    Returns:
+        None
+    """
+    elevation, x_grid, y_grid = _regularize_zxy(elevation, x_grid, y_grid)
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.set_title('Elevation Map')
+    ax.imshow(elevation, cmap='viridis', extent=(x_grid[0, 0], x_grid[-1, -1], y_grid[0, 0], y_grid[-1, -1]))
+    ax.set_aspect('equal')
     plt.show()
 
 #%% # Function to show elevation in a 3D interactive plot

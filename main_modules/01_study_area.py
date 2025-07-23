@@ -149,3 +149,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     study_area_vars = main(base_dir=args.base_dir, gui_mode=False)
+# %%

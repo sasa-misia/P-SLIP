@@ -10,7 +10,9 @@ from .import_raster import (
 
 from .info_raster import (
     get_georaster_info,
-    get_xy_grids_from_profile
+    get_xy_grids_from_profile,
+    get_projected_epsg_code_from_bbox,
+    get_projected_crs_from_bbox
 )
 
 from .manipulate_raster import (
@@ -34,6 +36,8 @@ __all__ = [
     "load_georaster",
     "get_georaster_info",
     "get_xy_grids_from_profile",
+    "get_projected_epsg_code_from_bbox",
+    "get_projected_crs_from_bbox",
     "create_bbox",
     "create_grid_from_bbox",
     "convert_coords",

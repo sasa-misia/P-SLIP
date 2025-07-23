@@ -4,7 +4,7 @@ import pyproj
 import rasterio
 import rasterio.warp
 import warnings
-from .info_raster import get_xy_grids_from_profile
+from .info_raster import get_xy_grids_from_profile, get_projected_crs_from_bbox
 
 #%% # Function to create bounding box from coordinates
 def create_bbox(
@@ -67,19 +67,30 @@ def create_grid_from_bbox(
         raise ValueError('Bounding box ymin must be less than ymax')
 
     if profile:
-        profile['width'] = resolution[0]
-        profile['height'] = resolution[1]
-        profile['blockxsize'] = resolution[0]
-        profile['transform'] = rasterio.transform.from_bounds(*bbox, profile['width'], profile['height'])
-        grid_x, grid_y = get_xy_grids_from_profile(profile)
+        out_profile = profile.copy()
+        out_profile['width'] = int(resolution[0])
+        out_profile['height'] = int(resolution[1])
+        out_profile['blockxsize'] = int(resolution[0])
+        out_profile['transform'] = rasterio.transform.from_bounds(*bbox, out_profile['width'], out_profile['height'])
+        grid_x, grid_y = get_xy_grids_from_profile(out_profile)
     else:
+        out_profile = {
+            'width': int(resolution[0]),
+            'height': int(resolution[1]),
+            'blockxsize': int(resolution[0]),
+            'transform': rasterio.transform.from_bounds(*bbox, resolution[0], resolution[1]),
+            'crs': None,
+            'nodata': None,
+            'dtype': None,
+            'count': None,
+        }
         dx = (bbox[2] - bbox[0])/resolution[0]
         dy = (bbox[3] - bbox[1])/resolution[1]
         x = dx/2 + np.arange(bbox[0], bbox[2], dx)
         y = np.arange(bbox[3], bbox[1], -dy) - dy/2
         grid_x, grid_y = np.meshgrid(x, y) # Not very precise, because with geographic coordinates, the grid is not square and it is slightly rotated
 
-    return grid_x, grid_y, profile
+    return grid_x, grid_y, out_profile
 
 #%% # Function to convert coordinates to desired coordinate reference system
 def convert_coords(
@@ -201,9 +212,10 @@ def convert_grids_and_profile_to_geo(
     #     profile['height']
     # )
     # =====
-    profile['transform'] = transformer_from_grids(out_lons, out_lats)
-    profile['crs'] = rasterio.crs.CRS.from_epsg(4326)
-    return out_lons, out_lats, profile
+    out_profile = profile.copy() # Copy the profile to avoid modifying the original
+    out_profile['transform'] = transformer_from_grids(out_lons, out_lats)
+    out_profile['crs'] = rasterio.crs.CRS.from_epsg(4326)
+    return out_lons, out_lats, out_profile
 
 
 #%% # Function to replace values in a raster
@@ -233,9 +245,10 @@ def replace_values(raster: np.ndarray, old_value: np.ndarray, new_value: np.ndar
     if old_value.ndim > 1 or new_value.ndim > 1:
         raise ValueError('old_value and new_value must be scalar or vector')
 
+    out_raster = raster.copy()  # Create a copy of the raster to avoid modifying the original
     for old, new in zip(old_value, new_value):
-        raster[raster == old] = new
-    return raster
+        out_raster[out_raster == old] = new
+    return out_raster
 
 #%% # Function to resample raster
 def resample_raster(in_raster: np.ndarray, in_profile: dict, in_grid_x: np.ndarray, in_grid_y: np.ndarray, resample_method: str='nearest', new_size: np.ndarray=[10, 10]) -> np.ndarray:
@@ -248,32 +261,28 @@ def resample_raster(in_raster: np.ndarray, in_profile: dict, in_grid_x: np.ndarr
         in_grid_x (np.ndarray): Array of x coordinates.
         in_grid_y (np.ndarray): Array of y coordinates.
         resample_method (str, optional): The resampling method. Defaults to 'nearest'.
-        new_size (np.ndarray, optional): The new size of the raster. Defaults to [10, 10].
+        new_size (np.ndarray, optional): The new size of the pixels in the raster (in meters). Defaults to [10, 10].
     Returns:
         tuple[np.ndarray, dict, np.ndarray, np.ndarray]: Tuple containing the resampled raster, the raster profile, the x and y coordinates of the resampled raster.
     """
     bbox = create_bbox(in_grid_x, in_grid_y)
     if in_profile['crs'].is_geographic:
-        utm_crs_list = pyproj.database.query_utm_crs_info(
-            datum_name="WGS 84",
-            area_of_interest=pyproj.aoi.AreaOfInterest(
-                west_lon_degree=bbox[0],
-                south_lat_degree=bbox[1],
-                east_lon_degree=bbox[2],
-                north_lat_degree=bbox[3]
-            ),
-        )
-        utm_crs = pyproj.CRS.from_epsg(utm_crs_list[0].code)
-        if not utm_crs.is_projected:
-            raise ValueError('The auto-generated UTM CRS is not projected!')
+        utm_crs = get_projected_crs_from_bbox(bbox)
         bbox_utm = convert_bbox(in_profile['crs'].to_epsg(), utm_crs.to_epsg(), bbox)
     else:
         utm_crs = in_profile['crs']
         bbox_utm = bbox
     
+    if not isinstance(new_size, np.ndarray):
+        new_size = np.array(new_size)
+    if new_size.size == 1:
+        new_size = np.array([new_size, new_size])
+    if new_size.size != 2:
+        raise ValueError('new_size must have 2 values (pixels_x, pixels_y)')
+    
     old_size = np.array([
-        round(abs(bbox_utm[0] - bbox_utm[2]) / in_profile['width']), 
-        round(abs(bbox_utm[1] - bbox_utm[3]) / in_profile['height'])
+        round(abs(bbox_utm[2] - bbox_utm[0]) / in_profile['width']), # in_profile['width'] is the number of columns (horizontal pixels) in the raster
+        round(abs(bbox_utm[3] - bbox_utm[1]) / in_profile['height']) # in_profile['height'] is the number of rows (vertical pixels) in the raster
     ])
 
     if new_size[0] < old_size[0] or new_size[1] < old_size[1]:
@@ -282,8 +291,8 @@ def resample_raster(in_raster: np.ndarray, in_profile: dict, in_grid_x: np.ndarr
             f'({old_size[0]} x {old_size[1]}). The resampled raster will be more detailed!'
         )
     
-    out_pixel_h_res = round(abs(bbox_utm[0] - bbox_utm[2]) / new_size[0])
-    out_pixel_v_res = round(abs(bbox_utm[1] - bbox_utm[3]) / new_size[1])
+    out_pixel_res_width = round(abs(bbox_utm[2] - bbox_utm[0]) / new_size[0])
+    out_pixel_res_height = round(abs(bbox_utm[3] - bbox_utm[1]) / new_size[1])
 
     possible_resample_methods = ['nearest', 'bilinear', 'cubic', 'cubic_spline', 'average', 'rms', 'mode', 'lanczos', 'max', 'min', 'med', 'q1', 'q3', 'sum']
     try:
@@ -291,7 +300,7 @@ def resample_raster(in_raster: np.ndarray, in_profile: dict, in_grid_x: np.ndarr
     except AttributeError:
         raise ValueError(f"resample_method must be one of the following: {possible_resample_methods}")
     
-    out_grid_x, out_grid_y, out_profile = create_grid_from_bbox(bbox, [out_pixel_h_res, out_pixel_v_res], in_profile)
+    out_grid_x, out_grid_y, out_profile = create_grid_from_bbox(bbox, [out_pixel_res_width, out_pixel_res_height], in_profile)
     out_raster = np.zeros((out_profile['count'], out_profile['height'], out_profile['width']), dtype=in_raster.dtype)
     rasterio.warp.reproject(
         in_raster, 
@@ -299,7 +308,7 @@ def resample_raster(in_raster: np.ndarray, in_profile: dict, in_grid_x: np.ndarr
         src_transform=in_profile['transform'],
         dst_crs=out_profile['crs'],
         dst_transform=out_profile['transform'],
-        dst_resolution=(out_pixel_h_res,out_pixel_v_res),
+        dst_resolution=(out_pixel_res_width,out_pixel_res_height),
         src_nodata=in_profile['nodata'],
         dst_nodata=out_profile['nodata'],
         resampling=resample_obj,

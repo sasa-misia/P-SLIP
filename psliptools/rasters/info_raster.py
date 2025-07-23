@@ -3,6 +3,7 @@ import rasterio
 import os
 import warnings
 import numpy as np
+import pyproj
 
 #%% # Function to get raster crs
 def _get_crs(raster_path: str, set_crs: int=None) -> rasterio.crs.CRS:
@@ -32,7 +33,7 @@ def _get_crs(raster_path: str, set_crs: int=None) -> rasterio.crs.CRS:
     return crs_obj
 
 #%% # Function to get raster information
-def get_georaster_info(raster_path: str, set_crs: int=None, set_bbox: list=None) -> dict:
+def get_georaster_info(raster_path: str, set_crs: int=None, set_bbox: list | np.ndarray=None) -> dict:
     """
     Get information about a GeoTIFF raster file.
 
@@ -87,4 +88,66 @@ def get_xy_grids_from_profile(profile: dict) -> tuple[np.ndarray, np.ndarray]:
         )
     return ref_grid_x, ref_grid_y
 
-#%%
+#%% # Function to get the projected epsg code from a bounding box
+def get_projected_epsg_code_from_bbox(geo_bbox: list | np.ndarray) -> int:
+    """
+    Get the projected crs from a bounding box.
+
+    Args:
+        bbox (list): The bounding box coordinates, in longitude and latitude as a list of 4 elements (min_lon, min_lat, max_lon, max_lat).
+
+    Returns:
+        int: The EPSG code of the projected coordinate reference system.
+    """
+    if len(geo_bbox) != 4:
+        raise ValueError(f"Invalid bounding box: {geo_bbox}. Please specify a valid bounding box as a list of 4 elements (min_lon, min_lat, max_lon, max_lat).")
+    
+    if not(-180 <= geo_bbox[0] <= 180 and -90 <= geo_bbox[1] <= 90 and -180 <= geo_bbox[2] <= 180 and -90 <= geo_bbox[3] <= 90):
+        raise ValueError(f"Invalid bounding box: {geo_bbox}. Please specify a valid bounding box in lat and lon as a list of 4 elements (min_lon, min_lat, max_lon, max_lat).")
+    
+    if not(isinstance(geo_bbox, np.ndarray)):
+        geo_bbox = np.array(geo_bbox)
+           
+    utm_crs_list = pyproj.database.query_utm_crs_info(
+        datum_name="WGS 84",
+        area_of_interest=pyproj.aoi.AreaOfInterest(
+            west_lon_degree=geo_bbox[0],
+            south_lat_degree=geo_bbox[1],
+            east_lon_degree=geo_bbox[2],
+            north_lat_degree=geo_bbox[3]
+        ),
+    )
+
+    if not utm_crs_list:
+        raise ValueError(f"Unable to find a suitable UTM CRS for the bounding box: {geo_bbox}")
+    
+    if len(utm_crs_list) > 1:
+        warnings.warn(f"Multiple UTM CRS found for the bounding box: {geo_bbox}. Using the first one: {utm_crs_list[0].code}")
+
+    utm_epsg_code = utm_crs_list[0].code
+    if isinstance(utm_epsg_code, str):
+        utm_epsg_code = int(utm_epsg_code)
+    if not isinstance(utm_epsg_code, int):
+        print(type(utm_epsg_code))  # This will raise an error if utm_epsg_code is not an integer
+        raise ValueError(f"Invalid UTM EPSG code: {utm_epsg_code}. Expected an integer value.")
+    return utm_epsg_code
+
+#%% # Function to get the projected crs from a bounding box
+def get_projected_crs_from_bbox(geo_bbox: list | np.ndarray) -> rasterio.crs.CRS:
+    """ 
+    Get the projected coordinate reference system (CRS) from a bounding box.
+
+    Args:
+        geo_bbox (list): The bounding box coordinates, in longitude and latitude as a list of 4 elements (min_lon, min_lat, max_lon, max_lat).
+
+    Returns:
+        rasterio.crs.CRS: The projected CRS object.
+    """
+    epsg_code = get_projected_epsg_code_from_bbox(geo_bbox)
+
+    utm_crs = rasterio.crs.CRS.from_epsg(epsg_code)
+    if not utm_crs.is_projected:
+        raise ValueError('The auto-generated UTM CRS is not projected!')
+    return utm_crs
+
+# %%

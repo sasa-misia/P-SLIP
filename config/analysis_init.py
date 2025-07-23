@@ -200,8 +200,9 @@ def _import_corrected_name(lib: str) -> str:
         # If it fails, try manual mapping (add only special cases here)
         corrected_name = lib.split('.')[0]
         mapping = {
-            "scikit-image": "skimage",
+            "scikit-image": "skimage", # first the library name, then the import name
             "scikit-learn": "sklearn",
+            "gdal": "osgeo"
         }
         if corrected_name in mapping:
             importlib.import_module(mapping[corrected_name])
@@ -360,23 +361,27 @@ def _check_inputs_csv(inp_csv_path: str) -> bool:
     if missing_cols:
         logger.error(f"File {RAW_INPUT_FILENAME} is missing required columns: {missing_cols}")
         raise ValueError(f"The file {RAW_INPUT_FILENAME} does not contain the required columns: {missing_cols}")
-
-    # Identify rows where the file is not internal (i.e., external files)
-    external_mask = ~input_files_df.apply(
-        lambda row: parse_csv_internal_path_field(row['internal'], row['path'], inp_csv_base_dir), axis=1
-    )
-
-    # Warn if any external files are found
-    if external_mask.any():
-        external_paths = input_files_df.loc[external_mask, 'path'].tolist()
-        logger.warning(
-            f"Some input files are external to the 'inputs' folder: {external_paths}\n"
-            f"You must check the paths of these files in {RAW_INPUT_FILENAME}, and update them, if the path is not correct."
-        )
-        return False
-    else:
-        logger.info(f"All input files of {RAW_INPUT_FILENAME} are internal to the 'inputs' folder.")
+    
+    if input_files_df.empty:
+        logger.info(f"The input files CSV {RAW_INPUT_FILENAME} is empty. No input files to check.")
         return True
+    else:
+        # Identify rows where the file is not internal (i.e., external files)
+        external_mask = ~input_files_df.apply(
+            lambda row: parse_csv_internal_path_field(row['internal'], row['path'], inp_csv_base_dir), axis=1
+        )
+
+        # Warn if any external files are found
+        if external_mask.any():
+            external_paths = input_files_df.loc[external_mask, 'path'].tolist()
+            logger.warning(
+                f"Some input files are external to the 'inputs' folder: {external_paths}\n"
+                f"You must check the paths of these files in {RAW_INPUT_FILENAME}, and update them, if the path is not correct."
+            )
+            return False
+        else:
+            logger.info(f"All input files of {RAW_INPUT_FILENAME} are internal to the 'inputs' folder.")
+            return True
 
 def _create_folder_structure(base_dir: str, case_name: str) -> AnalysisEnvironment:
     """

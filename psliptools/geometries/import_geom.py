@@ -19,12 +19,13 @@ def check_and_fix_geometries(shape_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     Returns:
         gpd.GeoDataFrame: The GeoDataFrame with fixed geometries.
     """
-    invalid_mask = ~shape_gdf.geometry.is_valid
+    out_shape_gdf = shape_gdf.copy()
+    invalid_mask = ~out_shape_gdf.geometry.is_valid
     n_invalid = invalid_mask.sum()
     if n_invalid > 0:
         warnings.warn(f"{n_invalid} invalid geometries found and fixed using buffer(0).", UserWarning)
-        shape_gdf.loc[invalid_mask, 'geometry'] = shape_gdf.loc[invalid_mask, 'geometry'].buffer(0)
-    return shape_gdf
+        out_shape_gdf.loc[invalid_mask, 'geometry'] = out_shape_gdf.loc[invalid_mask, 'geometry'].buffer(0)
+    return out_shape_gdf
 
 #%% # Function to convert a GeoDataFrame to EPSG:4326 (WGS84)
 def convert_gdf_to_geo(shape_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:

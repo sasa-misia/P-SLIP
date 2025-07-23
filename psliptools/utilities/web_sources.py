@@ -8,7 +8,7 @@ import requests
 def download_wms_raster(
         url: str, 
         out_path: str, 
-        out_epsg: str="4326", 
+        out_epsg: int=4326, 
         bbox: list=None, 
         width: int=4096, 
         height: int=4096
@@ -32,7 +32,7 @@ def download_wms_raster(
         "VERSION": "1.3.0",
         "REQUEST": "GetMap",
         "FORMAT": "format=image/geotiff",
-        "SRS": "EPSG:" + out_epsg,  # WGS 84 standard in lat/lon
+        "SRS": "EPSG:" + str(out_epsg),  # WGS 84 standard in lat/lon
         "BBOX": (-180, -90, 180, 90),
         "WIDTH": width,
         "HEIGHT": height,
