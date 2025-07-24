@@ -38,8 +38,8 @@ def load_georaster(
     if convert_to_geo:
         ref_grid_x, ref_grid_y, raster_profile = convert_grids_and_profile_to_geo(
             crs_in=raster_profile['crs'].to_epsg(),
-            in_coords_x=ref_grid_x,
-            in_coords_y=ref_grid_y,
+            in_grid_x=ref_grid_x,
+            in_grid_y=ref_grid_y,
             profile=raster_profile
         )
 

@@ -150,4 +150,21 @@ def get_projected_crs_from_bbox(geo_bbox: list | np.ndarray) -> rasterio.crs.CRS
         raise ValueError('The auto-generated UTM CRS is not projected!')
     return utm_crs
 
-# %%
+#%% # Check if arrays contain geographic coordinates
+def is_geographic_coords(lon: np.ndarray, lat: np.ndarray) -> bool:
+    """
+    Check if arrays contain geographic coordinates.
+
+    Args:
+        lon (np.ndarray): Array of longitude coordinates.
+        lat (np.ndarray): Array of latitude coordinates.
+
+    Returns:
+        bool: True if the arrays contain geographic coordinates, False otherwise.
+    """
+    if not isinstance(lon, np.ndarray) or not isinstance(lat, np.ndarray):
+        lon = np.array(lon)
+        lat = np.array(lat)
+    return np.all(lon >= -180) and np.all(lon <= 180) and np.all(lat >= -90) and np.all(lat <= 90)
+
+#%%

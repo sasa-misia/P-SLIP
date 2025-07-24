@@ -141,9 +141,9 @@ def add_row_to_csv(
         path_to_add = os.path.relpath(path_to_add, csv_base_dir)
 
     # Check if the row already exists
-    row_matches = csv_df["type"] == path_type # Logical
+    row_matches = csv_df["type"] == path_type # Logical array
     if path_subtype:
-        row_matches = row_matches and any(csv_df["subtype"] == path_subtype)
+        row_matches = row_matches & (csv_df["subtype"] == path_subtype) # Not and but & because it is a logical array and not a scalar!
     
     row_index = csv_df[row_matches].index
 

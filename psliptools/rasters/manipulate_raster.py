@@ -4,7 +4,7 @@ import pyproj
 import rasterio
 import rasterio.warp
 import warnings
-from .info_raster import get_xy_grids_from_profile, get_projected_crs_from_bbox
+from .info_raster import get_xy_grids_from_profile, get_projected_crs_from_bbox, is_geographic_coords
 
 #%% # Function to create bounding box from coordinates
 def create_bbox(
@@ -78,6 +78,7 @@ def create_grid_from_bbox(
             'width': int(resolution[0]),
             'height': int(resolution[1]),
             'blockxsize': int(resolution[0]),
+            'blockysize': 1,
             'transform': rasterio.transform.from_bounds(*bbox, resolution[0], resolution[1]),
             'crs': None,
             'nodata': None,
@@ -183,8 +184,8 @@ def transformer_from_grids(
 #%% # Function to convert grids and profile to EPSG:4326 (WGS84)
 def convert_grids_and_profile_to_geo(
         crs_in: int, 
-        in_coords_x: np.ndarray, 
-        in_coords_y: np.ndarray, 
+        in_grid_x: np.ndarray, 
+        in_grid_y: np.ndarray, 
         profile: dict
     ) -> tuple[np.ndarray, np.ndarray, dict]:
     """
@@ -192,8 +193,8 @@ def convert_grids_and_profile_to_geo(
 
     Args:
         crs_in (int): The EPSG code of the input coordinate reference system.
-        in_coords_x (np.ndarray): Array of x coordinates.
-        in_coords_y (np.ndarray): Array of y coordinates.
+        in_grid_x (np.ndarray): Grid (matrix) of x coordinates.
+        in_grid_y (np.ndarray): Grid (matrix) of y coordinates.
         profile (dict): A dictionary containing the raster profile.
 
     Returns:
@@ -201,8 +202,8 @@ def convert_grids_and_profile_to_geo(
     """
     out_lons, out_lats = convert_coords_to_geo(
         crs_in=crs_in,
-        in_coords_x=in_coords_x,
-        in_coords_y=in_coords_y
+        in_coords_x=in_grid_x,
+        in_coords_y=in_grid_y
     )
     #  ===== Not correct in case of b and d not zero
     # new_bbox = create_bbox(ref_grid_x, ref_grid_y)
@@ -217,6 +218,63 @@ def convert_grids_and_profile_to_geo(
     out_profile['crs'] = rasterio.crs.CRS.from_epsg(4326)
     return out_lons, out_lats, out_profile
 
+#%% # Function to convert grids and profile to projected crs
+def convert_grids_and_profile_to_prj(
+        in_grid_lon: np.ndarray, 
+        in_grid_lat: np.ndarray, 
+        profile: dict=None,
+        crs_out: int=None
+    ) -> tuple[np.ndarray, np.ndarray, dict]:
+    """
+    Convert grids and profile to the desired or nearest projected coordinate reference system.
+
+    Args:
+        in_grid_lon (np.ndarray): Array of longitude coordinates.
+        in_grid_lat (np.ndarray): Array of latitude coordinates.
+        profile (dict): A dictionary containing the raster profile.
+        crs_out (int, optional): The EPSG code of the projected output coordinate reference system (default: None).
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, dict]: Tuple containing the converted projected x and y grids, and the converted raster profile.
+    """
+    if not is_geographic_coords(in_grid_lon, in_grid_lat):
+        raise ValueError('in_grid_lon and in_grid_lat must be geographic coordinates!')
+    
+    if crs_out is None:
+        bbox_geo = create_bbox(in_grid_lon, in_grid_lat)
+        crs_out_obj = get_projected_crs_from_bbox(bbox_geo)
+    elif isinstance(crs_out, int):
+        crs_out_obj = rasterio.crs.CRS.from_epsg(crs_out)
+        if not crs_out_obj.is_projected:
+            raise ValueError(f'The EPSG code {crs_out} is not a projected coordinate reference system!')
+    else:
+        raise ValueError('crs_out must be an integer or None!')
+    
+    out_coords_x, out_coords_y = convert_coords(
+        crs_in=4326,
+        crs_out=crs_out_obj.to_epsg(),
+        in_coords_x=in_grid_lon,
+        in_coords_y=in_grid_lat
+    )
+
+    if profile:
+        out_profile = profile.copy() # Copy the profile to avoid modifying the original
+    else:
+        out_profile = {
+            'width': int(out_coords_x.shape[1]),
+            'height': int(out_coords_x.shape[0]),
+            'blockxsize': int(out_coords_x.shape[1]),
+            'blockysize': 1,
+            'transform': None,
+            'crs': None,
+            'nodata': None,
+            'dtype': None,
+            'count': None,
+        }
+    
+    out_profile['transform'] = transformer_from_grids(out_coords_x, out_coords_y)
+    out_profile['crs'] = crs_out_obj
+    return out_coords_x, out_coords_y, out_profile
 
 #%% # Function to replace values in a raster
 def replace_values(raster: np.ndarray, old_value: np.ndarray, new_value: np.ndarray) -> np.ndarray:
@@ -316,4 +374,4 @@ def resample_raster(in_raster: np.ndarray, in_profile: dict, in_grid_x: np.ndarr
     )
     return out_raster, out_profile, out_grid_x, out_grid_y
 
-# %%
+#%%

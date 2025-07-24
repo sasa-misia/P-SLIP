@@ -1,4 +1,4 @@
-#%% # Import necessary modules
+#%% === Import necessary modules
 import os
 import shapely.ops as ops
 import pandas as pd
@@ -30,13 +30,13 @@ from psliptools.geometries import (
     get_shapefile_field_values
 )
 
-#%% Set up logging configuration
+#%% === Set up logging configuration
 # This will log messages to the console and can be modified to log to a file if needed
 logging.basicConfig(level=logging.INFO,
                     format=LOG_CONFIG['format'], 
                     datefmt=LOG_CONFIG['date_format'])
 
-#%% # Define study area functions
+#%% === Study Area methods
 def define_study_area_from_shapefile(shapefile_path, id_field, id_selection, clip_polygons=None):
     """Define study area from a shapefile, optionally clipping with custom polygons."""
     if not os.path.exists(shapefile_path):
@@ -76,7 +76,7 @@ def define_study_area_from_rectangles(rectangle_polygons):
     }
     return study_area_vars
 
-#%% # Main function to define the study area
+#%% === Main function to define the study area
 def main(gui_mode=False, base_dir=None) -> Dict[str, object]:
     """Main function to define the study area."""
     src_type = 'study_area'

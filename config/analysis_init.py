@@ -128,6 +128,9 @@ class AnalysisEnvironment:
         
         for idx, row in inp_files_df.iterrows():
             # Parse the internal path field to get the correct file(s) path
+            if parse_csv_internal_path_field(row['internal'], row['path'], inp_csv_path):
+                logger.info(f"File {row['path']} already exists in the input directory. Skipping copy.")
+                continue
             if multi_extension:
                 # If multi_extension is True, we need to find all files with the same basename
                 file_basename_no_ext = os.path.splitext(os.path.basename(row['path']))[0] # Also with multiple ".", splitext will split just the last "."

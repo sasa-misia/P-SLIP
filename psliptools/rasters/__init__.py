@@ -12,7 +12,8 @@ from .info_raster import (
     get_georaster_info,
     get_xy_grids_from_profile,
     get_projected_epsg_code_from_bbox,
-    get_projected_crs_from_bbox
+    get_projected_crs_from_bbox,
+    is_geographic_coords
 )
 
 from .manipulate_raster import (
@@ -27,9 +28,10 @@ from .manipulate_raster import (
     resample_raster
 )
 
-from .show_raster import (
-    show_elevation_isometric,
-    show_elevation_3d
+from .plot_raster import (
+    plot_elevation_2d,
+    plot_elevation_isometric,
+    plot_elevation_3d
 )
 
 __all__ = [
@@ -38,6 +40,7 @@ __all__ = [
     "get_xy_grids_from_profile",
     "get_projected_epsg_code_from_bbox",
     "get_projected_crs_from_bbox",
+    "is_geographic_coords",
     "create_bbox",
     "create_grid_from_bbox",
     "convert_coords",
@@ -47,6 +50,7 @@ __all__ = [
     "convert_bbox",
     "replace_values",
     "resample_raster",
-    "show_elevation_isometric",
-    "show_elevation_3d"
+    "plot_elevation_2d",
+    "plot_elevation_isometric",
+    "plot_elevation_3d"
 ]
