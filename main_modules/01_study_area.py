@@ -1,4 +1,4 @@
-#%% === Import necessary modules
+# %% === Import necessary modules
 import os
 import shapely.ops as ops
 import pandas as pd
@@ -11,10 +11,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    AnalysisEnvironment,
-    get_analysis_environment,
-    add_input_file,
-    save_variable, 
     LOG_CONFIG
 )
 
@@ -30,13 +26,15 @@ from psliptools.geometries import (
     get_shapefile_field_values
 )
 
-#%% === Set up logging configuration
+from env_init import get_or_create_analysis_environment
+
+# %% === Set up logging configuration
 # This will log messages to the console and can be modified to log to a file if needed
 logging.basicConfig(level=logging.INFO,
                     format=LOG_CONFIG['format'], 
                     datefmt=LOG_CONFIG['date_format'])
 
-#%% === Study Area methods
+# %% === Study Area methods
 def define_study_area_from_shapefile(shapefile_path, id_field, id_selection, clip_polygons=None):
     """Define study area from a shapefile, optionally clipping with custom polygons."""
     if not os.path.exists(shapefile_path):
@@ -76,23 +74,24 @@ def define_study_area_from_rectangles(rectangle_polygons):
     }
     return study_area_vars
 
-#%% === Main function to define the study area
-def main(gui_mode=False, base_dir=None) -> Dict[str, object]:
+# %% === Main function to define the study area
+def main(gui_mode: bool=False, base_dir: str=None) -> Dict[str, object]:
     """Main function to define the study area."""
     src_type = 'study_area'
+
+    # Get the analysis environment
+    env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=True)
 
     # --- User choices section ---
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
-        if base_dir is None:
-            base_dir = input(f"Enter the base directory for the analysis (or press Enter to use the current directory {os.getcwd()}): ").strip(' "')
-            if not base_dir:
-                base_dir = os.getcwd()
         use_window = input("Define study area using rectangles? [y/N]: ").strip().lower() == "y"
         if not(use_window):
             src_mode = 'shapefile'
             src_path = input("Study area shapefile name (e.g. study_area.shp) or full path: ").strip(' "')
+            if not os.path.isabs(src_path):
+                src_path = os.path.join(env.folders['inputs']['study_area']['path'], src_path)
 
             shp_fields, shp_types = get_shapefile_fields(src_path)
             print("Shapefile fields and types:")
@@ -115,38 +114,38 @@ def main(gui_mode=False, base_dir=None) -> Dict[str, object]:
             cls_sel = None
             n_rectangles = int(input("How many rectangles? [1]: ") or "1")
             rec_polys = create_rectangle_polygons(get_rectangle_parameters(n_rectangles))
-    
-    # Get the analysis environment
-    env, _ = get_analysis_environment(base_dir=base_dir)
 
     # --- Step 1: Study area definition ---
     if use_window:
         study_area_vars = define_study_area_from_rectangles(rec_polys)
     else:
         # If you want to clip with rectangles, pass rectangle_polygons as clip_polygons
-        _, cust_id = add_input_file(env, file_path=src_path, file_type='study_area')
+        _, cust_id = env.add_input_file(file_path=src_path, file_type='study_area')
         study_area_vars = define_study_area_from_shapefile(
             shapefile_path=src_path, 
             id_field=cls_fld, 
             id_selection=cls_sel
         )
 
-    env.config['inputs'][src_type]['1']['settings'] = {
+    env.config['inputs'][src_type][0]['settings'] = {
         'source_mode': src_mode,
         'source_field': cls_fld,
         'source_selection': cls_sel
     }
-    env.config['inputs'][src_type]['1']['custom_id'] = [cust_id]
+    env.config['inputs'][src_type][0]['custom_id'] = [cust_id]
     env.collect_input_files(file_type=[src_type], multi_extension=True)
     
-    save_variable(analysis_env=env, variable_to_save=study_area_vars, filename="study_area_vars.pkl")
+    env.save_variable(variable_to_save=study_area_vars, variable_filename="study_area_vars.pkl")
     return study_area_vars
 
+ # %% === Command line interface
 if __name__ == "__main__":
     # Command line interface
     parser = argparse.ArgumentParser(description="Define the study area for the analysis.")
     parser.add_argument('--base_dir', type=str, default=None, help="Base directory for the analysis.")
+    parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
     args = parser.parse_args()
 
-    study_area_vars = main(base_dir=args.base_dir, gui_mode=False)
+    study_area_vars = main(base_dir=args.base_dir, gui_mode=args.gui_mode)
+
 # %%

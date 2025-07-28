@@ -10,7 +10,6 @@ from .default_params import (
     ENVIRONMENT_FILENAME,
     GENERIC_INPUT_TYPE,
     ANALYSIS_FOLDER_STRUCTURE,
-    ANALYSIS_FOLDER_ATTRIBUTE_MAPPER,
     DEFAULT_PLOT_CONFIG,
     LOG_CONFIG,
     RAW_INPUT_FILENAME,
@@ -19,13 +18,15 @@ from .default_params import (
     ANALYSIS_CONFIGURATION
 )
 
+from .version_writer import (
+    get_app_version,
+    write_app_version_to_file
+)
+
 from .analysis_init import (
     AnalysisEnvironment,
     create_analysis_environment,
     get_analysis_environment,
-    add_input_file,
-    save_variable,
-    load_variable
 )
 
 __all__ = [
@@ -43,7 +44,6 @@ __all__ = [
     'AnalysisEnvironment',
     'create_analysis_environment',
     'get_analysis_environment',
-    'add_input_file',
-    'save_variable',
-    'load_variable'
+    'get_app_version',
+    'write_app_version_to_file'
 ]

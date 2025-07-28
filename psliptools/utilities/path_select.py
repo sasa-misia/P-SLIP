@@ -37,6 +37,7 @@ def file_selector(base_dir: str, src_ext: str=None) -> list[str]:
             "Enter the number of the file you want to select" \
             +" (also multiple, comma or semicolon separated): "
         ).replace(',', ';').split(';')
+        if x.strip(' "')
     ]
     if not files_sel:
         files_sel = [str(i) for i in range(1, len(files)+1)]

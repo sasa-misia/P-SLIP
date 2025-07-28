@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import warnings
 import mayavi.mlab as mlab
-from .manipulate_raster import convert_grids_and_profile_to_prj
+from .coordinates import convert_grids_and_profile_to_prj
 
 #%% # Function to create a fake base grid
 def _create_fake_base_grid(

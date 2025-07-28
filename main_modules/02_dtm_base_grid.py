@@ -4,19 +4,19 @@ import pandas as pd
 import sys
 import argparse
 import logging
+import shapely
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    get_analysis_environment,
-    add_input_file,
-    save_variable,
-    load_variable,
+    AnalysisEnvironment,
     LOG_CONFIG
 )
 
 from psliptools import file_selector, load_georaster, convert_coords_to_geo, resample_raster, plot_elevation_3d
+
+from env_init import get_or_create_analysis_environment
 
 #%% === Set up logging configuration
 # This will log messages to the console and can be modified to log to a file if needed
@@ -27,18 +27,26 @@ logging.basicConfig(level=logging.INFO,
 #%% === DEM and Analysis Base Grid (ABG) methods
 # Read and import DTM files in a dataframe
 def import_dtm_files(
-        env, 
-        file_type, 
+        env: AnalysisEnvironment,
+        file_type: str, 
         files_path: list[str], 
         resample_size: tuple[int, int]=None, 
-        resample_method: str='average'
+        resample_method: str='average',
+        poly_mask_load_geo: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
     dtm_data = [] # Initializing an empty list
     abg_data = [] # Initializing an empty list
     cust_id = []
     for idx, dtm_path in enumerate(files_path):
-        _, curr_cust_id = add_input_file(env, file_path=dtm_path, file_type=file_type, file_subtype=f'dtm{idx+1}')
-        raster_data, raster_profile, raster_x, raster_y = load_georaster(filepath=dtm_path, set_dtype='float32', convert_to_geo=False)
+        raster_data, raster_profile, raster_x, raster_y = load_georaster(
+            filepath=dtm_path, 
+            set_dtype='float32', 
+            convert_to_geo=False, 
+            poly_mask_load_geo=poly_mask_load_geo
+        )
+        if raster_data is None: # No pixels inside poly_load_mask_geo
+            continue
+        _, curr_cust_id = env.add_input_file(file_path=dtm_path, file_type=file_type, file_subtype=f'dtm{idx+1}')
         if resample_size:
             raster_data, raster_profile, raster_x, raster_y = resample_raster(
                 in_raster=raster_data, 
@@ -91,45 +99,39 @@ def import_dtm_files(
 def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resample_method: str='average'):
     """Main function to define the base grid."""
     src_type = 'dtm'
-
-    # --- User choices section ---
-    if gui_mode:
-        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
-    else:
-        if base_dir is None:
-            base_dir = input(f"Enter the base directory for the analysis (or press Enter to use the current directory {os.getcwd()}): ").strip(' "')
-            if not base_dir:
-                base_dir = os.getcwd()
     
     # Get the analysis environment
-    env, _ = get_analysis_environment(base_dir=base_dir)
+    env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
+
+    study_area_polygon = env.load_variable(variable_filename='study_area_vars.pkl')['study_area_polygon']
 
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
-        dtm_fold = input(f"Enter the folder name where the DTM files are stored (default: {env.inp_dir['dtm']['path']}): ").strip(' "')
+        dtm_fold = input(f"Enter the folder name where the DTM files are stored (default: {env.folders['inputs']['dtm']['path']}): ").strip(' "')
         if not dtm_fold:
-            dtm_fold = env.inp_dir['dtm']['path']
+            dtm_fold = env.folders['inputs']['dtm']['path']
 
         dtm_paths = file_selector(base_dir=dtm_fold, src_ext=['tif', '.tiff'])
     
-    dtm_df, abg_df, cust_id = import_dtm_files(env, src_type, dtm_paths, resample_size=resample_size, resample_method=resample_method)
+    dtm_df, abg_df, cust_id = import_dtm_files(env, src_type, dtm_paths, resample_size=resample_size, resample_method=resample_method, poly_mask_load_geo=study_area_polygon)
 
     dtm_abg_vars = {'dtm': dtm_df, 'abg': abg_df}
 
-    env.config['inputs'][src_type]['1']['settings'] = {
+    env.config['inputs'][src_type][0]['settings'] = {
         'resample_size': resample_size, # None or (x, y)
         'resample_method': resample_method
     }
-    env.config['inputs'][src_type]['1']['custom_id'] = [cust_id]
+    env.config['inputs'][src_type][0]['custom_id'] = [cust_id]
     env.collect_input_files(file_type=[src_type], multi_extension=True)
     
-    save_variable(analysis_env=env, variable_to_save=dtm_abg_vars, filename="dtm_abg_vars.pkl")
+    env.save_variable(variable_to_save=dtm_abg_vars, variable_filename="dtm_abg_vars.pkl")
 
     # Check-plot
     plot_elevation_3d(dtm_df['raster_data'], abg_df['raster_lon'], abg_df['raster_lat'], projected=True)
     return dtm_abg_vars
 
+# %% === Command line interface
 if __name__ == '__main__':
     # Command line interface
     parser = argparse.ArgumentParser(description="Define the base grid for the analysis, importing the DEM.")

@@ -7,30 +7,33 @@ Module for creating the folder structure for the analysis.
 
 #%% Import necessary modules
 import os
+import numpy as np
 import platform
 import importlib
-import warnings
 import json
 import logging
 import pandas as pd
 import copy
 import pickle
 from pathlib import Path
-from dataclasses import dataclass, asdict, field
-from typing import Dict, Any, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional, Tuple
 import shutil
 
 # Import default configuration
-from config import (
+from .default_params import (
     RAW_INPUT_FILENAME,
     RAW_INPUT_CSV_COLUMNS,
     ENVIRONMENT_FILENAME,
     GENERIC_INPUT_TYPE,
     ANALYSIS_FOLDER_STRUCTURE,
-    ANALYSIS_FOLDER_ATTRIBUTE_MAPPER,
     LIBRARIES_CONFIG,
     DEFAULT_CASE_NAME,
-    ANALYSIS_CONFIGURATION
+    ANALYSIS_CONFIGURATION,
+)
+
+from .version_writer import (
+    get_app_version
 )
 
 # Import utility functions
@@ -43,25 +46,25 @@ class AnalysisEnvironment:
 
     # Metadata
     case_name: str
-    user: str
-    os_separator: str
+    user: str = 'unknown'  # Default user if not specified
+    app_version: str = 'unknown' # Placeholder for the application version
+    user_platform: str = field(default_factory=lambda: platform.system())
+    path_separator: str = os.path.sep
     creation_time: str = field(default_factory=lambda: pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
-    base_dir: Dict[str, str] = field(default_factory=lambda: {'path': os.getcwd()})
+    folders: dict = field(default_factory=lambda: {})
     config: dict = field(default_factory=lambda: copy.deepcopy(ANALYSIS_CONFIGURATION))
 
+    # Dynamic attributes can be added later
     def __post_init__(self):
-        # Dynamically ensure all folder attributes exist and are dicts
-        for key, attr in ANALYSIS_FOLDER_ATTRIBUTE_MAPPER.items():
-            if not hasattr(self, attr) or getattr(self, attr) is None:
-                setattr(self, attr, {})
-            elif not isinstance(getattr(self, attr), dict):
-                setattr(self, attr, {})
+        # Ensure folders is always a dict (deepcopy for safety)
+        if not hasattr(self, 'folders') or self.folders is None or not isinstance(self.folders, dict):
+            self.folders = {}
+        self.folders['base'] = {'path': os.getcwd()}  # Set the base path to the current working directory
         # Ensure config is always a dict (deepcopy for safety)
-        if not hasattr(self, 'config') or self.config is None:
-            self.config = copy.deepcopy(ANALYSIS_CONFIGURATION)
-        elif not isinstance(self.config, dict):
+        if not hasattr(self, 'config') or self.config is None or not isinstance(self.config, dict):
             self.config = copy.deepcopy(ANALYSIS_CONFIGURATION)
 
+    # Function to save the environment to a JSON file
     def to_json(self, file_path: str) -> None:
         """
         Save the environment to a JSON file, including dynamic attributes.
@@ -71,6 +74,175 @@ class AnalysisEnvironment:
         """
         with open(file_path, 'w') as f:
             json.dump(self.__dict__, f, indent=4)
+    
+    # Function to add an input file to the RAW_INPUT_FILENAME
+    def add_input_file(
+            self, 
+            file_path: str,
+            file_type: str,
+            file_subtype: Optional[str] = None,
+            force_add: bool = True,
+            ) -> tuple[bool, str]:
+        """
+        Add a new input file to the analysis environment and row in the input files CSV.
+
+        Args:
+            analysis_env (AnalysisEnvironment): The analysis environment object.
+            file_path (str): Path to the input file to be added.
+            file_type (str): Type of the input file (e.g., 'shapefile', 'raster', etc.).
+            file_subtype (str, optional): Subtype of the input file (e.g., 'recording', 'forecast', etc.).
+            force_add (bool, optional): If True, will overwrite the existing row if it exists (defaults to True).
+
+        Returns:
+            bool: True if the file was added successfully, False if it already exists and duplicates are not allowed.
+            str: The new ID of the added row.
+        """
+        logger = logging.getLogger(__name__)
+        logger.info(f"Adding input file: {file_path} of type {file_type}")
+        
+        inp_csv_path = os.path.join(self.folders['inputs']['path'], RAW_INPUT_FILENAME)
+        
+        # Check if the input file already exists in the input files CSV
+        entry_already_exists = check_raw_path(
+            csv_path=inp_csv_path, 
+            type=file_type,
+            subtype=file_subtype
+        )
+
+        row_added, new_id = add_row_to_csv(
+                csv_path=inp_csv_path, 
+                path_to_add=file_path, 
+                path_type=file_type, 
+                path_subtype=file_subtype,
+                force_rewrite=force_add
+            )
+
+        if row_added:
+            if entry_already_exists:
+                logger.warning(f"File {file_path} might already exist in the input files CSV, but it was added/overwritten anyway.")
+            else:
+                logger.info(f"File {file_path} added to the input files CSV.")
+        else:
+            logger.info(f"File {file_path} not added in the input files CSV.")
+        return (row_added, new_id)
+    
+    # Functions to save a v
+    def save_variable(
+            self, 
+            variable_to_save: Dict[str, Any], 
+            variable_filename: str,
+            environment_filename: str = ENVIRONMENT_FILENAME,
+        ) -> None:
+        """
+        saves variables in a pickle file and updates the config dictionary in the environment.
+        
+        Args:
+            variable_to_save (Dict[str, Any]): Dictionary containing the variables to save.
+            variable_filename (str): Name of the file to save the variables (must end with '.pkl').
+            environment_filename (str): Name of the environment file to update (default is ENVIRONMENT_FILENAME).
+        
+        Raises:
+            TypeError: If variable_to_save is not a dictionary.
+            FileNotFoundError: If the var_dir directory does not exist.
+            IOError: If there is an error during file saving.
+        """
+        logger = logging.getLogger(__name__)
+        logger.info(f"Start saving variable: {variable_filename}")
+
+        if os.path.isabs(variable_filename):
+            variable_filename = os.path.basename(variable_filename)
+            logger.warning("filename was provided as an absolute path, converted to filename only.")
+        
+        # Verify that variable_to_save is a dictionary
+        if not isinstance(variable_to_save, dict):
+            logger.error(f"variable_to_save must be a dictionary, received: {type(variable_to_save)}")
+            raise TypeError(f"variable_to_save must be a dictionary, received: {type(variable_to_save)}")
+        
+        # Verify that var_dir exists
+        var_dir_path = self.folders['variables']['path']
+        if not os.path.exists(var_dir_path):
+            logger.error(f"var_dir directory not found: {var_dir_path}")
+            raise FileNotFoundError(f"var_dir directory not found: {var_dir_path}")
+        
+        # Construct the full file path
+        file_path = os.path.join(var_dir_path, variable_filename)
+        
+        # Save the variable to a pickle file
+        try:
+            with open(file_path, 'wb') as f:
+                pickle.dump(variable_to_save, f)
+            logger.info(f"Variables saved successfully in: {file_path}")
+        except Exception as e:
+            logger.error(f"Error during file saving {file_path}: {e}")
+            raise IOError(f"Error during file saving {file_path}: {e}")
+        
+        # Update env.config[filename]
+        variable_keys = list(variable_to_save.keys())
+        self.config['variables'][variable_filename] = variable_keys
+
+        if os.path.isabs(environment_filename):
+            environment_filename = os.path.basename(environment_filename)
+            logger.warning("environment_filename was provided as an absolute path, converted to filename only.")
+        env_file_path = os.path.join(self.folders['base']['path'], environment_filename)
+        self.to_json(env_file_path)
+
+        logger.info(f"Updated env.config['{variable_filename}'] with {len(variable_keys)} variables")
+
+    def load_variable(
+            self,
+            variable_filename: str,
+        ) -> Dict[str, Any]:
+        """
+        Load variables from a pickle file and return them as a dictionary.
+        
+        Args:
+            variable_filename (str): name of the file to load, must end with '.pkl' (e.g., 'study_area_vars.pkl').
+        
+        Returns:
+            Dict[str, Any]: dictionary containing the loaded variables.
+        
+        Raises:
+            KeyError: if the variable_filename is not found in env.config['variables'].
+            FileNotFoundError: if the file does not exist in the variables directory.
+            IOError: if there is an error loading the file.
+        """
+        logger = logging.getLogger(__name__)
+        logger.info(f"Start loading variables from {variable_filename}")
+
+        if os.path.isabs(variable_filename):
+            variable_filename = os.path.basename(variable_filename)
+            logger.warning("variable_filename was provided as an absolute path, converted to filename only.")
+        
+        # Verify that variable_filename is a valid key in env.config['variables']
+        available_files = list(self.config['variables'].keys())
+        if variable_filename not in available_files:
+            logger.error(f"File '{variable_filename}' not found in env.config['variables']. "
+                        f"Available files: {available_files}")
+            raise KeyError(f"File '{variable_filename}' not found in env.config['variables']. "
+                        f"Available files: {available_files}")
+        
+        # Construct the full file path
+        var_dir_path = self.folders['variables']['path']
+        file_path = os.path.join(var_dir_path, variable_filename)
+        
+        # Verify that the file exists
+        if not os.path.exists(file_path):
+            logger.error(f"File does not exist: {file_path}")
+            raise FileNotFoundError(f"File does not exist: {file_path}")
+        
+        # Load the variable from the pickle file
+        logger.info(f"Loading variables from: {file_path}")
+        try:
+            with open(file_path, 'rb') as f:
+                variable_data = pickle.load(f)
+            logger.info(f"Variables loaded successfully from: {file_path}")
+            if not isinstance(variable_data, dict):
+                logger.error(f"Loaded data from {file_path} is not a dictionary: {type(variable_data)}")
+                raise TypeError(f"Loaded data from {file_path} is not a dictionary: {type(variable_data)}")
+            return variable_data
+        except Exception as e:
+            logger.error(f"Error loading file {file_path}: {e}")
+            raise IOError(f"Error loading file {file_path}: {e}")
     
     def collect_input_files(
             self,
@@ -94,7 +266,7 @@ class AnalysisEnvironment:
         logger = logging.getLogger(__name__)
         logger.info("Collecting input files from the input files CSV and copying them to the input directory...")
 
-        input_dir = self.inp_dir['path']
+        input_dir = self.folders['inputs']['path']
         inp_csv_path = os.path.join(input_dir, RAW_INPUT_FILENAME)
         if not os.path.exists(inp_csv_path):
             logger.error(f"Input files CSV not found at {inp_csv_path}. Please create it first.")
@@ -112,21 +284,25 @@ class AnalysisEnvironment:
                 logger.error("file_type and file_subtype cannot be used with file_custom_id.")
                 raise ValueError("file_type and file_subtype cannot be used with file_custom_id.")
             
-            inp_files_df = inp_files_df[inp_files_df['custom_id'].isin(file_custom_id)]
+            df_filter = inp_files_df['custom_id'].isin(file_custom_id)
         else:
+            df_filter = np.ones(len(inp_files_df), dtype=bool)
+
             if file_type is not None:
                 if not isinstance(file_type, list):
                     logger.error("file_type must be a list of strings.")
                     raise TypeError("file_type must be a list of strings.")
-                inp_files_df = inp_files_df[inp_files_df['type'].isin(file_type)]
+                df_filter = df_filter & inp_files_df['type'].isin(file_type)
             
             if file_subtype is not None:
                 if not isinstance(file_subtype, list):
                     logger.error("file_subtype must be a list of strings.")
                     raise TypeError("file_subtype must be a list of strings.")
-                inp_files_df = inp_files_df[inp_files_df['subtype'].isin(file_subtype)]
+                df_filter = df_filter & inp_files_df['subtype'].isin(file_subtype)
         
-        for idx, row in inp_files_df.iterrows():
+        inp_files_df_filtered = inp_files_df[df_filter]
+        
+        for idx, row in inp_files_df_filtered.iterrows():
             # Parse the internal path field to get the correct file(s) path
             if parse_csv_internal_path_field(row['internal'], row['path'], inp_csv_path):
                 logger.info(f"File {row['path']} already exists in the input directory. Skipping copy.")
@@ -141,11 +317,11 @@ class AnalysisEnvironment:
                 file_paths = [row['path']] # Just use the single path
 
             file_type = row['type']
-            known_types = self.inp_dir.keys()
+            known_types = self.folders['inputs'].keys()
             if file_type in known_types:
-                rel_inp_dir = self.inp_dir[file_type]['path']
+                rel_inp_dir = self.folders['inputs'][file_type]['path']
             else:
-                rel_inp_dir = self.inp_dir[GENERIC_INPUT_TYPE[0]]['path']
+                rel_inp_dir = self.folders['inputs'][GENERIC_INPUT_TYPE[0]]['path']
 
             for file_path in file_paths:
                 if not os.path.exists(file_path):
@@ -168,9 +344,10 @@ class AnalysisEnvironment:
             
             # Update the input files DataFrame
             main_file = os.path.join(rel_inp_dir, os.path.basename(row['path']))
-            inp_files_df.loc[idx, ['path', 'internal']] = [os.path.relpath(main_file, input_dir), True]
+            inp_files_df_filtered.loc[idx, ['path', 'internal']] = [os.path.relpath(main_file, input_dir), True]
 
         # Save the updated input files DataFrame
+        inp_files_df.loc[df_filter, ['path', 'internal']] = inp_files_df_filtered[['path', 'internal']]
         inp_files_df.to_csv(inp_csv_path, index=False)
         logger.info("Input files collected and copied to the input directory successfully.")
 
@@ -264,7 +441,6 @@ def _check_libraries(required_file: str = LIBRARIES_CONFIG['required_file'],
     if missing_optional:
         warn_msg = "It is recommended to install the following optional libraries:\n" + "\n".join(missing_optional)
         logger.warning(warn_msg)
-        warnings.warn(warn_msg)
 
     logger.info("Library check completed: required OK=%s, optional OK=%s", len(missing_required) == 0, len(missing_optional) == 0)
     return (len(missing_required) == 0, len(missing_optional) == 0)
@@ -406,13 +582,22 @@ def _create_folder_structure(base_dir: str, case_name: str) -> AnalysisEnvironme
         user = os.environ.get('USERNAME', 'unknown')
     else:
         user = os.environ.get('USER', 'unknown')
-        if platform.system() == 'Darwin':
-            pass
-        else:
-            logger.warning('Platform not yet tested. In case of problems, please contact the developer.')
-
-    # Separator
-    sl = os.path.sep
+        logger.warning('Platform not yet tested. In case of problems, please contact the developer.')
+    
+    # Write and read the application version from a file
+    app_version = get_app_version()
+    if app_version:
+        logger.info(f"Application version is: {app_version}")
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        version_file_path = os.path.join(script_dir, 'version.txt')
+        with open(version_file_path, 'r') as f:
+            app_version = f.read().strip()
+            if app_version:
+                logger.info(f"Application version ({app_version}) read from {version_file_path}")
+            else:
+                logger.warning(f"No application version found in {version_file_path}. Using default version 'unknown'.")
+                app_version = 'unknown'
 
     # Library check
     logger.info("Checking required and optional libraries...")
@@ -423,59 +608,33 @@ def _create_folder_structure(base_dir: str, case_name: str) -> AnalysisEnvironme
     env = AnalysisEnvironment(
         case_name=case_name,
         user=user,
-        os_separator=sl
+        app_version=app_version
     )
 
     # Check if base_dir is provided and exists
     if not os.path.isdir(base_dir):
         raise ValueError(f"The specified base directory does not exist: {base_dir}")
 
-    env.base_dir = {'path': base_dir}
+    env.folders['base'] = {'path': base_dir}
 
     # Dynamically create folder structure attributes
-    for key, attr in ANALYSIS_FOLDER_ATTRIBUTE_MAPPER.items():
+    for key, substructure in ANALYSIS_FOLDER_STRUCTURE.items():
         main_path = os.path.join(base_dir, key)
-        structure = ANALYSIS_FOLDER_STRUCTURE.get(key, [])
-        nested_dict = _create_nested_folders(main_path, structure)
+        nested_dict = _create_nested_folders(main_path, substructure)
         # Set the attribute directly (now declared in dataclass)
-        setattr(env, attr, nested_dict)
+        env.folders[key] = nested_dict
 
     # Create or update the csv of the input files, in the main input folder
-    inp_csv_path = _create_inputs_csv(env.inp_dir['path'])
+    inp_csv_path = _create_inputs_csv(env.folders['inputs']['path'])
     logger.info(f"File {RAW_INPUT_FILENAME} created: {inp_csv_path}")
 
     # Save the environment to a JSON file
-    env_file_path = os.path.join(env.base_dir['path'], ENVIRONMENT_FILENAME)
+    env_file_path = os.path.join(env.folders['base']['path'], ENVIRONMENT_FILENAME)
     env.to_json(env_file_path)
     logger.info(f"Analysis environment saved to: {env_file_path}")
 
     logger.info(f"Analysis folder structure created successfully for: {case_name}")
     return env
-
-def _update_env_file(env: AnalysisEnvironment) -> None:
-    """
-    Save the current analysis environment to a JSON file.
-    
-    Args:
-        env (AnalysisEnvironment): Analysis environment object to save.
-    """
-    logger = logging.getLogger(__name__)
-    logger.info("Updating the analysis environment file...")
-
-    if not isinstance(env, AnalysisEnvironment):
-        raise TypeError("env must be an instance of AnalysisEnvironment.")
-    
-    if not hasattr(env, 'base_dir') or not isinstance(env.base_dir, dict) or 'path' not in env.base_dir:
-        raise ValueError("env.base_dir must be a dictionary with a 'path' key.")
-    
-    try:
-        env_file_path = os.path.join(env.base_dir['path'], ENVIRONMENT_FILENAME)
-        env.to_json(env_file_path)
-        
-        logger.info(f"Environment saved to {env_file_path}")
-    except Exception as e:
-        logger.error(f"Error saving the environment: {e}")
-        raise IOError(f"Errore nel salvare l'ambiente: {e}")
 
 #%% Functions to create or get the analysis environment
 def create_analysis_environment(base_dir: str, case_name: Optional[str] = None) -> AnalysisEnvironment:
@@ -507,7 +666,7 @@ def create_analysis_environment(base_dir: str, case_name: Optional[str] = None) 
 
     return _create_folder_structure(base_dir=base_dir, case_name=case_name)
 
-def get_analysis_environment(base_dir: str) -> tuple[AnalysisEnvironment, str]:
+def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
     """
     Load an existing analysis environment from the specified directory.
 
@@ -515,9 +674,7 @@ def get_analysis_environment(base_dir: str) -> tuple[AnalysisEnvironment, str]:
         base_dir (str): Base directory of the analysis. Must exist.
 
     Returns:
-        tuple: (AnalysisEnvironment, env_file_path)
-            AnalysisEnvironment: Object with the details of the analysis environment.
-            env_file_path (str): Path to the environment file used.
+        AnalysisEnvironment: Object with the details of the analysis environment.
     """
     logger = logging.getLogger(__name__)
     logger.info(f"Start loading environment from: {base_dir}")
@@ -532,24 +689,22 @@ def get_analysis_environment(base_dir: str) -> tuple[AnalysisEnvironment, str]:
     if os.path.exists(env_file_path):
         logger.info(f"Existing {ENVIRONMENT_FILENAME} found in {base_dir}. Loading environment...")
         env = AnalysisEnvironment.from_json(env_file_path)
-        old_base = env.base_dir['path']
+        old_base = env.folders['base']['path']
         # If the base directory has changed, update all paths accordingly
         if os.path.abspath(old_base) != os.path.abspath(base_dir):
             logger.warning(f"Base directory has changed from '{old_base}' to '{base_dir}'. Updating all paths...")
-            env.base_dir['path'] = base_dir
             # Recursively update all paths in the environment for each folder attribute
-            for attr in ANALYSIS_FOLDER_ATTRIBUTE_MAPPER.values():
-                val = getattr(env, attr)
+            for key, val in env.folders.items():
                 if isinstance(val, dict):
                     _update_paths(val, old_base, base_dir)
                 else:
-                    logger.error(f"Unexpected type for attribute '{attr}': {type(val)}. Expected dict.")
-                    raise TypeError(f"Expected dict for attribute '{attr}', got {type(val)}.")
+                    logger.error(f"Unexpected type for attribute 'folders.{key}': {type(val)}. Expected dict.")
+                    raise TypeError(f"Expected dict for attribute 'folders.{key}', got {type(val)}.")
             # Save the updated environment to file
             env.to_json(env_file_path)
             logger.info("All paths updated and environment saved.")
 
-            inp_csv_base_dir = env.inp_dir['path']
+            inp_csv_base_dir = env.folders['inputs']['path']
             inp_csv_path = os.path.join(inp_csv_base_dir, RAW_INPUT_FILENAME)
             # If the input CSV does not exist, create it; otherwise, check its contents
             if not os.path.exists(inp_csv_path):
@@ -561,183 +716,6 @@ def get_analysis_environment(base_dir: str) -> tuple[AnalysisEnvironment, str]:
                 _check_inputs_csv(inp_csv_path)
         else:
             logger.info("Base directory unchanged. Environment loaded as is.")
-        return env, env_file_path
+        return env
     else:
         raise FileNotFoundError(f"No existing analysis environment found in {base_dir}.")
-
-#%% # Function to add an input file to the RAW_INPUT_FILENAME
-def add_input_file(
-        analysis_env: AnalysisEnvironment, 
-        file_path: str,
-        file_type: str,
-        file_subtype: Optional[str] = None,
-        force_add: bool = True,
-        ) -> tuple[bool, str]:
-    """
-    Add a new input file to the analysis environment and row in the input files CSV.
-
-    Args:
-        analysis_env (AnalysisEnvironment): The analysis environment object.
-        file_path (str): Path to the input file to be added.
-        file_type (str): Type of the input file (e.g., 'shapefile', 'raster', etc.).
-        file_subtype (str, optional): Subtype of the input file (e.g., 'recording', 'forecast', etc.).
-        force_add (bool, optional): If True, will overwrite the existing row if it exists (defaults to True).
-
-    Returns:
-        bool: True if the file was added successfully, False if it already exists and duplicates are not allowed.
-        str: The new ID of the added row.
-    """
-    logger = logging.getLogger(__name__)
-    logger.info(f"Adding input file: {file_path} of type {file_type}")
-
-    # Check if the analysis environment is valid
-    if not isinstance(analysis_env, AnalysisEnvironment):
-        logger.error("analysis_env must be an instance of AnalysisEnvironment.")
-        raise TypeError("analysis_env must be an instance of AnalysisEnvironment.")
-    
-    inp_csv_path = os.path.join(analysis_env.inp_dir['path'], RAW_INPUT_FILENAME)
-    
-    # Check if the input file already exists in the input files CSV
-    entry_already_exists = check_raw_path(
-        csv_path=inp_csv_path, 
-        type=file_type,
-        subtype=file_subtype
-    )
-
-    row_added, new_id = add_row_to_csv(
-            csv_path=inp_csv_path, 
-            path_to_add=file_path, 
-            path_type=file_type, 
-            path_subtype=file_subtype,
-            force_rewrite=force_add
-        )
-
-    if row_added:
-        if entry_already_exists:
-            logger.warning(f"File {file_path} might already exist in the input files CSV, but it was added/overwritten anyway.")
-        else:
-            logger.info(f"File {file_path} added to the input files CSV.")
-    else:
-        logger.info(f"File {file_path} not added in the input files CSV.")
-    return (row_added, new_id)
-    
-#%% # Main functions for saving and loading analysis variables
-def save_variable(
-        analysis_env: AnalysisEnvironment, 
-        variable_to_save: Dict[str, Any], 
-        filename: str,
-    ) -> AnalysisEnvironment:
-    """
-    saves variables in a pickle file and updates the config dictionary in the environment.
-    
-    Args:
-        env (AnalysisEnvironment): environment object containing the config dictionary and var_dir path.
-        variable_to_save (Dict[str, Any]): dictionary of variables to save.
-        filename (str): filename to save the variables, must end with '.pkl' (e.g., 'study_area_vars.pkl').
-        var_type (str): string representing the type of control, as described in env.config (e.g., 'study_area', 'land_use', etc.).
-    
-    Raises:
-        ValueError: if var_type is not present in env.config.
-        TypeError: if variable_to_save is not a dictionary.
-        FileNotFoundError: if the directory var_dir does not exist.
-    """
-    logger = logging.getLogger(__name__)
-    logger.info(f"Start saving variable: {filename}")
-
-    if os.path.isabs(filename):
-        filename = os.path.basename(filename)
-        logger.warning("filename was provided as an absolute path, converted to filename only.")
-        warnings.warn("filename was provided as an absolute path, converted to filename only.")
-    
-    # Verify that variable_to_save is a dictionary
-    if not isinstance(variable_to_save, dict):
-        logger.error(f"variable_to_save must be a dictionary, received: {type(variable_to_save)}")
-        raise TypeError(f"variable_to_save must be a dictionary, received: {type(variable_to_save)}")
-    
-    # Verify that var_dir exists
-    var_dir_attr = ANALYSIS_FOLDER_ATTRIBUTE_MAPPER['variables']
-    var_dir_path = getattr(analysis_env, var_dir_attr)['path']
-    if not os.path.exists(var_dir_path):
-        logger.error(f"var_dir directory not found: {var_dir_path}")
-        raise FileNotFoundError(f"var_dir directory not found: {var_dir_path}")
-    
-    # Construct the full file path
-    file_path = os.path.join(var_dir_path, filename)
-    
-    # Save the variable to a pickle file
-    try:
-        with open(file_path, 'wb') as f:
-            pickle.dump(variable_to_save, f)
-        logger.info(f"Variables saved successfully in: {file_path}")
-    except Exception as e:
-        logger.error(f"Error during file saving {file_path}: {e}")
-        raise IOError(f"Error during file saving {file_path}: {e}")
-    
-    # Update env.config[filename]
-    variable_keys = list(variable_to_save.keys())
-    analysis_env.config['variables'][filename] = variable_keys
-
-    _update_env_file(analysis_env)
-
-    logger.info(f"Updated env.config['{filename}'] with {len(variable_keys)} variables")
-    return analysis_env
-
-def load_variable(
-        analysis_env: AnalysisEnvironment, 
-        filename: str,
-    ) -> Dict[str, Any]:
-    """
-    Load variables from a pickle file and return them as a dictionary.
-    
-    Args:
-        env (AnalysisEnvironment): environment object containing the config dictionary and var_dir path.
-        filename (str): name of the file to load, must end with '.pkl' (e.g., 'study_area_vars.pkl').
-        var_type (str): string representing the type of variable, as described in env.config (e.g., 'study_area', 'land_use', etc.).
-    
-    Returns:
-        Dict[str, Any]: dictionary containing the loaded variables.
-    
-    Raises:
-        ValueError: if var_type is not present in env.config.
-        FileNotFoundError: if the file does not exist in the specified var_dir.
-        KeyError: if the filename is not found in the var_files of the specified var_type.
-    """
-    logger = logging.getLogger(__name__)
-    logger.info(f"Start loading variables from {filename}")
-
-    if os.path.isabs(filename):
-        filename = os.path.basename(filename)
-        logger.warning("filename was provided as an absolute path, converted to filename only.")
-        warnings.warn("filename was provided as an absolute path, converted to filename only.")
-    
-    # Verify that filename is a valid key in env.config['variables']
-    available_files = list(analysis_env.config['variables'].keys())
-    if filename not in available_files:
-        logger.error(f"File '{filename}' not found in env.config['variables']. "
-                     f"Available files: {available_files}")
-        raise KeyError(f"File '{filename}' not found in env.config['variables']. "
-                       f"Available files: {available_files}")
-    
-    # Construct the full file path
-    var_dir_attr = ANALYSIS_FOLDER_ATTRIBUTE_MAPPER['variables']
-    var_dir_path = getattr(analysis_env, var_dir_attr)['path']
-    file_path = os.path.join(var_dir_path, filename)
-    
-    # Verify that the file exists
-    if not os.path.exists(file_path):
-        logger.error(f"File does not exist: {file_path}")
-        raise FileNotFoundError(f"File does not exist: {file_path}")
-    
-    # Load the variable from the pickle file
-    logger.info(f"Loading variables from: {file_path}")
-    try:
-        with open(file_path, 'rb') as f:
-            variable_data = pickle.load(f)
-        logger.info(f"Variables loaded successfully from: {file_path}")
-        if not isinstance(variable_data, dict):
-            logger.error(f"Loaded data from {file_path} is not a dictionary: {type(variable_data)}")
-            raise TypeError(f"Loaded data from {file_path} is not a dictionary: {type(variable_data)}")
-        return variable_data
-    except Exception as e:
-        logger.error(f"Error loading file {file_path}: {e}")
-        raise IOError(f"Error loading file {file_path}: {e}")

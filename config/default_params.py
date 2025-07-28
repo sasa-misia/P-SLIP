@@ -23,7 +23,7 @@ KNOWN_STATIC_INPUT_TYPES = [
     'soil',
     'vegetation',
     'infrastructures',
-    'land_uses',
+    'land_uses'
 ]
 KNOWN_DYNAMIC_INPUT_TYPES = [
     'rainfalls', 
@@ -58,30 +58,6 @@ ANALYSIS_FOLDER_STRUCTURE = {
     ],
     'logs': []
 }
-
-# Dynamically create main directories and nested subfolders from ANALYSIS_FOLDER_STRUCTURE 
-# Remember to modify in case of changes in ANALYSIS_FOLDER_STRUCTURE!
-ANALYSIS_FOLDER_ATTRIBUTE_MAPPER = {
-    'inputs': 'inp_dir',
-    'variables': 'var_dir',
-    'results': 'res_dir',
-    'user_control': 'usr_dir',
-    'outputs': 'out_dir',
-    'logs': 'log_dir'
-}
-
-# --- CHECK: ANALYSIS_FOLDER_ATTRIBUTE_MAPPER vs ANALYSIS_FOLDER_STRUCTURE ---
-# Just the first level keys of ANALYSIS_FOLDER_STRUCTURE should be in ANALYSIS_FOLDER_ATTRIBUTE_MAPPER.
-# This check ensures that the keys in ANALYSIS_FOLDER_ATTRIBUTE_MAPPER match the top-level keys
-structure_keys = set(ANALYSIS_FOLDER_STRUCTURE.keys())
-map_keys = set(ANALYSIS_FOLDER_ATTRIBUTE_MAPPER.keys())
-if structure_keys != map_keys:
-    raise ValueError(
-        f"Mismatch between ANALYSIS_FOLDER_ATTRIBUTE_MAPPER keys and ANALYSIS_FOLDER_STRUCTURE keys:\n"
-        f"  Only in ANALYSIS_FOLDER_ATTRIBUTE_MAPPER: {map_keys - structure_keys}\n"
-        f"  Only in ANALYSIS_FOLDER_STRUCTURE: {structure_keys - map_keys}"
-    )
-# --- END CHECK ---
 
 # Raw input files configuration
 # This is the name of the CSV file that contains the raw input files.
@@ -118,10 +94,10 @@ LOG_CONFIG = {
 # User analysis configuration
 # This dictionary contains the analysis configuration template.
 ANALYSIS_CONFIGURATION = {
-    'inputs': { # Here all the settings used to import the various files
-        **{k: {1: {'settings': {}, 'custom_id': []}} for k in KNOWN_STATIC_INPUT_TYPES},
-        **{k: {1: {'settings': {}, 'custom_id': []}} for k in KNOWN_DYNAMIC_INPUT_TYPES},
-        **{k: {1: {'settings': {}, 'custom_id': []}} for k in GENERIC_INPUT_TYPE}
+    'inputs': { # Here all the settings used to import the various files (ex: {'study_area': [{'settings': {}, 'custom_id': []}]})
+        **{k: [{'settings': {}, 'custom_id': []}] for k in KNOWN_STATIC_INPUT_TYPES},
+        **{k: [{'settings': {}, 'custom_id': []}] for k in KNOWN_DYNAMIC_INPUT_TYPES},
+        **{k: [{'settings': {}, 'custom_id': []}] for k in GENERIC_INPUT_TYPE}
     },
     'variables': { # Here a list of variables and content (ex: {'variable.pkl': {'var1', 'var2', 'var3'}}})
         'example.pkl': [

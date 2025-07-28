@@ -32,13 +32,21 @@ def get_polygon_extremes(polygon: geom.Polygon) -> pd.DataFrame:
     Returns:
         pd.DataFrame: A DataFrame with min and max longitude and latitude.
     """
-    if hasattr(polygon, "exterior"):
-        xs, ys = polygon.exterior.xy
-    else:
-        raise ValueError("Input must be a shapely Polygon or MultiPolygon (or have an exterior attribute).")
+    # if hasattr(polygon, "exterior"):
+    #     xs, ys = polygon.exterior.xy
+    # else:
+    #     raise ValueError("Input must be a shapely Polygon or MultiPolygon (or have an exterior attribute).")
+    
+    # df = pd.DataFrame(
+    #         [[min(xs), min(ys)], [max(xs), max(ys)]],
+    #         columns=['lon', 'lat'], 
+    #         index=['min', 'max']
+    #     )
+
+    poly_bbox =polygon.bounds
     
     df = pd.DataFrame(
-            [[min(xs), max(xs)], [min(ys), max(ys)]], 
+            [poly_bbox[0:2], poly_bbox[2:4]],
             columns=['lon', 'lat'], 
             index=['min', 'max']
         )

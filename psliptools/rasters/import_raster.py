@@ -1,9 +1,9 @@
 #%% # Import necessary modules
-import rasterio
 import warnings
+import rasterio
+import shapely
 import numpy as np
-from .info_raster import get_georaster_info, get_xy_grids_from_profile
-from .manipulate_raster import convert_coords, convert_grids_and_profile_to_geo
+from .coordinates import get_georaster_info, get_xy_grids_from_profile, raster_within_polygon, convert_grids_and_profile_to_geo
 
 #%% # Function to load GeoTIFF raster
 def load_georaster(
@@ -12,7 +12,8 @@ def load_georaster(
         set_bbox: list=None, 
         set_nodata: int=None, 
         set_dtype: str=None,
-        convert_to_geo: bool=False
+        convert_to_geo: bool=False,
+        poly_mask_load_geo: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None
     ) -> tuple[np.ndarray, dict, np.ndarray, np.ndarray]:
     """
     Load a GeoTIFF raster as a rasterio.DatasetReader object.
@@ -30,6 +31,15 @@ def load_georaster(
     """
     raster_profile = get_georaster_info(raster_path=filepath, set_crs=set_crs, set_bbox=set_bbox)
     ref_grid_x, ref_grid_y = get_xy_grids_from_profile(raster_profile)
+
+    if poly_mask_load_geo:
+        is_within_polygon, _ = raster_within_polygon(
+            geo_polygon=poly_mask_load_geo, 
+            raster_profile=raster_profile,
+        )
+        if not is_within_polygon:
+            warnings.warn(f"The raster {filepath} is not within the provided polygon. It will not be loaded and processed.")
+            return None, None, None, None
     
     with rasterio.open(filepath, 'r') as src:
         raster_data = src.read()
@@ -37,7 +47,6 @@ def load_georaster(
 
     if convert_to_geo:
         ref_grid_x, ref_grid_y, raster_profile = convert_grids_and_profile_to_geo(
-            crs_in=raster_profile['crs'].to_epsg(),
             in_grid_x=ref_grid_x,
             in_grid_y=ref_grid_y,
             profile=raster_profile

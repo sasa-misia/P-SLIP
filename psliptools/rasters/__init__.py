@@ -4,19 +4,12 @@ Raster utilities for the psliptools package.
 Provides functions for importing and generating raster grids (e.g., elevation).
 """
 
-from .import_raster import (
-    load_georaster
-)
-
-from .info_raster import (
+from .coordinates import (
     get_georaster_info,
     get_xy_grids_from_profile,
     get_projected_epsg_code_from_bbox,
     get_projected_crs_from_bbox,
-    is_geographic_coords
-)
-
-from .manipulate_raster import (
+    is_geographic_coords,
     create_bbox,
     create_grid_from_bbox,
     convert_coords,
@@ -24,6 +17,11 @@ from .manipulate_raster import (
     transformer_from_grids,
     convert_grids_and_profile_to_geo,
     convert_bbox,
+    get_pixels_inside_polygon,
+    raster_within_polygon
+)
+
+from .manipulate_raster import (
     replace_values,
     resample_raster
 )
@@ -34,6 +32,10 @@ from .plot_raster import (
     plot_elevation_3d
 )
 
+from .import_raster import (
+    load_georaster
+)
+
 __all__ = [
     "load_georaster",
     "get_georaster_info",
@@ -41,6 +43,8 @@ __all__ = [
     "get_projected_epsg_code_from_bbox",
     "get_projected_crs_from_bbox",
     "is_geographic_coords",
+    "get_pixels_inside_polygon",
+    "raster_within_polygon",
     "create_bbox",
     "create_grid_from_bbox",
     "convert_coords",

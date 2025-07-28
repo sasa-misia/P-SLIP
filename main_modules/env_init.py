@@ -21,7 +21,13 @@ logging.basicConfig(level=logging.INFO,
 
 #%% Main function to initialize or load the analysis environment
 # This function is responsible for creating or loading the analysis environment based on user input.
-def main(case_name=None, gui_mode=False, base_dir=None) -> AnalysisEnvironment:
+def get_or_create_analysis_environment(
+        case_name=None, 
+        gui_mode=False, 
+        base_dir=None, 
+        allow_creation=True, 
+        env_filename=None
+    ) -> AnalysisEnvironment:
     """
     Main function for initializing or loading the analysis environment.
 
@@ -42,24 +48,36 @@ def main(case_name=None, gui_mode=False, base_dir=None) -> AnalysisEnvironment:
             base_dir = input(f"Enter the base directory for the analysis (or press Enter to use the current directory [{os.getcwd()}]): ").strip(' "')
             if not base_dir:
                 base_dir = os.getcwd()
-        
-        if case_name is None:
-            case_name = input("Specify the analysis name (enter for default [Not Defined - Standalone]): ").strip()
-            if not case_name:
-                case_name = DEFAULT_CASE_NAME
 
     os.makedirs(base_dir, exist_ok=True) # Ensure the base directory exists
 
-    # Decide automatically based on base_dir existence
-    if os.path.exists(os.path.join(base_dir, ENVIRONMENT_FILENAME)):
-        env, _ = get_analysis_environment(base_dir=base_dir)
+    if env_filename:
+        if not isinstance(env_filename, str):
+            raise ValueError("env_file_path must be a string representing the path to the environment file.")
+        if not env_filename.endswith('.json'):
+            raise ValueError("env_file_path must be a JSON file.")
+        if os.path.isabs(env_filename):
+            env_filename = os.path.basename(env_filename)
+        CURR_ENV_FILENAME = env_filename
     else:
-        env = create_analysis_environment(base_dir=base_dir, case_name=case_name)
+        CURR_ENV_FILENAME = ENVIRONMENT_FILENAME
 
-    if not gui_mode:
-        logging.info(f"Analysis environment loaded for case: {env.case_name}")
-        print(f"Analysis folder structure ready for: {case_name}")
+    # Decide automatically based on base_dir existence
+    if os.path.exists(os.path.join(base_dir, CURR_ENV_FILENAME)):
+        env = get_analysis_environment(base_dir=base_dir)
+    else:
+        if allow_creation:
+            if case_name is None and not gui_mode:
+                if case_name is None:
+                    case_name = input("Specify the analysis name (enter for default [Not Defined - Standalone]): ").strip()
+                    if not case_name:
+                        case_name = DEFAULT_CASE_NAME
+            env = create_analysis_environment(base_dir=base_dir, case_name=case_name)
+        else:
+            raise FileNotFoundError(f"Analysis environment file '{CURR_ENV_FILENAME}' not found in {base_dir}. "
+                                     "Please create the environment first or set allow_creation=True.")
 
+    logging.info(f"Analysis environment loaded for case: {env.case_name}")
     return env
 
 #%% Command line interface
@@ -72,4 +90,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Call the main function with the provided arguments
-    curr_env = main(case_name=args.case_name, base_dir=args.base_dir, gui_mode=False)
+    curr_env = get_or_create_analysis_environment(case_name=args.case_name, base_dir=args.base_dir, gui_mode=False)
