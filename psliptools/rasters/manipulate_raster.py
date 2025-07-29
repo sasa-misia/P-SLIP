@@ -1,12 +1,17 @@
-#%% # Import necessary modules
+# %% === Import necessary modules
 import numpy as np
 import rasterio
 import rasterio.warp
 import warnings
-from .coordinates import get_projected_crs_from_bbox, create_bbox, convert_bbox, create_grid_from_bbox
+import shapely
+from .coordinates import get_projected_crs_from_bbox, create_bbox, convert_bbox, create_grid_from_bbox, get_pixels_inside_polygon
 
-#%% # Function to replace values in a raster
-def replace_values(raster: np.ndarray, old_value: np.ndarray, new_value: np.ndarray) -> np.ndarray:
+# %% === Function to replace values in a raster
+def replace_values(
+        raster: np.ndarray, 
+        old_value: np.ndarray, 
+        new_value: np.ndarray
+    ) -> np.ndarray:
     """
     Replace values in a raster.
 
@@ -37,8 +42,16 @@ def replace_values(raster: np.ndarray, old_value: np.ndarray, new_value: np.ndar
         out_raster[out_raster == old] = new
     return out_raster
 
-#%% # Function to resample raster
-def resample_raster(in_raster: np.ndarray, in_profile: dict, in_grid_x: np.ndarray, in_grid_y: np.ndarray, resample_method: str='nearest', new_size: np.ndarray=[10, 10]) -> np.ndarray:
+# %% === Function to resample raster
+def resample_raster(
+        in_raster: np.ndarray, 
+        in_profile: dict, 
+        in_grid_x: np.ndarray, 
+        in_grid_y: np.ndarray, 
+        resample_method: str='nearest',
+        new_size: np.ndarray=[10, 10],
+        poly_mask: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None
+    ) -> np.ndarray:
     """
     Resample a raster to a new size.
 
@@ -101,6 +114,10 @@ def resample_raster(in_raster: np.ndarray, in_profile: dict, in_grid_x: np.ndarr
         resampling=resample_obj,
         destination=out_raster
     )
-    return out_raster, out_profile, out_grid_x, out_grid_y
 
-#%%
+    mask_matrix = np.ones((out_profile['height'], out_profile['width']), dtype=bool)
+    if poly_mask is not None:
+        mask_matrix = get_pixels_inside_polygon(geo_polygon=poly_mask, raster_profile=out_profile)
+    return out_raster, out_profile, out_grid_x, out_grid_y, mask_matrix
+
+# %%

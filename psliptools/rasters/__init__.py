@@ -21,6 +21,12 @@ from .coordinates import (
     raster_within_polygon
 )
 
+from .manage_raster import (
+    get_2d_idx_from_1d_idx,
+    get_2d_mask_from_1d_idx,
+    mask_raster_with_1d_idx
+)
+
 from .manipulate_raster import (
     replace_values,
     resample_raster
@@ -45,6 +51,9 @@ __all__ = [
     "is_geographic_coords",
     "get_pixels_inside_polygon",
     "raster_within_polygon",
+    "get_2d_idx_from_1d_idx",
+    "get_2d_mask_from_1d_idx",
+    "mask_raster_with_1d_idx",
     "create_bbox",
     "create_grid_from_bbox",
     "convert_coords",

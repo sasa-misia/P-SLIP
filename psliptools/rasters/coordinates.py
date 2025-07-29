@@ -6,6 +6,7 @@ import warnings
 import numpy as np
 import pyproj
 import shapely
+import scipy
 
 # %% === Function to get raster crs
 def _get_crs(raster_path: str, set_crs: int=None) -> rasterio.crs.CRS:
@@ -169,7 +170,7 @@ def is_geographic_coords(lon: np.ndarray, lat: np.ndarray) -> bool:
         lat = np.array(lat)
     return np.all(lon >= -180) and np.all(lon <= 180) and np.all(lat >= -90) and np.all(lat <= 90)
 
-#%% # Function to create bounding box from coordinates
+# %% === Function to create bounding box from coordinates
 def create_bbox(
         coords_x: np.ndarray, 
         coords_y: np.ndarray
@@ -194,7 +195,7 @@ def create_bbox(
     ])
     return out_bbox
 
-#%% # Function to create grid from bounding box
+# %% === Function to create grid from bounding box
 def create_grid_from_bbox(
         bbox: np.ndarray, 
         resolution: np.ndarray, 
@@ -256,7 +257,7 @@ def create_grid_from_bbox(
 
     return grid_x, grid_y, out_profile
 
-#%% # Function to convert coordinates to desired coordinate reference system
+# %% === Function to convert coordinates to desired coordinate reference system
 def convert_coords(
         crs_in: int, 
         crs_out: int, 
@@ -288,7 +289,7 @@ def convert_coords(
     # =====
     return out_coords_x, out_coords_y
 
-#%% # Function to convert coordinates to geographic
+# %% === Function to convert coordinates to geographic
 def convert_coords_to_geo(
         crs_in: int,  
         in_coords_x: np.ndarray, 
@@ -308,7 +309,7 @@ def convert_coords_to_geo(
     out_coords_x, out_coords_y = convert_coords(crs_in, 4326, in_coords_x, in_coords_y)
     return out_coords_x, out_coords_y
 
-#%% # Function to convert bbox
+# %% === Function to convert bbox
 def convert_bbox(
         crs_in: int, 
         crs_out: int, 
@@ -330,7 +331,7 @@ def convert_bbox(
     out_coords_x, out_coords_y = convert_coords(crs_in, crs_out, in_coords_x, in_coords_y)
     return np.array([out_coords_x.min(), out_coords_y.min(), out_coords_x.max(), out_coords_y.max()])
 
-#%% # Function to create a transformer from grids
+# %% === Function to create a transformer from grids
 def transformer_from_grids(
         grid_x: np.ndarray, 
         grid_y: np.ndarray
@@ -344,7 +345,7 @@ def transformer_from_grids(
     out_transformer = rasterio.transform.Affine(a_trans, b_trans, c_trans, d_trans, e_trans, f_trans)
     return out_transformer
 
-#%% # Function to convert grids and profile to EPSG:4326 (WGS84)
+# %% === Function to convert grids and profile to EPSG:4326 (WGS84)
 def convert_grids_and_profile_to_geo(
         in_grid_x: np.ndarray, 
         in_grid_y: np.ndarray, 
@@ -381,7 +382,7 @@ def convert_grids_and_profile_to_geo(
     out_profile['crs'] = rasterio.crs.CRS.from_epsg(4326)
     return out_lons, out_lats, out_profile
 
-#%% # Function to convert grids and profile to projected crs
+# %% === Function to convert grids and profile to projected crs
 def convert_grids_and_profile_to_prj(
         in_grid_lon: np.ndarray, 
         in_grid_lat: np.ndarray, 
@@ -483,3 +484,56 @@ def raster_within_polygon(
     """
     mask = get_pixels_inside_polygon(geo_polygon, raster_profile)
     return np.any(mask), mask
+
+# %% === Function to obtain the 1d index of the pixel that is closest to a given coordinate
+def get_closest_pixel_idx(
+        x: np.ndarray,
+        y: np.ndarray,
+        x_grid: np.ndarray=None,
+        y_grid: np.ndarray=None,
+        raster_profile: dict=None
+    ) -> int:
+    """
+    Get the 1d index of the pixel that is closest to a given coordinate.
+
+    Args:
+        lon (float): The longitude of the coordinate.
+        lat (float): The latitude of the coordinate.
+        x_grid (np.ndarray, optional): The x grid of the raster. If not provided, it will be obtained from the raster profile.
+        y_grid (np.ndarray, optional): The y grid of the raster. If not provided, it will be obtained from the raster profile.
+        raster_profile (dict, optional): The raster profile dictionary. If not provided, x_grid and y_grid must be provided.
+
+    Returns:
+        int: The 1d index of the pixel that is closest to the coordinate.
+    """
+    if x_grid is None or y_grid is None and raster_profile is None:
+        raise ValueError('x_grid + y_grid or raster_profile must be provided!')
+    
+    if raster_profile is not None:
+        ref_grid_x, ref_grid_y = get_xy_grids_from_profile(raster_profile)
+    else:
+        ref_grid_x = x_grid
+        ref_grid_y = y_grid
+    
+    if not is_geographic_coords(x, y):
+        raise ValueError("The provided coordinate is not in geographic coordinates. Please convert it to geographic coordinates before using it.")
+    
+    if x.ndim != 1 or y.ndim != 1:
+        raise ValueError('x and y must be 1d arrays!')
+    if x.size != y.size:
+        raise ValueError('x and y must have the same size!')
+    
+    idx_1d = np.zeros(x.size)
+    for idx, (curr_x, curr_y) in enumerate(zip(x, y)):
+        dist = np.sqrt((ref_grid_x - curr_x)**2 + (ref_grid_y - curr_y)**2)
+        if dist.min() > np.sqrt((ref_grid_x[1,1] - ref_grid_x[0,0])**2 + (ref_grid_y[1,1] - ref_grid_y[0,0])**2):
+            warnings.warn("The provided coordinate is outside the raster!")
+            idx_1d[idx] = np.nan
+        else:
+            idx_1d[idx] = np.argmin(dist.flatten())
+    # === Alternative to test
+    # kdtree = scipy.spatial.KDTree(np.dstack((ref_grid_x.flatten(), ref_grid_y.flatten())).reshape(-1, 2))
+    # dist, idx_1d = kdtree.query(np.column_stack((x, y)))
+    return idx_1d
+
+# %%

@@ -1,6 +1,8 @@
+# %% ===  Import necessary modules
 import pandas as pd
 import os
 
+# %% === Function to check if a path is relative to a base directory
 def _is_relative_path(raw_inp_path: str, csv_base_dir: str) -> bool:
     """
     Check if the given path is relative to the base directory.
@@ -16,6 +18,7 @@ def _is_relative_path(raw_inp_path: str, csv_base_dir: str) -> bool:
     abs_inp = os.path.abspath(csv_base_dir)
     return abs_pth.startswith(abs_inp)
 
+# %% === Function to parse a supposed boolean field that indicates if a path is internal
 def parse_csv_internal_path_field(bool_field: str | int | float, path_field: str, csv_base_dir: str) -> bool:
     """
     Parse a supposed boolean field that indicates if a path is internal, from the CSV containing the paths of the raw input files.
@@ -40,7 +43,8 @@ def parse_csv_internal_path_field(bool_field: str | int | float, path_field: str
     # If value is missing or not recognized, fallback to path check
     return _is_relative_path(path_field, csv_base_dir)
 
-def update_csv_path_field(csv_path: str, path_field: str = 'path') -> bool:
+# %% === Function to check if any path is external and prompt the user to update it
+def update_external_paths_in_csv(csv_path: str, path_field: str = 'path') -> bool:
     """
     Check if the raw input files CSV exists and validate paths.
     If any path is external, prompt the user to update it.
@@ -82,7 +86,8 @@ def update_csv_path_field(csv_path: str, path_field: str = 'path') -> bool:
     else:
         print(f"All input files of {csv_filename} are internal to the 'inputs' folder.")
         return False
-    
+
+# %% === Function to check if a specified P-SLIP folder/file exists in the CSV file containing the list of inputs
 def check_raw_path(csv_path: str, type: str, subtype: str = None) -> bool:
     """
     Check if a specified P-SLIP folder/file exists in the CSV file containing the list of inputs.
@@ -107,6 +112,7 @@ def check_raw_path(csv_path: str, type: str, subtype: str = None) -> bool:
         entry_exists = entry_exists and subtype in input_files_df['subtype'].values
     return entry_exists
 
+# %% === Function to add a new row to the CSV file containing the list of inputs
 def add_row_to_csv(
         csv_path: str, 
         path_to_add: str, 

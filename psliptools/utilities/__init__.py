@@ -4,7 +4,7 @@ Utility functions for path and CSV management in the psliptools package.
 
 from .csv_file_utils import (
     parse_csv_internal_path_field, 
-    update_csv_path_field,
+    update_external_paths_in_csv,
     check_raw_path,
     add_row_to_csv
 )
@@ -27,7 +27,7 @@ __all__ = [
     "get_raw_fold",
     "get_fold_from_csv",
     "parse_csv_internal_path_field",
-    "update_csv_path_field",
+    "update_external_paths_in_csv",
     "add_row_to_csv",
     "download_wms_raster",
     "file_selector"

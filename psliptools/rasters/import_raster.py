@@ -1,11 +1,11 @@
-#%% # Import necessary modules
+# %% === Import necessary modules
 import warnings
 import rasterio
 import shapely
 import numpy as np
 from .coordinates import get_georaster_info, get_xy_grids_from_profile, raster_within_polygon, convert_grids_and_profile_to_geo
 
-#%% # Function to load GeoTIFF raster
+# %% === Function to load GeoTIFF raster
 def load_georaster(
         filepath: str, 
         set_crs: int=None, 
@@ -13,7 +13,7 @@ def load_georaster(
         set_nodata: int=None, 
         set_dtype: str=None,
         convert_to_geo: bool=False,
-        poly_mask_load_geo: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None
+        poly_mask: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None
     ) -> tuple[np.ndarray, dict, np.ndarray, np.ndarray]:
     """
     Load a GeoTIFF raster as a rasterio.DatasetReader object.
@@ -25,21 +25,23 @@ def load_georaster(
         set_nodata (int, optional): The nodata value. Defaults to None.
         set_dtype (str, optional): The data type of the raster (e.g., 'uint8', 'float32', 'int16', etc.). Defaults to None.
         convert_to_geo (bool, optional): Whether to convert the raster to geographic coordinates. Defaults to True.
+        poly_mask (shapely.geometry.Polygon | shapely.geometry.MultiPolygon, optional): The polygon to mask the raster. Defaults to None. If provided, the raster will be loaded only if it is within the polygon.
 
     Returns:
-        tuple[np.ndarray, dict, np.ndarray, np.ndarray]: Tuple containing the raster data, raster profile, x and y grids.
+        tuple[np.ndarray, dict, np.ndarray, np.ndarray, np.ndarray]: Tuple containing the raster data, raster profile, x and y grids, and mask matrix.
     """
     raster_profile = get_georaster_info(raster_path=filepath, set_crs=set_crs, set_bbox=set_bbox)
     ref_grid_x, ref_grid_y = get_xy_grids_from_profile(raster_profile)
 
-    if poly_mask_load_geo:
-        is_within_polygon, _ = raster_within_polygon(
-            geo_polygon=poly_mask_load_geo, 
+    mask_matrix = np.ones((raster_profile['height'], raster_profile['width']), dtype=bool)
+    if poly_mask:
+        is_within_polygon, mask_matrix = raster_within_polygon(
+            geo_polygon=poly_mask, 
             raster_profile=raster_profile,
         )
         if not is_within_polygon:
             warnings.warn(f"The raster {filepath} is not within the provided polygon. It will not be loaded and processed.")
-            return None, None, None, None
+            return None, None, None, None, None
     
     with rasterio.open(filepath, 'r') as src:
         raster_data = src.read()
@@ -71,6 +73,6 @@ def load_georaster(
             raster_data = raster_data.astype(set_dtype)
         else:
             warnings.warn(f"Unable to read dtype value of raster file: {filepath}. Consider to specify a value as the set_dtype argument.")
-    return raster_data, raster_profile, ref_grid_x, ref_grid_y
+    return raster_data, raster_profile, ref_grid_x, ref_grid_y, mask_matrix
 
-# %%
+# %% ===

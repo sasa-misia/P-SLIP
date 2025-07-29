@@ -1,6 +1,7 @@
 #%% === Import necessary modules
 import os
 import pandas as pd
+import numpy as np
 import sys
 import argparse
 import logging
@@ -14,7 +15,14 @@ from config import (
     LOG_CONFIG
 )
 
-from psliptools import file_selector, load_georaster, convert_coords_to_geo, resample_raster, plot_elevation_3d
+from psliptools import (
+    file_selector, 
+    load_georaster, 
+    convert_coords_to_geo, 
+    resample_raster, 
+    plot_elevation_3d,
+    mask_raster_with_1d_idx
+)
 
 from env_init import get_or_create_analysis_environment
 
@@ -32,35 +40,45 @@ def import_dtm_files(
         files_path: list[str], 
         resample_size: tuple[int, int]=None, 
         resample_method: str='average',
-        poly_mask_load_geo: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None
+        poly_mask: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None,
+        apply_mask_to_raster: bool=False
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
     dtm_data = [] # Initializing an empty list
     abg_data = [] # Initializing an empty list
     cust_id = []
     for idx, dtm_path in enumerate(files_path):
-        raster_data, raster_profile, raster_x, raster_y = load_georaster(
-            filepath=dtm_path, 
+        raster_data, raster_profile, raster_x, raster_y, mask_matrix = load_georaster(
+            filepath=dtm_path,
             set_dtype='float32', 
             convert_to_geo=False, 
-            poly_mask_load_geo=poly_mask_load_geo
+            poly_mask=poly_mask
         )
+
         if raster_data is None: # No pixels inside poly_load_mask_geo
             continue
+
         _, curr_cust_id = env.add_input_file(file_path=dtm_path, file_type=file_type, file_subtype=f'dtm{idx+1}')
         if resample_size:
-            raster_data, raster_profile, raster_x, raster_y = resample_raster(
+            raster_data, raster_profile, raster_x, raster_y, mask_matrix = resample_raster(
                 in_raster=raster_data, 
                 in_profile=raster_profile,
                 in_grid_x=raster_x,
                 in_grid_y=raster_y,
                 resample_method=resample_method,
-                new_size=resample_size
+                new_size=resample_size,
+                poly_mask=poly_mask
             )
+
         raster_lon, raster_lat = convert_coords_to_geo(
             crs_in=raster_profile['crs'].to_epsg(), 
             in_coords_x=raster_x, 
             in_coords_y=raster_y
         )
+
+        mask_idx_1d = np.where(mask_matrix.flatten(order='C')) # C order is the default and means row-major (row by row)
+
+        if apply_mask_to_raster:
+            raster_data = mask_raster_with_1d_idx(raster_data, mask_idx_1d, profile=raster_profile)
 
         dtm_data.append({
             'path': dtm_path,
@@ -70,7 +88,8 @@ def import_dtm_files(
 
         abg_data.append({
             'raster_lon': raster_lon,
-            'raster_lat': raster_lat
+            'raster_lat': raster_lat,
+            'mask_idx_1d': mask_idx_1d
         })
 
         cust_id.append(curr_cust_id)
@@ -96,7 +115,7 @@ def import_dtm_files(
     return dtm_df, abg_df, cust_id
 
 #%% === Main function to import DEM and define base grid
-def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resample_method: str='average'):
+def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resample_method: str='average', apply_mask_to_raster: bool=False):
     """Main function to define the base grid."""
     src_type = 'dtm'
     
@@ -114,7 +133,15 @@ def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resa
 
         dtm_paths = file_selector(base_dir=dtm_fold, src_ext=['tif', '.tiff'])
     
-    dtm_df, abg_df, cust_id = import_dtm_files(env, src_type, dtm_paths, resample_size=resample_size, resample_method=resample_method, poly_mask_load_geo=study_area_polygon)
+    dtm_df, abg_df, cust_id = import_dtm_files(
+        env, 
+        src_type, 
+        dtm_paths, 
+        resample_size=resample_size, 
+        resample_method=resample_method, 
+        poly_mask=study_area_polygon,
+        apply_mask_to_raster=apply_mask_to_raster
+    )
 
     dtm_abg_vars = {'dtm': dtm_df, 'abg': abg_df}
 
@@ -128,7 +155,7 @@ def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resa
     env.save_variable(variable_to_save=dtm_abg_vars, variable_filename="dtm_abg_vars.pkl")
 
     # Check-plot
-    plot_elevation_3d(dtm_df['raster_data'], abg_df['raster_lon'], abg_df['raster_lat'], projected=True)
+    plot_elevation_3d(dtm_df['raster_data'], abg_df['raster_lon'], abg_df['raster_lat'], mask_idx_1d=abg_df['mask_idx_1d'], projected=True)
     return dtm_abg_vars
 
 # %% === Command line interface
@@ -138,6 +165,13 @@ if __name__ == '__main__':
     parser.add_argument('--base_dir', type=str, default=None, help="Base directory for the analysis.")
     parser.add_argument('--resample_size', type=int, default=None, help="Resample size for the DEM.")
     parser.add_argument('--resample_method', type=str, default='average', help="Resample method for the DEM.")
+    parser.add_argument('--apply_mask_to_raster', type=bool, default=False, help="Apply mask to the raster.")
     args = parser.parse_args()
 
-    dtm_abg_vars = main(base_dir=args.base_dir, gui_mode=False, resample_size=args.resample_size, resample_method=args.resample_method)
+    dtm_abg_vars = main(
+        base_dir=args.base_dir, 
+        gui_mode=False, 
+        resample_size=args.resample_size, 
+        resample_method=args.resample_method,
+        apply_mask_to_raster=args.apply_mask_to_raster
+    )
