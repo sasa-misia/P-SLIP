@@ -1,11 +1,10 @@
 # %% === Import necessary modules
 import os
-import shapely.ops as ops
-import pandas as pd
-import argparse
-from typing import Dict
 import sys
 import logging
+import argparse
+import pandas as pd
+from typing import Dict
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -37,13 +36,15 @@ logging.basicConfig(level=logging.INFO,
 # %% === Study Area methods
 def define_study_area_from_shapefile(shapefile_path, id_field, id_selection, clip_polygons=None):
     """Define study area from a shapefile, optionally clipping with custom polygons."""
-    if not os.path.exists(shapefile_path):
-        raise FileNotFoundError(f"Shapefile not found: {shapefile_path}")
-    study_area_df = load_shapefile_polygons(shapefile_path, field_name=id_field, sel_filter=id_selection)
+    study_area_df = load_shapefile_polygons(
+        shapefile_path=shapefile_path, 
+        field_name=id_field, 
+        sel_filter=id_selection,
+        convert_to_geo=True
+    )
     id_polys = study_area_df['geometry']
     if clip_polygons:
-        clip_union = ops.unary_union(clip_polygons)
-        id_polys = intersect_polygons(id_polys, clip_union)
+        id_polys = intersect_polygons(id_polys, clip_polygons, clean_empty=True)
     study_area_poly = union_polygons(id_polys)
     study_area_extremes = get_polygon_extremes(study_area_poly)
     study_area_vars = {
@@ -63,7 +64,7 @@ def define_study_area_from_rectangles(rectangle_polygons):
         'class_name': rect_names,
         'geometry': rect_polys
     })
-    study_area_poly = ops.unary_union(rect_polys)
+    study_area_poly = union_polygons(rect_polys)
     study_area_extremes = get_polygon_extremes(study_area_poly)
     study_area_vars = {
         'study_area_polygon': study_area_poly,

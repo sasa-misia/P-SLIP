@@ -154,7 +154,7 @@ def get_projected_crs_from_bbox(geo_bbox: list | np.ndarray) -> rasterio.crs.CRS
     return utm_crs
 
 # %% === Check if arrays contain geographic coordinates
-def is_geographic_coords(lon: np.ndarray, lat: np.ndarray) -> bool:
+def are_coords_geographic(lon: np.ndarray, lat: np.ndarray) -> bool:
     """
     Check if arrays contain geographic coordinates.
 
@@ -262,7 +262,8 @@ def convert_coords(
         crs_in: int, 
         crs_out: int, 
         in_coords_x: np.ndarray, 
-        in_coords_y: np.ndarray
+        in_coords_y: np.ndarray,
+        force_ndarray: bool = False
     ) -> tuple[np.ndarray, np.ndarray]:
     """
     Convert coordinates from one coordinate reference system to another.
@@ -272,10 +273,17 @@ def convert_coords(
         crs_out (int): The EPSG code of the output coordinate reference system.
         in_coords_x (np.ndarray): Array of x coordinates.
         in_coords_y (np.ndarray): Array of y coordinates.
+        force_ndarray (bool, optional): Force the input (and output) coordinates to be numpy arrays. Defaults to False.
 
     Returns:
         tuple[np.ndarray, np.ndarray]: Tuple containing the converted x and y coordinates.
     """
+    if force_ndarray:
+        if not isinstance(in_coords_x, np.ndarray) or not isinstance(in_coords_y, np.ndarray):
+            in_coords_x = np.array(in_coords_x)
+            in_coords_y = np.array(in_coords_y)
+        if in_coords_x.size != in_coords_y.size:
+            raise ValueError('Coordinates must have the same size')
     transformer = pyproj.Transformer.from_crs(crs_in, crs_out, always_xy=True)
     out_coords_x, out_coords_y = transformer.transform(in_coords_x, in_coords_y)
     # ===== Less efficient
@@ -287,6 +295,32 @@ def convert_coords(
     # out_coords_x = np.array(out_coords_x_flat).reshape(in_coords_x.shape)
     # out_coords_y = np.array(out_coords_y_flat).reshape(in_coords_y.shape)
     # =====
+    return out_coords_x, out_coords_y
+
+# %% === Function to convert coordinates inside lists
+def convert_coords_from_list(
+        crs_in: int,
+        crs_out: int,
+        x_coords: list,
+        y_coords: list
+    ) -> tuple[list, list]:
+    """
+    Convert coordinates inside lists from one coordinate reference system to another.
+
+    Args:
+        crs_in (int): The EPSG code of the input coordinate reference system.
+        crs_out (int): The EPSG code of the output coordinate reference system.
+        x_coords (list): List of x coordinates, where each element of the list contains an array of x coordinates.
+        y_coords (list): List of y coordinates, where each element of the list contains an array of y coordinates.
+
+    Returns:
+        tuple[list, list]: Tuple containing the converted x and y coordinates in lists of numpy arrays.
+    """
+    out_coords_x, out_coords_y = [], []
+    for x_coords, y_coords in zip(x_coords, y_coords):
+        x_temp, y_temp = convert_coords(crs_in, crs_out, x_coords, y_coords, force_ndarray=True)
+        out_coords_x.append(x_temp)
+        out_coords_y.append(y_temp)
     return out_coords_x, out_coords_y
 
 # %% === Function to convert coordinates to geographic
@@ -401,7 +435,7 @@ def convert_grids_and_profile_to_prj(
     Returns:
         tuple[np.ndarray, np.ndarray, dict]: Tuple containing the converted projected x and y grids, and the converted raster profile.
     """
-    if not is_geographic_coords(in_grid_lon, in_grid_lat):
+    if not are_coords_geographic(in_grid_lon, in_grid_lat):
         raise ValueError('in_grid_lon and in_grid_lat must be geographic coordinates!')
     
     if crs_out is None:
@@ -455,7 +489,7 @@ def get_pixels_inside_polygon(
     Returns:
         np.ndarray: An array of indices of the pixels that are inside the polygon.
     """
-    if not is_geographic_coords(geo_polygon.bounds[2], geo_polygon.bounds[3]):
+    if not are_coords_geographic(geo_polygon.bounds[2], geo_polygon.bounds[3]):
         raise ValueError("The provided polygon is not in geographic coordinates. Please convert it to geographic coordinates before using it.")
     
     ref_grid_x, ref_grid_y = get_xy_grids_from_profile(raster_profile)
@@ -515,7 +549,7 @@ def get_closest_pixel_idx(
         ref_grid_x = x_grid
         ref_grid_y = y_grid
     
-    if not is_geographic_coords(x, y):
+    if not are_coords_geographic(x, y):
         raise ValueError("The provided coordinate is not in geographic coordinates. Please convert it to geographic coordinates before using it.")
     
     if x.ndim != 1 or y.ndim != 1:

@@ -43,6 +43,7 @@ def import_dtm_files(
         poly_mask: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None,
         apply_mask_to_raster: bool=False
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Import DTM files in a dataframe."""
     dtm_data = [] # Initializing an empty list
     abg_data = [] # Initializing an empty list
     cust_id = []
@@ -147,9 +148,10 @@ def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resa
 
     env.config['inputs'][src_type][0]['settings'] = {
         'resample_size': resample_size, # None or (x, y)
-        'resample_method': resample_method
+        'resample_method': resample_method,
+        'apply_mask_to_raster': apply_mask_to_raster
     }
-    env.config['inputs'][src_type][0]['custom_id'] = [cust_id]
+    env.config['inputs'][src_type][0]['custom_id'] = cust_id
     env.collect_input_files(file_type=[src_type], multi_extension=True)
     
     env.save_variable(variable_to_save=dtm_abg_vars, variable_filename="dtm_abg_vars.pkl")
