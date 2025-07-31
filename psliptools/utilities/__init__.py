@@ -9,8 +9,12 @@ from .csv_file_utils import (
     add_row_to_csv
 )
 
-from .path_select import (
-    file_selector
+from .user_prompts import (
+    print_enumerated_list,
+    select_from_list_prompt,
+    select_files_in_folder_prompt,
+    select_dir_prompt,
+    select_file_prompt
 )
 
 from .path_utils import (
@@ -30,5 +34,9 @@ __all__ = [
     "update_external_paths_in_csv",
     "add_row_to_csv",
     "download_wms_raster",
-    "file_selector"
+    "print_enumerated_list",
+    "select_from_list_prompt",
+    "select_files_in_folder_prompt",
+    "select_dir_prompt",
+    "select_file_prompt"
 ]

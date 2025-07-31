@@ -9,13 +9,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    AnalysisEnvironment,
     LOG_CONFIG
 )
 
 from psliptools import (
     load_shapefile_polygons,
-    get_shapefile_fields
+    get_shapefile_fields,
+    select_file_prompt,
+    select_from_list_prompt
 )
 
 from env_init import get_or_create_analysis_environment
@@ -40,24 +41,28 @@ def main(source_type: str="land_uses", gui_mode: bool=False, base_dir: str=None)
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
-        src_path = input(f"{source_type} shapefile name (e.g. {source_type}.shp) or full path: ").strip(' "')
-        if not os.path.isabs(src_path):
-            src_path = os.path.join(env.folders['inputs'][source_type]['path'], src_path)
-        
+        src_path = select_file_prompt(
+            base_dir=env.folders['inputs'][source_type]['path'],
+            usr_prompt=f"Name or full path of the {source_type} shapefile (ex. {source_type}.shp): ",
+            src_ext='shp'
+        )
+
         shp_fields, shp_types = get_shapefile_fields(src_path)
-        print("Shapefile fields and types:")
-        for i, (f, t) in enumerate(zip(shp_fields, shp_types)):
-            print(f"{i+1}. {f} ({t})")
-        sel_shp_field = input(f"Field name containing polygon names (or number from 1 to {len(shp_fields)}): ").strip(' "')
-        if sel_shp_field.isdigit() and 1 <= int(sel_shp_field) <= len(shp_fields):
-            sel_shp_field = shp_fields[int(sel_shp_field)-1]
+        print("\n === Shapefile fields and types ===")
+        sel_shp_field = select_from_list_prompt(
+            obj_list=shp_fields, 
+            obj_type=shp_types, 
+            usr_prompt="Select the field:", 
+            allow_multiple=False
+        )[0]
     
     prop_df = load_shapefile_polygons(
         shapefile_path=src_path,
         field_name=sel_shp_field,
         poly_bound_geo=study_area_polygon,
         mask_out_poly=True,
-        convert_to_geo=True
+        convert_to_geo=True,
+        points_lim=300000
     )
 
     prop_vars = {'prop_polygons_df': prop_df}
@@ -76,4 +81,16 @@ def main(source_type: str="land_uses", gui_mode: bool=False, base_dir: str=None)
     
 # %% === Command line interface
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Import shapefiles with main properties")
+    parser.add_argument("--source_type", type=str, default="land_uses", help="Source type (soil, vegetation, land_uses)")
+    parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode")
+    parser.add_argument("--base_dir", type=str, default=None, help="Base directory for the analysis")
+    args = parser.parse_args()
+
+    prop_vars = main(
+        source_type=args.source_type, 
+        gui_mode=args.gui_mode, 
+        base_dir=args.base_dir
+    )
+
+# %%

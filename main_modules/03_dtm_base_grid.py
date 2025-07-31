@@ -16,7 +16,8 @@ from config import (
 )
 
 from psliptools import (
-    file_selector, 
+    select_files_in_folder_prompt,
+    select_dir_prompt,
     load_georaster, 
     convert_coords_to_geo, 
     resample_raster, 
@@ -128,11 +129,8 @@ def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resa
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
-        dtm_fold = input(f"Enter the folder name where the DTM files are stored (default: {env.folders['inputs']['dtm']['path']}): ").strip(' "')
-        if not dtm_fold:
-            dtm_fold = env.folders['inputs']['dtm']['path']
-
-        dtm_paths = file_selector(base_dir=dtm_fold, src_ext=['tif', '.tiff'])
+        dtm_fold = select_dir_prompt(default_dir=env.folders['inputs'][src_type]['path'], content_type=src_type)
+        dtm_paths = select_files_in_folder_prompt(base_dir=dtm_fold, src_ext=['tif', '.tiff'])
     
     dtm_df, abg_df, cust_id = import_dtm_files(
         env, 

@@ -14,15 +14,16 @@ from config import (
 )
 
 # Importing necessary modules from psliptools
-from psliptools.geometries import (
+from psliptools import (
     load_shapefile_polygons,
     get_rectangle_parameters,
-    create_rectangle_polygons, 
-    intersect_polygons,
+    create_rectangle_polygons,
     union_polygons,
     get_polygon_extremes,
     get_shapefile_fields,
-    get_shapefile_field_values
+    get_shapefile_field_values,
+    select_file_prompt,
+    select_from_list_prompt
 )
 
 from env_init import get_or_create_analysis_environment
@@ -34,7 +35,7 @@ logging.basicConfig(level=logging.INFO,
                     datefmt=LOG_CONFIG['date_format'])
 
 # %% === Study Area methods
-def define_study_area_from_shapefile(shapefile_path, id_field, id_selection, clip_polygons=None):
+def define_study_area_from_shapefile(shapefile_path, id_field, id_selection):
     """Define study area from a shapefile, optionally clipping with custom polygons."""
     study_area_df = load_shapefile_polygons(
         shapefile_path=shapefile_path, 
@@ -43,8 +44,6 @@ def define_study_area_from_shapefile(shapefile_path, id_field, id_selection, cli
         convert_to_geo=True
     )
     id_polys = study_area_df['geometry']
-    if clip_polygons:
-        id_polys = intersect_polygons(id_polys, clip_polygons, clean_empty=True)
     study_area_poly = union_polygons(id_polys)
     study_area_extremes = get_polygon_extremes(study_area_poly)
     study_area_vars = {
@@ -88,39 +87,44 @@ def main(gui_mode: bool=False, base_dir: str=None) -> Dict[str, object]:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
         use_window = input("Define study area using rectangles? [y/N]: ").strip().lower() == "y"
-        if not(use_window):
-            src_mode = 'shapefile'
-            src_path = input("Study area shapefile name (e.g. study_area.shp) or full path: ").strip(' "')
-            if not os.path.isabs(src_path):
-                src_path = os.path.join(env.folders['inputs']['study_area']['path'], src_path)
-
-            shp_fields, shp_types = get_shapefile_fields(src_path)
-            print("Shapefile fields and types:")
-            for i, (f, t) in enumerate(zip(shp_fields, shp_types)):
-                print(f"{i+1}. {f} ({t})")
-            cls_fld = input(f"Field name containing polygon names (or number from 1 to {len(shp_fields)}): ").strip(' "')
-            if cls_fld.isdigit() and 1 <= int(cls_fld) <= len(shp_fields):
-                cls_fld = shp_fields[int(cls_fld)-1]
-
-            shp_field_vals = get_shapefile_field_values(src_path, cls_fld, sort=True)
-            print("Available classes:")
-            for i, val in enumerate(shp_field_vals):
-                print(f"{i+1}. {val}")
-            cls_sel = [x.strip(' "') for x in input("Classes to select (also multiple, comma or semicolon separated): ").replace(',', ';').split(';')]
-            cls_sel = sorted(set(shp_field_vals[int(x)-1] if x.isdigit() and 1 <= int(x) <= len(shp_field_vals) else x for x in cls_sel))
-        else:
+        if use_window:
             src_mode = 'rectangle'
             src_path = None
             cls_fld = None
             cls_sel = None
             n_rectangles = int(input("How many rectangles? [1]: ") or "1")
             rec_polys = create_rectangle_polygons(get_rectangle_parameters(n_rectangles))
+        else:
+            src_mode = 'shapefile'
+            print("\n === Shapefile selection ===")
+            src_path = select_file_prompt(
+                base_dir=env.folders['inputs']['study_area']['path'],
+                usr_prompt=f"Name or full path of the {src_type} shapefile (ex. {src_type}.shp): ",
+                src_ext='shp'
+            )
+
+            shp_fields, shp_types = get_shapefile_fields(src_path)
+            print("\n === Shapefile fields and types ===")
+            cls_fld = select_from_list_prompt(
+                obj_list=shp_fields, 
+                obj_type=shp_types, 
+                usr_prompt="Select the field:", 
+                allow_multiple=False
+            )[0]
+
+            shp_field_vals = get_shapefile_field_values(src_path, cls_fld, sort=True)
+            print("\n === Shapefile field classes ===")
+            cls_sel = select_from_list_prompt(
+                obj_list=shp_field_vals,
+                usr_prompt=f"Select the class(es) inside the field ({cls_fld}):", 
+                allow_multiple=True
+            )
 
     # --- Step 1: Study area definition ---
     if use_window:
         study_area_vars = define_study_area_from_rectangles(rec_polys)
     else:
-        # If you want to clip with rectangles, pass rectangle_polygons as clip_polygons
+        # If you want to clip with rectangles, pass something as clip_polygons
         _, cust_id = env.add_input_file(file_path=src_path, file_type='study_area')
         study_area_vars = define_study_area_from_shapefile(
             shapefile_path=src_path, 
@@ -147,6 +151,9 @@ if __name__ == "__main__":
     parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
     args = parser.parse_args()
 
-    study_area_vars = main(base_dir=args.base_dir, gui_mode=args.gui_mode)
+    study_area_vars = main(
+        base_dir=args.base_dir, 
+        gui_mode=args.gui_mode
+    )
 
 # %%
