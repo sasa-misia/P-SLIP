@@ -4,7 +4,7 @@ import rasterio
 import rasterio.warp
 import warnings
 import shapely
-from .coordinates import get_projected_crs_from_bbox, create_bbox, convert_bbox, create_grid_from_bbox, get_pixels_inside_polygon
+from .coordinates import get_projected_crs_from_bbox, create_bbox_from_grids, convert_bbox, create_grid_from_bbox, get_pixels_inside_polygon
 
 # %% === Function to replace values in a raster
 def replace_values(
@@ -65,7 +65,7 @@ def resample_raster(
     Returns:
         tuple[np.ndarray, dict, np.ndarray, np.ndarray]: Tuple containing the resampled raster, the raster profile, the x and y coordinates of the resampled raster.
     """
-    bbox = create_bbox(in_grid_x, in_grid_y)
+    bbox = create_bbox_from_grids(in_grid_x, in_grid_y)
     if in_profile['crs'].is_geographic:
         utm_crs = get_projected_crs_from_bbox(bbox)
         bbox_utm = convert_bbox(in_profile['crs'].to_epsg(), utm_crs.to_epsg(), bbox)

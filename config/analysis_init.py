@@ -246,9 +246,9 @@ class AnalysisEnvironment:
     
     def collect_input_files(
             self,
-            file_type: list = None,
-            file_subtype: list = None,
-            file_custom_id: list = None,
+            file_type: list[str] = None,
+            file_subtype: list[str] = None,
+            file_custom_id: list[str] = None,
             multi_extension: bool = False
         ) -> None:
         """
@@ -274,6 +274,14 @@ class AnalysisEnvironment:
         
         inp_files_df = pd.read_csv(inp_csv_path)
 
+        # Check if file_custom_id is a list and if all elements are None
+        if isinstance(file_custom_id, list) and all([x is None for x in file_custom_id]):
+            file_custom_id = None
+        if isinstance(file_type, list) and all([x is None for x in file_type]):
+            file_type = None
+        if isinstance(file_subtype, list) and all([x is None for x in file_subtype]):
+            file_subtype = None
+
         # Filter the DataFrame based on the provided file_type, file_subtype, and file_custom_id
         if file_custom_id:
             if not isinstance(file_custom_id, list):
@@ -288,13 +296,13 @@ class AnalysisEnvironment:
         else:
             df_filter = np.ones(len(inp_files_df), dtype=bool)
 
-            if file_type is not None:
+            if file_type:
                 if not isinstance(file_type, list):
                     logger.error("file_type must be a list of strings.")
                     raise TypeError("file_type must be a list of strings.")
                 df_filter = df_filter & inp_files_df['type'].isin(file_type)
             
-            if file_subtype is not None:
+            if file_subtype:
                 if not isinstance(file_subtype, list):
                     logger.error("file_subtype must be a list of strings.")
                     raise TypeError("file_subtype must be a list of strings.")

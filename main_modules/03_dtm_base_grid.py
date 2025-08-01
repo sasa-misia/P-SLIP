@@ -43,7 +43,7 @@ def import_dtm_files(
         resample_method: str='average',
         poly_mask: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None,
         apply_mask_to_raster: bool=False
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     """Import DTM files in a dataframe."""
     dtm_data = [] # Initializing an empty list
     abg_data = [] # Initializing an empty list
@@ -124,7 +124,7 @@ def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resa
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
 
-    study_area_polygon = env.load_variable(variable_filename='study_area_vars.pkl')['study_area_polygon']
+    study_area_polygon = env.load_variable(variable_filename='study_area_vars.pkl')['study_area_cln_poly']
 
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")

@@ -96,7 +96,7 @@ def main(gui_mode: bool=False, base_dir: str=None) -> Dict[str, object]:
             rec_polys = create_rectangle_polygons(get_rectangle_parameters(n_rectangles))
         else:
             src_mode = 'shapefile'
-            print("\n === Shapefile selection ===")
+            print("\n=== Shapefile selection ===")
             src_path = select_file_prompt(
                 base_dir=env.folders['inputs']['study_area']['path'],
                 usr_prompt=f"Name or full path of the {src_type} shapefile (ex. {src_type}.shp): ",
@@ -104,7 +104,7 @@ def main(gui_mode: bool=False, base_dir: str=None) -> Dict[str, object]:
             )
 
             shp_fields, shp_types = get_shapefile_fields(src_path)
-            print("\n === Shapefile fields and types ===")
+            print("\n=== Shapefile fields and types ===")
             cls_fld = select_from_list_prompt(
                 obj_list=shp_fields, 
                 obj_type=shp_types, 
@@ -113,7 +113,7 @@ def main(gui_mode: bool=False, base_dir: str=None) -> Dict[str, object]:
             )[0]
 
             shp_field_vals = get_shapefile_field_values(src_path, cls_fld, sort=True)
-            print("\n === Shapefile field classes ===")
+            print("\n=== Shapefile field classes ===")
             cls_sel = select_from_list_prompt(
                 obj_list=shp_field_vals,
                 usr_prompt=f"Select the class(es) inside the field ({cls_fld}):", 

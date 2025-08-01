@@ -7,6 +7,18 @@ def get_2d_idx_from_1d_idx(
         shape: tuple, 
         order: str='C'
     ) -> np.ndarray:
+    # Check that all numbers are integer or can be converted
+    if not issubclass(indices.dtype.type, np.integer):
+        if np.isnan(indices).any():
+            raise ValueError('NaN values are present in the array')
+        if np.issubdtype(indices.dtype, np.floating):
+            if np.allclose(indices % 1, 0):
+                indices = indices.astype(int)
+            else:
+                raise ValueError('The array contains non-integer numbers')
+        else:
+            raise ValueError('The array contains non-numeric values')
+    
     rows, cols = np.unravel_index(indices, shape, order=order)
     rows = np.squeeze(rows)
     cols = np.squeeze(cols)

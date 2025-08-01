@@ -4,8 +4,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import warnings
 import mayavi.mlab as mlab
-from .coordinates import convert_grids_and_profile_to_prj
-from .manage_raster import mask_raster_with_1d_idx, get_2d_mask_from_1d_idx
+import shapely
+from .coordinates import convert_grids_and_profile_to_prj, get_closest_pixel_idx, convert_coords, get_projected_epsg_code_from_bbox
+from .manage_raster import mask_raster_with_1d_idx, get_2d_mask_from_1d_idx, get_2d_idx_from_1d_idx
 
 # %% === Function to create a fake base grid
 def _create_fake_base_grid(
@@ -154,9 +155,15 @@ def _regularize_zxy_multi(
     
     if isinstance(elevation, pd.Series) or isinstance(elevation, pd.DataFrame):
         elevation = elevation.to_list()
+    if isinstance(x_grid, pd.Series) or isinstance(x_grid, pd.DataFrame):
         x_grid = x_grid.to_list()
+    if isinstance(y_grid, pd.Series) or isinstance(y_grid, pd.DataFrame):
         y_grid = y_grid.to_list()
+    if isinstance(mask_idx_1d, pd.Series) or isinstance(mask_idx_1d, pd.DataFrame):
         mask_idx_1d = mask_idx_1d.to_list()
+
+    if mask_idx_1d is None:
+        mask_idx_1d = [None for _ in elevation]
     
     if not(isinstance(elevation, list) and isinstance(x_grid, list) and isinstance(y_grid, list) and isinstance(mask_idx_1d, list)):
         raise ValueError(f"elevation, x_grid, y_grid, and mask_idx_1d must be lists, not {type(elevation)}, {type(x_grid)}, {type(y_grid)}")
@@ -194,6 +201,59 @@ def _obtain_masked_raster(
         out_elevation.append(mask_raster_with_1d_idx(e, m))
     return out_elevation
 
+# %% === Function to convert shapely polygons in two list (exteriors, interiors) of coordinates
+def get_coord_lists_from_polygon(
+        polygon: shapely.geometry.base.BaseGeometry
+    ) -> tuple[list, list]:
+    exteriors_list = []
+    interiors_list = []
+    def _single_polygon(polygon):
+        x, y = polygon.exterior.xy
+        exteriors_list.append((np.array(x), np.array(y)))
+        if len(polygon.interiors) > 0:
+            for interior in polygon.interiors:
+                x, y = interior.xy
+                interiors_list.append((np.array(x), np.array(y)))
+    if polygon is not None:
+        if isinstance(polygon, shapely.geometry.MultiPolygon):
+            for poly in polygon.geoms:
+                _single_polygon(poly)
+        elif isinstance(polygon, shapely.geometry.Polygon):
+            _single_polygon(polygon)
+        else:
+            raise ValueError("Polygon must be a Shapely Polygon or MultiPolygon.")
+    return exteriors_list, interiors_list
+
+# %% Function to get the elevation from a list of coordinates
+def get_elevation_from_coord_list(
+        coord_list: list,
+        elevation: list | pd.Series | np.ndarray, 
+        x_grid: list | pd.Series | np.ndarray=None, 
+        y_grid: list | pd.Series | np.ndarray=None
+    ) -> list:
+    if not isinstance(coord_list, list):
+        raise ValueError(f"coord_list must be a list, not {type(coord_list)}")
+    for coord in coord_list:
+        if not isinstance(coord, tuple):
+            raise ValueError(f"coord_list must be a list of tuples, not {type(coord)}")
+    
+    elevation, x_grid, y_grid, _ = _regularize_zxy_multi(elevation, x_grid, y_grid)
+        
+    coord_elevation = []
+    for coord in coord_list:
+        idx_matrix, dst_matrix = np.zeros([coord[0].size, len(elevation)]), np.zeros([coord[0].size, len(elevation)])
+        for i, (x, y) in enumerate(zip(x_grid, y_grid)):
+            idx_temp, dst_temp = get_closest_pixel_idx(coord[0], coord[1], x_grid=x, y_grid=y)
+            idx_matrix[:, i] = idx_temp
+            dst_matrix[:, i] = dst_temp
+        
+        coord_elevation.append(np.zeros(coord[0].size))
+        for i in range(coord[0].size):
+            grid_number = np.nanargmin(dst_matrix[i, :])
+            idx_2d_grid = get_2d_idx_from_1d_idx(idx_matrix[i, :][grid_number], elevation[grid_number].shape)
+            coord_elevation[-1][i] = elevation[grid_number][idx_2d_grid]
+    return coord_elevation
+
 # %% === Function to show elevation in a isometric plot
 def plot_elevation_isometric(
         elevation: list | pd.Series | np.ndarray, 
@@ -201,6 +261,7 @@ def plot_elevation_isometric(
         y_grid: list | pd.Series | np.ndarray=None,
         mask_idx_1d: list | pd.Series | np.ndarray=None,
         figure: plt.figure=None,
+        polygon: shapely.geometry.base.BaseGeometry=None,
         show: bool=True
     ) -> tuple[plt.figure, plt.axes]:
     """
@@ -229,6 +290,16 @@ def plot_elevation_isometric(
     axs.set_title('Elevation Map')
     for e, x, y in zip(elevation, x_grid, y_grid):
         axs.plot_surface(x, y, e, cmap='viridis')
+    
+    if polygon:
+        warnings.warn("Polygon can be very slow in a 3D plot.")
+        exteriors_coord_list, interiors_coord_list = get_coord_lists_from_polygon(polygon)
+        exteriors_elev_list = get_elevation_from_coord_list(exteriors_coord_list, elevation, x_grid, y_grid)
+        interiors_elev_list = get_elevation_from_coord_list(interiors_coord_list, elevation, x_grid, y_grid)
+        for c, e in zip(exteriors_coord_list, exteriors_elev_list):
+            axs.plot3D(c[0], c[1], e, color='k')
+        for c, e in zip(interiors_coord_list, interiors_elev_list):
+            axs.plot3D(c[0], c[1], e, color='k')
 
     if show: fig.show()
     return fig, axs
@@ -240,10 +311,11 @@ def plot_elevation_2d(
         y_grid: list | pd.Series | np.ndarray=None,
         mask_idx_1d: list | pd.Series | np.ndarray=None,
         figure: plt.figure=None,
+        polygon: shapely.geometry.base.BaseGeometry=None,
         show: bool=True
     ) -> tuple[plt.figure, plt.axes]:
     """
-    Show elevation in a 2D plot.
+    Show elevation in a 2D plot with optional polygon overlay.
 
     Args:
         elevation (list | pd.Series | np.ndarray): The elevation data, which can be a single matrix or a list of matrices.
@@ -252,6 +324,7 @@ def plot_elevation_2d(
         mask_idx_1d (np.ndarray): The indices of the points to show.
         figure (plt.figure): The figure to plot on.
         show (bool): Whether to show the plot.
+        polygon (shapely.geometry.base.BaseGeometry, optional): A Shapely Polygon or MultiPolygon to overlay on the plot.
         
     Returns:
         tuple[plt.figure, plt.axes]: The figure and axes.
@@ -260,17 +333,42 @@ def plot_elevation_2d(
     elevation = _obtain_masked_raster(elevation, mask_idx_1d) 
 
     if figure is None:
-        fig, axs = plt.subplots(nrows=1, ncols=len(elevation), figsize=(5 * len(elevation), 5))
-        if len(elevation) == 1:
-            axs = [axs]  # Ensure axes is always a list
+        fig = plt.figure()
     else:
         fig = figure
-        axs = [fig.add_subplot(1, len(elevation), i + 1) for i in range(len(elevation))]
+    
+    axs = fig.add_subplot(111)
 
-    for idx, (ax, e, x, y) in enumerate(zip(axs, elevation, x_grid, y_grid)):
-        ax.set_title(f'Elevation Map {idx + 1}')
-        ax.imshow(e, cmap='viridis', extent=(x[0, 0], x[-1, -1], y[0, 0], y[-1, -1]))
-        ax.set_aspect('equal')
+    axs.set_title(f'Elevation Map')
+
+    # create a unique color bar for all dtms
+    min_elv = min([e.min() for e in elevation])
+    max_elv = max([e.max() for e in elevation])
+
+    for e, x, y in zip(elevation, x_grid, y_grid):
+        if x[0,0] < x[0,-1]: # if x is increasing
+            left_x = x.min()
+            right_x = x.max()
+        else:
+            left_x = x.max()
+            right_x = x.min()
+
+        if y[0,0] > y[-1,0]: # if y is increasing
+            bottom_y = y.max()
+            top_y = y.min()
+        else:
+            bottom_y = y.min()
+            top_y = y.max()
+        
+        axs.imshow(e, cmap='viridis', extent=(left_x, right_x, bottom_y, top_y), aspect='auto', vmin=min_elv, vmax=max_elv, origin='lower')
+        axs.set_aspect('equal')
+    
+    if polygon:
+        exteriors_list, interiors_list = get_coord_lists_from_polygon(polygon)
+        for e in exteriors_list:
+            axs.plot(e[0], e[1], color='black')
+        for i in interiors_list:
+            axs.plot(i[0], i[1], color='red')
 
     if show: fig.show()
     return fig, axs
@@ -283,6 +381,7 @@ def plot_elevation_3d(
         mask_idx_1d: list | pd.Series | np.ndarray=None,
         projected: bool=False,
         figure: mlab.figure=None,
+        polygon: shapely.geometry.base.BaseGeometry=None,
         show: bool=True
     ) -> tuple[mlab.figure, any]:
     """
@@ -316,6 +415,20 @@ def plot_elevation_3d(
     
     for e, x, y in zip(elevation, x_grid, y_grid):
         mlab.mesh(x, y, e, colormap='terrain', vmin=min_elv, vmax=max_elv, figure=fig)
+    
+    if polygon:
+        warnings.warn("Polygon can be very slow in a 3D plot.")
+        if projected:
+            proj_epsg = get_projected_epsg_code_from_bbox(polygon.bounds)
+        exteriors_coord_list, interiors_coord_list = get_coord_lists_from_polygon(polygon)
+        exteriors_elev_list = get_elevation_from_coord_list(exteriors_coord_list, elevation, x_grid, y_grid)
+        interiors_elev_list = get_elevation_from_coord_list(interiors_coord_list, elevation, x_grid, y_grid)
+        for c, e in zip(exteriors_coord_list, exteriors_elev_list):
+            if projected:
+                c[0], c[1] = convert_coords(4326, proj_epsg, c[0], c[1], force_ndarray=True)
+            mlab.plot3d(c[0], c[1], e, color=(0, 0, 0), tube_radius=10, figure=fig)
+        for c, e in zip(interiors_coord_list, interiors_elev_list):
+            mlab.plot3d(c[0], c[1], e, color=(1, 0, 0), tube_radius=10, figure=fig)
 
     if show: mlab.show()
     return fig, axs

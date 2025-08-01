@@ -85,6 +85,7 @@ def intersect_polygons(
     Args:
         polygons (geom.Polygon | geom.MultiPolygon | list | pd.Series): Polygons (or MultiPolygon) to intersect.
         mask (geom.Polygon | geom.MultiPolygon | list | pd.Series): Mask polygon (or MultiPolygon) to intersect with.
+        clean_empty (bool, optional): Whether to remove empty polygons from the result. Defaults to False.
 
     Returns:
         list: List of intersected polygons (or MultiPolygon).
@@ -121,6 +122,27 @@ def intersect_polygons(
     if not intersected_poly:
         warnings.warn("The intersection of the polygons with the mask is empty.")
     return intersected_poly
+
+# %% === Function to subtract a polygon from a list of polygons
+def subtract_polygons(
+        polygons: geom.Polygon | geom.MultiPolygon | list | pd.Series, 
+        mask: geom.Polygon | geom.MultiPolygon | list | pd.Series,
+    ) -> list[geom.Polygon | geom.MultiPolygon]:
+    """
+    Intersect a list of polygons with a mask polygon (or MultiPolygon).
+
+    Args:
+        polygons (geom.Polygon | geom.MultiPolygon | list | pd.Series): Polygons (or MultiPolygon) to be subtracted.
+        mask (geom.Polygon | geom.MultiPolygon | list | pd.Series): Mask polygon (or MultiPolygon) to subtract.
+
+    Returns:
+        list: List of intersected polygons (or MultiPolygon).
+    """
+    polygons = _check_and_collect_polygons_in_list(polygons)
+    mask_union = union_polygons(mask)
+
+    subtracted_polygon = [p.symmetric_difference(mask_union) for p in polygons]
+    return subtracted_polygon
 
 # %% === Function to obtain list of coordinates (exterior and interiors) from a polygon
 def get_ext_int_coords_from_polygon(

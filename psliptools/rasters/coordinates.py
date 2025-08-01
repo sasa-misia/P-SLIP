@@ -6,7 +6,6 @@ import warnings
 import numpy as np
 import pyproj
 import shapely
-import scipy
 
 # %% === Function to get raster crs
 def _get_crs(raster_path: str, set_crs: int=None) -> rasterio.crs.CRS:
@@ -171,7 +170,7 @@ def are_coords_geographic(lon: np.ndarray, lat: np.ndarray) -> bool:
     return np.all(lon >= -180) and np.all(lon <= 180) and np.all(lat >= -90) and np.all(lat <= 90)
 
 # %% === Function to create bounding box from coordinates
-def create_bbox(
+def create_bbox_from_grids(
         coords_x: np.ndarray, 
         coords_y: np.ndarray
     ) -> np.ndarray:
@@ -179,8 +178,8 @@ def create_bbox(
     Create a bounding box from coordinates.
 
     Args:
-        coords_x (np.ndarray): Array of x coordinates.
-        coords_y (np.ndarray): Array of y coordinates.
+        coords_x (np.ndarray): 2D array of x coordinates.
+        coords_y (np.ndarray): 2D array of y coordinates.
 
     Returns:
         np.ndarray: Array of bounding box coordinates [xmin, ymin, xmax, ymax].
@@ -439,7 +438,7 @@ def convert_grids_and_profile_to_prj(
         raise ValueError('in_grid_lon and in_grid_lat must be geographic coordinates!')
     
     if crs_out is None:
-        bbox_geo = create_bbox(in_grid_lon, in_grid_lat)
+        bbox_geo = create_bbox_from_grids(in_grid_lon, in_grid_lat)
         crs_out_obj = get_projected_crs_from_bbox(bbox_geo)
     elif isinstance(crs_out, int):
         crs_out_obj = rasterio.crs.CRS.from_epsg(crs_out)
@@ -526,7 +525,7 @@ def get_closest_pixel_idx(
         x_grid: np.ndarray=None,
         y_grid: np.ndarray=None,
         raster_profile: dict=None
-    ) -> int:
+    ) -> tuple[np.ndarray, np.ndarray]:
     """
     Get the 1d index of the pixel that is closest to a given coordinate.
 
@@ -558,16 +557,18 @@ def get_closest_pixel_idx(
         raise ValueError('x and y must have the same size!')
     
     idx_1d = np.zeros(x.size)
+    dst_1d = np.zeros(x.size)
     for idx, (curr_x, curr_y) in enumerate(zip(x, y)):
         dist = np.sqrt((ref_grid_x - curr_x)**2 + (ref_grid_y - curr_y)**2)
+        dst_1d[idx] = dist.min()
         if dist.min() > np.sqrt((ref_grid_x[1,1] - ref_grid_x[0,0])**2 + (ref_grid_y[1,1] - ref_grid_y[0,0])**2):
-            warnings.warn("The provided coordinate is outside the raster!")
+            # warnings.warn("The provided coordinate is outside the raster!")
             idx_1d[idx] = np.nan
         else:
             idx_1d[idx] = np.argmin(dist.flatten())
     # === Alternative to test
     # kdtree = scipy.spatial.KDTree(np.dstack((ref_grid_x.flatten(), ref_grid_y.flatten())).reshape(-1, 2))
     # dist, idx_1d = kdtree.query(np.column_stack((x, y)))
-    return idx_1d
+    return idx_1d, dst_1d
 
 # %%

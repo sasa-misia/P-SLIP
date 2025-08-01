@@ -164,7 +164,7 @@ def select_from_list_prompt(
     if allow_multiple:
         default_index = f"1:{len(obj_list)}"
         multi_completion = "(s)"
-        extra_prompt = "\n - Multiple selection -> use [,] or [;] (ex. 1, 2, 3) \n - Range selection -> use [:] (ex. 1:3)"
+        extra_prompt = "\n    - Multiple selection -> use [,] or [;] (ex. 1, 2, 3) \n    - Range selection -> use [:] (ex. 1:3)"
     else:
         default_index = "1"
         multi_completion = ""
@@ -176,7 +176,7 @@ def select_from_list_prompt(
         + f"of the option{multi_completion} you want to select (or press enter for default: {default_index}) " \
         + f"{extra_prompt}")
 
-    user_raw_input = input("\n "+usr_prompt).strip(' "')
+    user_raw_input = input("\n"+usr_prompt).strip(' "')
 
     selected_indices = _parse_selection_string(obj_list, user_raw_input)
     
@@ -266,7 +266,7 @@ def select_file_prompt(
     if files:
         print_enumerated_list(files)
 
-    source_path = input("\n "+usr_prompt).strip(' "')
+    source_path = input("\n"+usr_prompt).strip(' "')
 
     if files and source_path.isdigit() and int(source_path) in range(1, len(files)+1):
         source_path = files[int(source_path)-1]
