@@ -7,6 +7,7 @@ Provides functions for importing and generating raster grids (e.g., elevation).
 from .coordinates import (
     get_georaster_info,
     get_xy_grids_from_profile,
+    get_bbox_from_profile,
     get_projected_epsg_code_from_bbox,
     get_projected_crs_from_bbox,
     are_coords_geographic,
@@ -47,6 +48,7 @@ __all__ = [
     "load_georaster",
     "get_georaster_info",
     "get_xy_grids_from_profile",
+    "get_bbox_from_profile",
     "get_projected_epsg_code_from_bbox",
     "get_projected_crs_from_bbox",
     "are_coords_geographic",

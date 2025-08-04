@@ -292,7 +292,6 @@ def plot_elevation_isometric(
         axs.plot_surface(x, y, e, cmap='viridis')
     
     if polygon:
-        warnings.warn("Polygon can be very slow in a 3D plot.")
         exteriors_coord_list, interiors_coord_list = get_coord_lists_from_polygon(polygon)
         exteriors_elev_list = get_elevation_from_coord_list(exteriors_coord_list, elevation, x_grid, y_grid)
         interiors_elev_list = get_elevation_from_coord_list(interiors_coord_list, elevation, x_grid, y_grid)
@@ -417,7 +416,6 @@ def plot_elevation_3d(
         mlab.mesh(x, y, e, colormap='terrain', vmin=min_elv, vmax=max_elv, figure=fig)
     
     if polygon:
-        warnings.warn("Polygon can be very slow in a 3D plot.")
         if projected:
             proj_epsg = get_projected_epsg_code_from_bbox(polygon.bounds)
         exteriors_coord_list, interiors_coord_list = get_coord_lists_from_polygon(polygon)

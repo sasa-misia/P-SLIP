@@ -4,7 +4,17 @@ import rasterio
 import rasterio.warp
 import warnings
 import shapely
-from .coordinates import get_projected_crs_from_bbox, create_bbox_from_grids, convert_bbox, create_grid_from_bbox, get_pixels_inside_polygon
+import scipy.interpolate
+import scipy.spatial
+from .coordinates import (
+    get_projected_crs_from_bbox, 
+    create_bbox_from_grids, 
+    convert_bbox, 
+    create_grid_from_bbox, 
+    get_pixels_inside_polygon,
+    get_xy_grids_from_profile,
+    get_bbox_from_profile
+)
 
 # %% === Function to replace values in a raster
 def replace_values(
@@ -45,9 +55,7 @@ def replace_values(
 # %% === Function to resample raster
 def resample_raster(
         in_raster: np.ndarray, 
-        in_profile: dict, 
-        in_grid_x: np.ndarray, 
-        in_grid_y: np.ndarray, 
+        in_profile: dict,
         resample_method: str='nearest',
         new_size: np.ndarray=[10, 10],
         poly_mask: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None
@@ -65,7 +73,7 @@ def resample_raster(
     Returns:
         tuple[np.ndarray, dict, np.ndarray, np.ndarray]: Tuple containing the resampled raster, the raster profile, the x and y coordinates of the resampled raster.
     """
-    bbox = create_bbox_from_grids(in_grid_x, in_grid_y)
+    bbox = get_bbox_from_profile(in_profile)
     if in_profile['crs'].is_geographic:
         utm_crs = get_projected_crs_from_bbox(bbox)
         bbox_utm = convert_bbox(in_profile['crs'].to_epsg(), utm_crs.to_epsg(), bbox)
@@ -119,5 +127,88 @@ def resample_raster(
     if poly_mask is not None:
         mask_matrix = get_pixels_inside_polygon(geo_polygon=poly_mask, raster_profile=out_profile)
     return out_raster, out_profile, out_grid_x, out_grid_y, mask_matrix
+
+# %% === Function to interpolate scatter data to raster
+def interpolate_scatter_to_raster(
+        in_data: np.ndarray, 
+        in_coord_x: np.ndarray, 
+        in_coord_y: np.ndarray, 
+        resample_method: str='nearest',
+        out_profile: dict=None,
+        out_grid_x: np.ndarray=None,
+        out_grid_y: np.ndarray=None,
+        fill_value: float=np.nan,
+        max_distance: float=None
+    ) -> np.ndarray:
+    """
+    Interpolate values from one raster to another.
+
+    Args:
+        in_data (np.ndarray): The input data to interpolate.
+        in_coord_x (np.ndarray): The x coordinates of the input data.
+        in_coord_y (np.ndarray): The y coordinates of the input data.
+        resample_method (str, optional): The resampling method. Defaults to 'nearest'.
+        out_profile (dict, optional): A dictionary containing the raster profile. If provided, out_grid_x and out_grid_y will be derived from it.
+        out_grid_x (np.ndarray, optional): The x coordinates of the output grid. If None, it will be derived from out_profile.
+        out_grid_y (np.ndarray, optional): The y coordinates of the output grid. If None, it will be derived from out_profile.
+
+    Returns:
+        np.ndarray: The interpolated raster.
+    """
+    if not isinstance(in_data, np.ndarray) or not isinstance(in_coord_x, np.ndarray) or not isinstance(in_coord_y, np.ndarray):
+        raise TypeError('in_data, in_coord_x, and in_coord_y must be numpy arrays')
+
+    if in_data.ndim != 1 or in_coord_x.ndim != 1 or in_coord_y.ndim != 1:
+        raise ValueError('in_data, in_coord_x, and in_coord_y must be 1D arrays')
+    if in_data.size != in_coord_x.size or in_data.size != in_coord_y.size:
+        raise ValueError('in_data, in_coord_x, and in_coord_y must have the same size')
+    if out_profile:
+        if out_grid_x or out_grid_y:
+            raise ValueError('If out_profile is provided, out_grid_x and out_grid_y must not be provided')
+        out_grid_x, out_grid_y = get_xy_grids_from_profile(out_profile)
+    else:
+        if not isinstance(out_grid_x, np.ndarray) or not isinstance(out_grid_y, np.ndarray):
+            raise TypeError('out_grid_x and out_grid_y must be numpy arrays')
+        if out_grid_x.ndim != 2 or out_grid_y.ndim != 2:
+            raise ValueError('out_grid_x and out_grid_y must be 2D arrays')
+        if out_grid_x.shape != out_grid_y.shape:
+            raise ValueError('out_grid_x and out_grid_y must have the same shape')
+    
+    if np.isnan(in_data).any() or np.isinf(in_data).any():
+        raise ValueError('in_data contains NaN or Inf')
+    if np.isnan(in_coord_x).any() or np.isinf(in_coord_x).any():
+        raise ValueError('in_coord_x contains NaN or Inf')
+    if np.isnan(in_coord_y).any() or np.isinf(in_coord_y).any():
+        raise ValueError('in_coord_y contains NaN or Inf')
+    
+    out_raster_data = np.zeros(out_grid_x.shape, dtype=in_data.dtype)
+
+    points = np.column_stack((in_coord_x, in_coord_y))
+    grid_points = (out_grid_x, out_grid_y)
+
+    allowed_methods = ['nearest', 'linear', 'cubic']
+    if resample_method not in allowed_methods:
+        raise ValueError(f"resample_method must be one of {allowed_methods}")
+    
+    out_raster_data = scipy.interpolate.griddata(
+        points, 
+        in_data, 
+        grid_points, 
+        method=resample_method, 
+        fill_value=fill_value,
+    )
+
+    if max_distance:
+        # === Fast method using KDTree for nearest neighbor search
+        max_distance = float(max_distance)
+        if max_distance <= 0:
+            raise ValueError('max_distance must be greater than 0')
+        # KDTree for fast nearest neighbor search
+        kdtree = scipy.spatial.cKDTree(points)
+        grid_coords = np.stack([out_grid_x.ravel(), out_grid_y.ravel()], axis=1)
+        min_dists, _ = kdtree.query(grid_coords, k=1)
+        min_dists = min_dists.reshape(out_grid_x.shape)
+        out_raster_data[min_dists > max_distance] = fill_value
+    return out_raster_data
 
 # %%

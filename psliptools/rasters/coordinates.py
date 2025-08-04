@@ -6,6 +6,7 @@ import warnings
 import numpy as np
 import pyproj
 import shapely
+import scipy.spatial
 
 # %% === Function to get raster crs
 def _get_crs(raster_path: str, set_crs: int=None) -> rasterio.crs.CRS:
@@ -89,6 +90,33 @@ def get_xy_grids_from_profile(profile: dict) -> tuple[np.ndarray, np.ndarray]:
             col
         )
     return ref_grid_x, ref_grid_y
+
+# %% === Function to get the bounding box from a profile
+def get_bbox_from_profile(
+        profile: dict
+    ) -> np.ndarray[(1, 4), float]:
+    """
+    Get the bounding box from a raster profile.
+
+    Args:
+        profile (dict): A dictionary containing the raster profile.
+
+    Returns:
+        np.ndarray: Array of bounding box coordinates [xmin, ymin, xmax, ymax].
+    """
+    if 'transform' not in profile:
+        raise ValueError("The profile does not contain a 'transform' key.")
+    if not isinstance(profile['transform'], rasterio.transform.Affine):
+        raise ValueError("The 'transform' key in the profile must be of type rasterio.transform.Affine.")
+    if 'height' not in profile or 'width' not in profile:
+        raise ValueError("The profile must contain 'height' and 'width' keys.")
+    
+    bbox = rasterio.transform.array_bounds(
+        profile['height'], 
+        profile['width'], 
+        profile['transform']
+    )
+    return np.array(bbox)
 
 # %% === Function to get the projected epsg code from a bounding box
 def get_projected_epsg_code_from_bbox(geo_bbox: list | np.ndarray) -> int:
@@ -524,7 +552,9 @@ def get_closest_pixel_idx(
         y: np.ndarray,
         x_grid: np.ndarray=None,
         y_grid: np.ndarray=None,
-        raster_profile: dict=None
+        raster_profile: dict=None,
+        fill_outside: bool = True,
+        fill_value: float = np.nan
     ) -> tuple[np.ndarray, np.ndarray]:
     """
     Get the 1d index of the pixel that is closest to a given coordinate.
@@ -539,10 +569,10 @@ def get_closest_pixel_idx(
     Returns:
         int: The 1d index of the pixel that is closest to the coordinate.
     """
-    if x_grid is None or y_grid is None and raster_profile is None:
+    if (x_grid is None and y_grid is None) and raster_profile is None:
         raise ValueError('x_grid + y_grid or raster_profile must be provided!')
     
-    if raster_profile is not None:
+    if raster_profile:
         ref_grid_x, ref_grid_y = get_xy_grids_from_profile(raster_profile)
     else:
         ref_grid_x = x_grid
@@ -556,19 +586,16 @@ def get_closest_pixel_idx(
     if x.size != y.size:
         raise ValueError('x and y must have the same size!')
     
-    idx_1d = np.zeros(x.size)
-    dst_1d = np.zeros(x.size)
-    for idx, (curr_x, curr_y) in enumerate(zip(x, y)):
-        dist = np.sqrt((ref_grid_x - curr_x)**2 + (ref_grid_y - curr_y)**2)
-        dst_1d[idx] = dist.min()
-        if dist.min() > np.sqrt((ref_grid_x[1,1] - ref_grid_x[0,0])**2 + (ref_grid_y[1,1] - ref_grid_y[0,0])**2):
-            # warnings.warn("The provided coordinate is outside the raster!")
-            idx_1d[idx] = np.nan
-        else:
-            idx_1d[idx] = np.argmin(dist.flatten())
-    # === Alternative to test
-    # kdtree = scipy.spatial.KDTree(np.dstack((ref_grid_x.flatten(), ref_grid_y.flatten())).reshape(-1, 2))
-    # dist, idx_1d = kdtree.query(np.column_stack((x, y)))
+    # === Fast KDTree method
+    grid_points = np.column_stack((ref_grid_x.flatten(), ref_grid_y.flatten()))
+    query_points = np.column_stack((x, y))
+    kdtree = scipy.spatial.cKDTree(grid_points)
+    dst_1d, idx_1d = kdtree.query(query_points, k=1)
+
+    # Fill value for points outside raster boundary (optional)
+    if fill_outside:
+        pixel_size = np.sqrt((ref_grid_x[1,1] - ref_grid_x[0,0])**2 + (ref_grid_y[1,1] - ref_grid_y[0,0])**2)
+        idx_1d = np.where(dst_1d > pixel_size, fill_value, idx_1d)
     return idx_1d, dst_1d
 
 # %%

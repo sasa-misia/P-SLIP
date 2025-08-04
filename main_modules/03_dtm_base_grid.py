@@ -64,8 +64,6 @@ def import_dtm_files(
             raster_data, raster_profile, raster_x, raster_y, mask_matrix = resample_raster(
                 in_raster=raster_data, 
                 in_profile=raster_profile,
-                in_grid_x=raster_x,
-                in_grid_y=raster_y,
                 resample_method=resample_method,
                 new_size=resample_size,
                 poly_mask=poly_mask
