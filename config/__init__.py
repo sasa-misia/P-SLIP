@@ -15,7 +15,8 @@ from .default_params import (
     RAW_INPUT_FILENAME,
     RAW_INPUT_CSV_COLUMNS,
     LIBRARIES_CONFIG,
-    ANALYSIS_CONFIGURATION
+    ANALYSIS_CONFIGURATION,
+    KNOWN_OPTIONAL_STATIC_INPUT_TYPES
 )
 
 from .version_writer import (
@@ -41,6 +42,7 @@ __all__ = [
     'RAW_INPUT_CSV_COLUMNS',
     'LIBRARIES_CONFIG',
     'ANALYSIS_CONFIGURATION',
+    'KNOWN_OPTIONAL_STATIC_INPUT_TYPES',
     'AnalysisEnvironment',
     'create_analysis_environment',
     'get_analysis_environment',

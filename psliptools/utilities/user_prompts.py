@@ -5,7 +5,7 @@ import warnings
 # %% === Function to check if an object is a list containing strings
 def _check_list_of_strings(obj_list) -> None:
     """Check if an object is a list containing strings."""
-    if not obj_list:
+    if obj_list is None:
         raise ValueError("obj_list must not be empty")
     if not isinstance(obj_list, list):
         raise ValueError(f"obj_list must be a list, not {type(obj_list)}")

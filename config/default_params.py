@@ -16,20 +16,22 @@ DEFAULT_CASE_NAME = 'Not Defined - Standalone'
 ENVIRONMENT_FILENAME = 'analysis_environment.json'
 
 # Input types and subfolders for dynamic inputs
-KNOWN_STATIC_INPUT_TYPES = [
+KNOWN_REQUIRED_STATIC_INPUT_TYPES = [
     'study_area',
-    'dtm',
+    'dtm'
+]
+KNOWN_OPTIONAL_STATIC_INPUT_TYPES = [
     'landslides',
     'soil',
     'vegetation',
     'infrastructures',
-    'land_uses'
+    'land_use'
 ]
 KNOWN_DYNAMIC_INPUT_TYPES = [
     'rainfalls', 
     'temperature'
 ]
-DYNMIC_SUBFOLDERS = [
+DYNAMIC_SUBFOLDERS = [
     'recordings', 
     'forecast'
 ]
@@ -39,8 +41,9 @@ GENERIC_INPUT_TYPE = ['miscellaneous']
 # This dictionary defines the folder structure for the project.
 ANALYSIS_FOLDER_STRUCTURE = {
     'inputs': [
-        *KNOWN_STATIC_INPUT_TYPES,
-        {name: DYNMIC_SUBFOLDERS for name in KNOWN_DYNAMIC_INPUT_TYPES},
+        *KNOWN_REQUIRED_STATIC_INPUT_TYPES,
+        *KNOWN_OPTIONAL_STATIC_INPUT_TYPES,
+        {name: DYNAMIC_SUBFOLDERS for name in KNOWN_DYNAMIC_INPUT_TYPES},
         *GENERIC_INPUT_TYPE
     ],
     'variables': [],
@@ -95,7 +98,8 @@ LOG_CONFIG = {
 # This dictionary contains the analysis configuration template.
 ANALYSIS_CONFIGURATION = {
     'inputs': { # Here all the settings used to import the various files (ex: {'study_area': [{'settings': {}, 'custom_id': []}]})
-        **{k: [{'settings': {}, 'custom_id': []}] for k in KNOWN_STATIC_INPUT_TYPES},
+        **{k: [{'settings': {}, 'custom_id': []}] for k in KNOWN_REQUIRED_STATIC_INPUT_TYPES},
+        **{k: [{'settings': {}, 'custom_id': []}] for k in KNOWN_OPTIONAL_STATIC_INPUT_TYPES},
         **{k: [{'settings': {}, 'custom_id': []}] for k in KNOWN_DYNAMIC_INPUT_TYPES},
         **{k: [{'settings': {}, 'custom_id': []}] for k in GENERIC_INPUT_TYPE}
     },

@@ -10,10 +10,12 @@ This module provides functions to get the current application version.
 import subprocess
 import os
 
+CWD = os.path.dirname(os.path.abspath(__file__))
+
 # %% Define functions to get the version and write it to a file
 def get_app_version():
     try:
-        output = subprocess.check_output(["git", "describe", "--tags", "--always", "--dirty"])
+        output = subprocess.check_output(["git", "describe", "--tags", "--always", "--dirty"], cwd=CWD)
         version = output.decode("utf-8").strip()
         return version
     except subprocess.CalledProcessError as e:
@@ -21,7 +23,7 @@ def get_app_version():
         return None
 
 def write_app_version_to_file(version):
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = CWD
     file_path = os.path.join(script_dir, "version.txt")
     with open(file_path, "w") as f:
         f.write(version)

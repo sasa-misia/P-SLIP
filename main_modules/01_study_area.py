@@ -14,18 +14,22 @@ from config import (
 )
 
 # Importing necessary modules from psliptools
-from psliptools import (
+from psliptools.geometries import (
     load_shapefile_polygons,
     get_rectangle_parameters,
     create_rectangle_polygons,
     union_polygons,
     get_polygon_extremes,
     get_shapefile_fields,
-    get_shapefile_field_values,
+    get_shapefile_field_values
+)
+
+from psliptools.utilities import (
     select_file_prompt,
     select_from_list_prompt
 )
 
+# Importing necessary modules from main_modules
 from env_init import get_or_create_analysis_environment
 
 # %% === Set up logging configuration
@@ -35,6 +39,8 @@ logging.basicConfig(level=logging.INFO,
                     datefmt=LOG_CONFIG['date_format'])
 
 # %% === Study Area methods
+REM_POLY_DF = pd.DataFrame(columns=['type', 'subtype', 'class_name', 'geometry']) # Empty DataFrame for removed areas
+
 def define_study_area_from_shapefile(shapefile_path, id_field, id_selection):
     """Define study area from a shapefile, optionally clipping with custom polygons."""
     study_area_df = load_shapefile_polygons(
@@ -50,7 +56,7 @@ def define_study_area_from_shapefile(shapefile_path, id_field, id_selection):
         'study_area_polygon': study_area_poly,
         'study_area_cls_poly': study_area_df,
         'study_area_cln_poly': study_area_poly,
-        'study_area_rem_poly': pd.DataFrame(), # Empty DataFrame for removed areas
+        'study_area_rem_poly': REM_POLY_DF,
         'study_area_extremes': study_area_extremes
     }
     return study_area_vars
@@ -69,7 +75,7 @@ def define_study_area_from_rectangles(rectangle_polygons):
         'study_area_polygon': study_area_poly,
         'study_area_cls_poly': study_area_df,
         'study_area_cln_poly': study_area_poly,
-        'study_area_rem_poly': pd.DataFrame(), # Empty DataFrame for removed areas
+        'study_area_rem_poly': REM_POLY_DF,
         'study_area_extremes': study_area_extremes
     }
     return study_area_vars
@@ -125,7 +131,7 @@ def main(gui_mode: bool=False, base_dir: str=None) -> Dict[str, object]:
         study_area_vars = define_study_area_from_rectangles(rec_polys)
     else:
         # If you want to clip with rectangles, pass something as clip_polygons
-        _, cust_id = env.add_input_file(file_path=src_path, file_type='study_area')
+        _, cust_id = env.add_input_file(file_path=src_path, file_type=src_type)
         study_area_vars = define_study_area_from_shapefile(
             shapefile_path=src_path, 
             id_field=cls_fld, 
@@ -135,17 +141,17 @@ def main(gui_mode: bool=False, base_dir: str=None) -> Dict[str, object]:
     env.config['inputs'][src_type][0]['settings'] = {
         'source_mode': src_mode,
         'source_field': cls_fld,
-        'source_selection': cls_sel
+        'source_selection': cls_sel,
+        'source_refined': False
     }
     env.config['inputs'][src_type][0]['custom_id'] = [cust_id]
     env.collect_input_files(file_type=[src_type], multi_extension=True)
-    
-    env.save_variable(variable_to_save=study_area_vars, variable_filename="study_area_vars.pkl")
+
+    env.save_variable(variable_to_save=study_area_vars, variable_filename=f"{src_type}_vars.pkl")
     return study_area_vars
 
  # %% === Command line interface
 if __name__ == "__main__":
-    # Command line interface
     parser = argparse.ArgumentParser(description="Define the study area for the analysis.")
     parser.add_argument('--base_dir', type=str, default=None, help="Base directory for the analysis.")
     parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")

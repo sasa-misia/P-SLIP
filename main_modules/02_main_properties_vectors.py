@@ -9,19 +9,25 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # Importing necessary modules from config
 from config import (
     AnalysisEnvironment,
-    LOG_CONFIG
+    LOG_CONFIG,
+    KNOWN_OPTIONAL_STATIC_INPUT_TYPES
 )
 
-from psliptools import (
+# Importing necessary modules from psliptools
+from psliptools.geometries import (
     load_shapefile_polygons,
-    get_shapefile_fields,
+    get_shapefile_fields
+)
+
+from psliptools.utilities import (
     select_file_prompt,
     select_from_list_prompt
 )
 
+# Importing necessary modules from main_modules
 from env_init import get_or_create_analysis_environment
 
-#%% === Set up logging configuration
+# %% === Set up logging configuration
 # This will log messages to the console and can be modified to log to a file if needed
 logging.basicConfig(level=logging.INFO,
                     format=LOG_CONFIG['format'], 
@@ -54,9 +60,9 @@ def obtain_config_idx_and_rel_filename(
     return env, idx, rel_filename
 
 # %% === Main function
-def main(source_type: str="land_uses", source_subtype: str=None, gui_mode: bool=False, base_dir: str=None):
-    if not source_type in ("soil", "vegetation", "land_uses"):
-        raise ValueError("Invalid source type. Must be 'soil', 'vegetation', or 'land_uses'.")
+def main(source_type: str="land_use", source_subtype: str=None, gui_mode: bool=False, base_dir: str=None):
+    if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
+        raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
 
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
 
@@ -67,6 +73,7 @@ def main(source_type: str="land_uses", source_subtype: str=None, gui_mode: bool=
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
+        print("\n=== Shapefile selection ===")
         src_path = select_file_prompt(
             base_dir=env.folders['inputs'][source_type]['path'],
             usr_prompt=f"Name or full path of the {source_type} [subtype: {source_subtype}] shapefile (ex. {source_type}.shp): ",
@@ -120,13 +127,15 @@ def main(source_type: str="land_uses", source_subtype: str=None, gui_mode: bool=
 # %% === Command line interface
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Import shapefiles with main properties")
-    parser.add_argument("--source_type", type=str, default="land_uses", help="Source type (soil, vegetation, land_uses)")
-    parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode")
+    parser.add_argument("--source_type", type=str, default="land_use", help="Source type (e.g., " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES) + ")")
+    parser.add_argument("--source_subtype", type=str, default=None, help="Source subtype (optional)")
+    parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
     parser.add_argument("--base_dir", type=str, default=None, help="Base directory for the analysis")
     args = parser.parse_args()
 
     prop_vars = main(
         source_type=args.source_type, 
+        source_subtype=args.source_subtype,
         gui_mode=args.gui_mode, 
         base_dir=args.base_dir
     )

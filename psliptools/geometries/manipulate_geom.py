@@ -126,22 +126,22 @@ def intersect_polygons(
 # %% === Function to subtract a polygon from a list of polygons
 def subtract_polygons(
         polygons: geom.Polygon | geom.MultiPolygon | list | pd.Series, 
-        mask: geom.Polygon | geom.MultiPolygon | list | pd.Series,
+        subtract_mask: geom.Polygon | geom.MultiPolygon | list | pd.Series,
     ) -> list[geom.Polygon | geom.MultiPolygon]:
     """
-    Intersect a list of polygons with a mask polygon (or MultiPolygon).
+    Subtract a list of polygons (or MultiPolygon) from another list of polygons (or MultiPolygon).
 
     Args:
         polygons (geom.Polygon | geom.MultiPolygon | list | pd.Series): Polygons (or MultiPolygon) to be subtracted.
-        mask (geom.Polygon | geom.MultiPolygon | list | pd.Series): Mask polygon (or MultiPolygon) to subtract.
+        subtract (geom.Polygon | geom.MultiPolygon | list | pd.Series): Mask polygon (or MultiPolygon) to subtract.
 
     Returns:
-        list: List of intersected polygons (or MultiPolygon).
+        list: List of subtracted polygons (or MultiPolygon).
     """
     polygons = _check_and_collect_polygons_in_list(polygons)
-    mask_union = union_polygons(mask)
+    subtract_union = union_polygons(subtract_mask)
 
-    subtracted_polygon = [p.symmetric_difference(mask_union) for p in polygons]
+    subtracted_polygon = [p.symmetric_difference(subtract_union) for p in polygons]
     return subtracted_polygon
 
 # %% === Function to obtain list of coordinates (exterior and interiors) from a polygon

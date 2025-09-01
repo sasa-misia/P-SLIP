@@ -12,6 +12,7 @@ from .generate_geom import (
 from .manipulate_geom import (
     intersect_polygons,
     union_polygons,
+    subtract_polygons,
     get_ext_int_coords_from_polygon,
     create_polygon_from_coord_lists,
     convert_simple_polygon_crs,
@@ -39,6 +40,7 @@ __all__ = [
     "load_shapefile_polygons",
     "intersect_polygons",
     "union_polygons",
+    "subtract_polygons",
     "get_ext_int_coords_from_polygon",
     "create_polygon_from_coord_lists",
     "convert_simple_polygon_crs",

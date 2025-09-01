@@ -1,4 +1,4 @@
-#%% === Import necessary modules
+# %% === Import necessary modules
 import os
 import pandas as pd
 import numpy as np
@@ -15,9 +15,8 @@ from config import (
     LOG_CONFIG
 )
 
-from psliptools import (
-    select_files_in_folder_prompt,
-    select_dir_prompt,
+# Importing necessary modules from psliptools
+from psliptools.rasters import (
     load_georaster, 
     convert_coords_to_geo, 
     resample_raster, 
@@ -25,15 +24,21 @@ from psliptools import (
     mask_raster_with_1d_idx
 )
 
+from psliptools.utilities import (
+    select_files_in_folder_prompt,
+    select_dir_prompt
+)
+
+# Importing necessary modules from main_modules
 from env_init import get_or_create_analysis_environment
 
-#%% === Set up logging configuration
+# %% === Set up logging configuration
 # This will log messages to the console and can be modified to log to a file if needed
 logging.basicConfig(level=logging.INFO,
                     format=LOG_CONFIG['format'], 
                     datefmt=LOG_CONFIG['date_format'])
 
-#%% === DEM and Analysis Base Grid (ABG) methods
+# %% === DEM and Analysis Base Grid (ABG) methods
 # Read and import DTM files in a dataframe
 def import_dtm_files(
         env: AnalysisEnvironment,
@@ -114,8 +119,8 @@ def import_dtm_files(
     # # === End of less efficient way
     return dtm_df, abg_df, cust_id
 
-#%% === Main function to import DEM and define base grid
-def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resample_method: str='average', apply_mask_to_raster: bool=False):
+# %% === Main function to import DEM and define base grid
+def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resample_method: str='average', apply_mask_to_raster: bool=False, check_plot: bool=False):
     """Main function to define the base grid."""
     src_type = 'dtm'
     
@@ -127,7 +132,10 @@ def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resa
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
+        print("\n=== Directory selection ===")
         dtm_fold = select_dir_prompt(default_dir=env.folders['inputs'][src_type]['path'], content_type=src_type)
+        
+        print("\n=== Raster selection ===")
         dtm_paths = select_files_in_folder_prompt(base_dir=dtm_fold, src_ext=['tif', '.tiff'])
     
     dtm_df, abg_df, cust_id = import_dtm_files(
@@ -149,27 +157,32 @@ def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resa
     }
     env.config['inputs'][src_type][0]['custom_id'] = cust_id
     env.collect_input_files(file_type=[src_type], multi_extension=True)
-    
-    env.save_variable(variable_to_save=dtm_abg_vars, variable_filename="dtm_abg_vars.pkl")
+
+    env.save_variable(variable_to_save=dtm_abg_vars, variable_filename=f"{src_type}_vars.pkl")
 
     # Check-plot
-    plot_elevation_3d(dtm_df['raster_data'], abg_df['raster_lon'], abg_df['raster_lat'], mask_idx_1d=abg_df['mask_idx_1d'], projected=True)
+    if check_plot:
+        plot_elevation_3d(dtm_df['raster_data'], abg_df['raster_lon'], abg_df['raster_lat'], mask_idx_1d=abg_df['mask_idx_1d'], projected=True)
     return dtm_abg_vars
 
 # %% === Command line interface
 if __name__ == '__main__':
-    # Command line interface
     parser = argparse.ArgumentParser(description="Define the base grid for the analysis, importing the DEM.")
     parser.add_argument('--base_dir', type=str, default=None, help="Base directory for the analysis.")
+    parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
     parser.add_argument('--resample_size', type=int, default=None, help="Resample size for the DEM.")
     parser.add_argument('--resample_method', type=str, default='average', help="Resample method for the DEM.")
-    parser.add_argument('--apply_mask_to_raster', type=bool, default=False, help="Apply mask to the raster.")
+    parser.add_argument('--apply_mask_to_raster', action='store_true', help="Apply mask to raster data.")
+    parser.add_argument('--check_plot', action='store_true', help="Check plot for the DEM.")
     args = parser.parse_args()
 
     dtm_abg_vars = main(
         base_dir=args.base_dir, 
-        gui_mode=False, 
+        gui_mode=args.gui_mode, 
         resample_size=args.resample_size, 
         resample_method=args.resample_method,
-        apply_mask_to_raster=args.apply_mask_to_raster
+        apply_mask_to_raster=args.apply_mask_to_raster,
+        check_plot=args.check_plot
     )
+
+# %%

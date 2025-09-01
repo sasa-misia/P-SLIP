@@ -1,3 +1,4 @@
 _old
 .vscode
 **/__pycache__/
+config/version.txt
