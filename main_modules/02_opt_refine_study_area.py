@@ -32,6 +32,48 @@ logging.basicConfig(level=logging.INFO,
                     format=LOG_CONFIG['format'],
                     datefmt=LOG_CONFIG['date_format'])
 
+# %% === Methods to subtract polygons from study area
+def subtract_polygons_from_study_area(
+    study_area_dict: dict,
+    rem_poly_df: pd.DataFrame,
+    labels: list,
+    type: str,
+    subtype: str=None
+    ) -> dict:
+    poly_sel_indices = rem_poly_df['class_name'].isin(labels)
+
+    polygons_to_remove = rem_poly_df.loc[poly_sel_indices, 'geometry']
+
+    study_area_subtracted_poly_list = subtract_polygons(study_area_dict['study_area_cln_poly'], polygons_to_remove)
+    if len(study_area_subtracted_poly_list) != 1:
+        logging.error("Polygon subtraction resulted in multiple or no polygons.")
+        raise ValueError("Polygon subtraction resulted in multiple or no polygons.")
+
+    study_area_dict['study_area_cln_poly'] = study_area_subtracted_poly_list[0]
+    for class_name, geometry in zip(labels, polygons_to_remove):
+        replace_index = (study_area_dict['study_area_rem_poly']['class_name'] == class_name) & \
+                        (study_area_dict['study_area_rem_poly']['type'] == type) & \
+                        (study_area_dict['study_area_rem_poly']['subtype'] == subtype) # It is a pandas series
+        
+        if replace_index.sum() > 1:
+            logging.error("Multiple polygon matches found for replace_index in study_area_rem_poly.")
+            raise ValueError("Multiple polygon matches found for replace_index in study_area_rem_poly.")
+        elif replace_index.sum() == 1:
+            study_area_dict['study_area_rem_poly'].loc[replace_index, 'geometry'] = geometry
+            logging.info(f"Replaced existing polygon for class '{class_name}' in study_area_rem_poly DataFrame.")
+        else:
+            study_area_dict['study_area_rem_poly'] = pd.concat(
+                [
+                    study_area_dict['study_area_rem_poly'],
+                    pd.DataFrame([{'type': type,
+                                   'subtype': subtype,
+                                   'class_name': class_name,
+                                   'geometry': geometry}]) # Remember that if you use dict, it must be a list of dicts!
+                ], ignore_index=True)
+
+        logging.info(f"Updated study_area_rem_poly DataFrame for class '{class_name}'.")
+    return study_area_dict
+
 # %% === Main function
 def main(source_type: str="land_use", source_subtype: str=None, gui_mode: bool=False, base_dir: str=None):
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
@@ -70,39 +112,14 @@ def main(source_type: str="land_use", source_subtype: str=None, gui_mode: bool=F
     
     logging.info(f"Selected classes to remove: {poly_labels_to_remove}")
 
-    poly_sel_indices = rem_poly_vars['prop_df']['class_name'].isin(poly_labels_to_remove)
+    study_area_vars = subtract_polygons_from_study_area(
+        study_area_dict=study_area_vars,
+        rem_poly_df=rem_poly_vars['prop_df'],
+        labels=poly_labels_to_remove,
+        type=source_type,
+        subtype=source_subtype
+    )
 
-    polygons_to_remove = rem_poly_vars['prop_df'].loc[poly_sel_indices, 'geometry']
-
-    study_area_subtracted_poly_list = subtract_polygons(study_area_vars['study_area_cln_poly'], polygons_to_remove)
-    if len(study_area_subtracted_poly_list) != 1:
-        logging.error("Polygon subtraction resulted in multiple or no polygons.")
-        raise ValueError("Polygon subtraction resulted in multiple or no polygons.")
-
-    study_area_vars['study_area_cln_poly'] = study_area_subtracted_poly_list[0]
-    for class_name, geometry in zip(poly_labels_to_remove, polygons_to_remove):
-        replace_index = (study_area_vars['study_area_rem_poly']['class_name'] == class_name) & \
-                        (study_area_vars['study_area_rem_poly']['type'] == source_type) & \
-                        (study_area_vars['study_area_rem_poly']['subtype'] == source_subtype) # It is a pandas series
-        
-        if replace_index.sum() > 1:
-            logging.error("Multiple polygon matches found for replace_index in study_area_rem_poly.")
-            raise ValueError("Multiple polygon matches found for replace_index in study_area_rem_poly.")
-        elif replace_index.sum() == 1:
-            study_area_vars['study_area_rem_poly'].loc[replace_index, 'geometry'] = geometry
-            logging.info(f"Replaced existing polygon for class '{class_name}' in study_area_rem_poly DataFrame.")
-        else:
-            study_area_vars['study_area_rem_poly'] = pd.concat(
-                [
-                    study_area_vars['study_area_rem_poly'],
-                    pd.DataFrame([{'type': source_type,
-                                   'subtype': source_subtype,
-                                   'class_name': class_name,
-                                   'geometry': geometry}]) # Remember that if you use dict, it must be a list of dicts!
-                ], ignore_index=True)
-
-        logging.info(f"Updated study_area_rem_poly DataFrame for class '{class_name}'.")
-    
     env.config['inputs']['study_area'][0]['settings']['source_refined'] = True
     env.save_variable(variable_to_save=study_area_vars, variable_filename='study_area_vars.pkl') # It also updates the environment file
     return study_area_vars
