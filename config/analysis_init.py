@@ -30,6 +30,10 @@ from .default_params import (
     LIBRARIES_CONFIG,
     DEFAULT_CASE_NAME,
     ANALYSIS_CONFIGURATION,
+    STANDARD_CLASSES_FILENAME,
+    DEFAULT_STANDARD_CLASSES,
+    PARAMETER_CLASSES_FILENAME,
+    DEFAULT_PARAMETER_CLASSES
 )
 
 from .version_writer import (
@@ -59,7 +63,8 @@ class AnalysisEnvironment:
         # Ensure folders is always a dict (deepcopy for safety)
         if not hasattr(self, 'folders') or self.folders is None or not isinstance(self.folders, dict):
             self.folders = {}
-        self.folders['base'] = {'path': os.getcwd()}  # Set the base path to the current working directory
+        if 'base' not in self.folders or 'path' not in self.folders['base']:
+            self.folders['base'] = {'path': os.getcwd()}  # Set the base path to the current working directory
         # Ensure config is always a dict (deepcopy for safety)
         if not hasattr(self, 'config') or self.config is None or not isinstance(self.config, dict):
             self.config = copy.deepcopy(ANALYSIS_CONFIGURATION)
@@ -358,6 +363,25 @@ class AnalysisEnvironment:
         inp_files_df.loc[df_filter, ['path', 'internal']] = inp_files_df_filtered[['path', 'internal']]
         inp_files_df.to_csv(inp_csv_path, index=False)
         logger.info("Input files collected and copied to the input directory successfully.")
+    
+    def generate_default_csv(self) -> None:
+        """Generate default CSV files in the user control directory."""
+        logger = logging.getLogger(__name__)
+        logger.info("Generating default CSV files in the user control directory...")
+
+        def_std_cls_filename = os.path.join(self.folders['user_control']['path'], STANDARD_CLASSES_FILENAME)
+        pd.DataFrame(DEFAULT_STANDARD_CLASSES).to_csv(
+            def_std_cls_filename,
+            index=False
+        )
+        logger.info(f"Default standard classes CSV generated at: {def_std_cls_filename}")
+
+        def_par_cls_filename = os.path.join(self.folders['user_control']['path'], PARAMETER_CLASSES_FILENAME)
+        pd.DataFrame(DEFAULT_PARAMETER_CLASSES).to_csv(
+            def_par_cls_filename,
+            index=False
+        )
+        logger.info(f"Default parameter classes CSV generated at: {def_par_cls_filename}")
 
     @classmethod
     def from_json(cls, file_path: str) -> "AnalysisEnvironment":
@@ -671,8 +695,12 @@ def create_analysis_environment(base_dir: str, case_name: Optional[str] = None) 
 
     if case_name is None:
         case_name = DEFAULT_CASE_NAME
+    
+    env = _create_folder_structure(base_dir=base_dir, case_name=case_name)
 
-    return _create_folder_structure(base_dir=base_dir, case_name=case_name)
+    env.generate_default_csv()
+
+    return env
 
 def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
     """
@@ -727,3 +755,5 @@ def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
         return env
     else:
         raise FileNotFoundError(f"No existing analysis environment found in {base_dir}.")
+    
+# %%

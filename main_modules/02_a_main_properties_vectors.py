@@ -99,8 +99,8 @@ def main(source_type: str="land_use", source_subtype: str=None, gui_mode: bool=F
     )
 
     prop_df['label'] = prop_df['class_name']
-    prop_df['standardized_class'] = None
-    prop_df['parameters_class'] = None
+    prop_df['standardized_class_id'] = None
+    prop_df['parameters_class_id'] = None
     prop_df['info'] = None
 
     # Write the DataFrame to a CSV file excluding the 'geometry' column
