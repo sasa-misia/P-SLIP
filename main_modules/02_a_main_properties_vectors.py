@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import argparse
+from typing import Dict, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -60,7 +61,12 @@ def obtain_config_idx_and_rel_filename(
     return env, idx, rel_filename
 
 # %% === Main function
-def main(source_type: str="land_use", source_subtype: str=None, gui_mode: bool=False, base_dir: str=None):
+def main(
+        source_type: str="land_use", 
+        source_subtype: str=None, 
+        gui_mode: bool=False, 
+        base_dir: str=None
+    ) -> Dict[str, Any]:
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
         raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
 

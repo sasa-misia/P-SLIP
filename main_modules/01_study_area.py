@@ -81,7 +81,10 @@ def define_study_area_from_rectangles(rectangle_polygons):
     return study_area_vars
 
 # %% === Main function to define the study area
-def main(gui_mode: bool=False, base_dir: str=None) -> Dict[str, object]:
+def main(
+        gui_mode: bool=False, 
+        base_dir: str=None
+    ) -> Dict[str, object]:
     """Main function to define the study area."""
     src_type = 'study_area'
 

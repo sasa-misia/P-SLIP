@@ -1,0 +1,148 @@
+# %% === Import necessary modules
+import os
+import sys
+import logging
+import pandas as pd
+import argparse
+from typing import Dict, Any
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Importing necessary modules from config
+from config import (
+    LOG_CONFIG,
+    KNOWN_OPTIONAL_STATIC_INPUT_TYPES,
+    STANDARD_CLASSES_FILENAME,
+    PARAMETER_CLASSES_FILENAME
+)
+
+from psliptools.utilities import (
+    select_file_prompt,
+    select_from_list_prompt
+)
+
+# Importing necessary modules from main_modules
+from env_init import get_or_create_analysis_environment
+
+# %% === Set up logging configuration
+# This will log messages to the console and can be modified to log to a file if needed
+logging.basicConfig(level=logging.INFO,
+                    format=LOG_CONFIG['format'], 
+                    datefmt=LOG_CONFIG['date_format'])
+
+# %% === Methods to add associations
+def class_association(
+        prop_vars: Dict, 
+        association_df: pd.DataFrame, 
+        csv_class_id_column: str, 
+        prop_target_column: str, 
+        reference_classes_df: pd.DataFrame,
+        ) -> tuple[Dict[str, Any], bool]:
+        """Helper function to process class associations"""
+        processed = False
+        if association_df[csv_class_id_column].any():
+            only_associated_df = association_df[~association_df[csv_class_id_column].isna()]
+            for _, row in only_associated_df.iterrows():
+                idx_to_replace = prop_vars['prop_df']['class_name'] == row['class_name']
+                if idx_to_replace.sum() > 1:
+                    raise ValueError(f"Multiple rows with the same class name: {row['class_name']}")
+                elif idx_to_replace.sum() == 0:
+                    raise ValueError(f"No rows with the class name: {row['class_name']}")
+                
+                if not row[csv_class_id_column] in reference_classes_df['class_id'].values:
+                    raise ValueError(f"Invalid {csv_class_id_column}: {row[csv_class_id_column]}. Possible values: {list(reference_classes_df['class_id'].values)}")
+                
+                prop_vars['prop_df'].loc[idx_to_replace, prop_target_column] = row[csv_class_id_column]
+
+            processed = True
+        return prop_vars, processed
+
+# %% === Main function
+def main(
+        source_type: str="land_use", 
+        source_subtype: str=None, 
+        standard_classes_filepath: str=None, 
+        parameter_classes_filepath: str=None,
+        gui_mode: bool=False, 
+        base_dir: str=None
+    ) -> Dict[str, Any]: 
+    if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
+        raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
+    
+    env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
+
+    possible_subtypes = [x['settings']['source_subtype'] for x in env.config['inputs'][source_type]]
+
+    if gui_mode:
+        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+    else:
+        if not standard_classes_filepath:
+            print("\n=== Association file for standard classes ===")
+            standard_classes_filepath = select_file_prompt(
+                base_dir=env.folders['user_control']['path'],
+                usr_prompt=f"Name or full path of the standard classes association file (default: [{STANDARD_CLASSES_FILENAME}]): ",
+                src_ext='csv',
+                default_file=STANDARD_CLASSES_FILENAME
+            )
+
+        if not parameter_classes_filepath:
+            print("\n=== Association file for parameter classes ===")
+            parameter_classes_filepath = select_file_prompt(
+                base_dir=env.folders['user_control']['path'],
+                usr_prompt=f"Name or full path of the parameter classes association file (default: [{PARAMETER_CLASSES_FILENAME}]): ",
+                src_ext='csv',
+                default_file=PARAMETER_CLASSES_FILENAME
+            )
+        
+        if not source_subtype and len(env.config['inputs'][source_type]) > 1:
+            source_subtype = select_from_list_prompt(possible_subtypes, "Select a subtype")[0]
+    
+    standard_classes_df = pd.read_csv(standard_classes_filepath)
+    parameter_classes_df = pd.read_csv(parameter_classes_filepath)
+
+    if len(env.config['inputs'][source_type]) == 1:
+        curr_idx = 0
+    elif len(env.config['inputs'][source_type]) > 1:
+        curr_idx = possible_subtypes.index(source_subtype)
+    
+    association_df = pd.read_csv(os.path.join(env.folders['user_control']['path'], env.config['inputs'][source_type][curr_idx]['settings']['association_filename']))
+
+    if source_subtype:
+        rel_filename = f"{source_type}_{source_subtype}"
+    else:
+        rel_filename = f"{source_type}"
+
+    prop_vars = env.load_variable(variable_filename=f'{rel_filename}_vars.pkl')
+
+    prop_vars, standard_exists = class_association(prop_vars, association_df, 'standardized_class_id', 'standardized_class', standard_classes_df) # "prop_vars =" not necessary because dict are mutable and already updated inside the function
+    prop_vars, parameter_exists = class_association(prop_vars, association_df, 'parameters_class_id', 'parameters_class', parameter_classes_df) # "prop_vars =" not necessary because dict are mutable and already updated inside the function
+
+    if standard_exists:
+        env.config['inputs'][source_type][curr_idx]['settings']['standard_classes_filename'] = os.path.basename(standard_classes_filepath)
+    
+    if parameter_exists:
+        env.config['inputs'][source_type][curr_idx]['settings']['parameter_classes_filename'] = os.path.basename(parameter_classes_filepath)
+        
+    env.save_variable(variable_to_save=prop_vars, variable_filename=f"{rel_filename}_vars.pkl")
+    return prop_vars
+
+
+# %% === Command line interface
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Associate main properties with parameters.")
+    parser.add_argument("--source_type", type=str, default="land_use", help="Source type (e.g., " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES) + ")")
+    parser.add_argument("--source_subtype", type=str, default=None, help="Source subtype (e.g., top, sub) (optional)")
+    parser.add_argument("--standard_classes_filepath", type=str, default=None, help="Path to the standard classes association file")
+    parser.add_argument("--parameter_classes_filepath", type=str, default=None, help="Path to the parameter classes association file")
+    parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
+    parser.add_argument("--base_dir", type=str, default=None, help="Base directory for the analysis")
+    args = parser.parse_args()
+
+    prop_vars = main(
+        source_type=args.source_type, 
+        source_subtype=args.source_subtype,
+        standard_classes_filepath=args.standard_classes_filepath,
+        parameter_classes_filepath=args.parameter_classes_filepath,
+        gui_mode=args.gui_mode, 
+        base_dir=args.base_dir
+    )

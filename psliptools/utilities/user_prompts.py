@@ -190,35 +190,6 @@ def select_from_list_prompt(
     )) # Sort and remove duplicates
     return selected_objs
 
-# %% === Function to select one or multiple files in a folder
-def select_files_in_folder_prompt(
-        base_dir: str=None,
-        usr_prompt: str=None,
-        allow_multiple: bool = False,
-        src_ext: str | list[str]=None
-    ) -> list[str]:
-    """
-    Select files from a directory.
-
-    Args:
-        base_dir (str): Base directory to select files from.
-        src_ext (str, optional): File extension to filter by.
-
-    Returns:
-        list[str]: List of selected files.
-    """
-    if base_dir is None:
-        base_dir = select_dir_prompt()
-    if not(os.path.isdir(base_dir)):
-        raise ValueError("base_dir must be a valid directory")
-    
-    files = _parse_files_in_folder(base_dir, src_ext)
-    
-    files_sel = select_from_list_prompt(files, usr_prompt, allow_multiple)
-
-    full_files_sel = [os.path.join(base_dir, f) for f in files_sel]
-    return full_files_sel
-
 # %% === Function to select one directory
 def select_dir_prompt(
         default_dir: str = None,
@@ -249,17 +220,54 @@ def select_dir_prompt(
         raise ValueError(f"{selected_fold} is not a valid directory")
     return selected_fold
 
+# %% === Function to select one or multiple files in a folder
+def select_files_in_folder_prompt(
+        base_dir: str=None,
+        usr_prompt: str=None,
+        allow_multiple: bool = False,
+        src_ext: str | list[str]=None
+    ) -> list[str]:
+    """
+    Select files from a directory.
+
+    Args:
+        base_dir (str): Base directory to select files from.
+        src_ext (str, optional): File extension to filter by.
+
+    Returns:
+        list[str]: List of selected files.
+    """
+    if base_dir is None:
+        base_dir = select_dir_prompt()
+    if not(os.path.isdir(base_dir)):
+        raise ValueError("base_dir must be a valid directory")
+    
+    files = _parse_files_in_folder(base_dir, src_ext)
+    
+    files_sel = select_from_list_prompt(files, usr_prompt, allow_multiple)
+
+    full_files_sel = [os.path.join(base_dir, f) for f in files_sel]
+
+    for f in full_files_sel:
+        if not os.path.isfile(f):
+            raise ValueError(f"{f} is not a valid file")
+    return full_files_sel
+
 # %% === Function to select a single file
 def select_file_prompt(
         base_dir: str=None,
         usr_prompt: str=None,
-        src_ext: str | list[str]=None
+        src_ext: str | list[str]=None,
+        default_file: str=None
     ) -> str:
     if not base_dir:
         base_dir = select_dir_prompt()
 
     if not usr_prompt:
-        usr_prompt = 'Enter the name of the file or full path: '
+        usr_prompt = 'Enter the name of the file or full path'
+        if default_file:
+            usr_prompt += f" (default: [{default_file}])"
+        usr_prompt += ": "
 
     files = _parse_files_in_folder(base_dir, src_ext=src_ext)
 
@@ -267,12 +275,17 @@ def select_file_prompt(
         print_enumerated_list(files)
 
     source_path = input("\n"+usr_prompt).strip(' "')
+    if not source_path and default_file:
+        source_path = default_file
 
     if files and source_path.isdigit() and int(source_path) in range(1, len(files)+1):
         source_path = files[int(source_path)-1]
     
     if not os.path.isabs(source_path):
         source_path = os.path.join(base_dir, source_path)
+    
+    if not os.path.isfile(source_path):
+        raise ValueError(f"{source_path} is not a valid file")
     return source_path
 
 # %% ===

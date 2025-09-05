@@ -6,6 +6,7 @@ import sys
 import argparse
 import logging
 import shapely
+from typing import Dict, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -120,7 +121,14 @@ def import_dtm_files(
     return dtm_df, abg_df, cust_id
 
 # %% === Main function to import DEM and define base grid
-def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resample_method: str='average', apply_mask_to_raster: bool=False, check_plot: bool=False):
+def main(
+        base_dir: str=None, 
+        gui_mode: bool=False, 
+        resample_size: int=None, 
+        resample_method: str='average', 
+        apply_mask_to_raster: bool=False, 
+        check_plot: bool=False
+    ) -> Dict[str, Any]:
     """Main function to define the base grid."""
     src_type = 'dtm'
     
@@ -136,7 +144,7 @@ def main(base_dir: str=None, gui_mode: bool=False, resample_size: int=None, resa
         dtm_fold = select_dir_prompt(default_dir=env.folders['inputs'][src_type]['path'], content_type=src_type)
         
         print("\n=== Raster selection ===")
-        dtm_paths = select_files_in_folder_prompt(base_dir=dtm_fold, src_ext=['tif', '.tiff'])
+        dtm_paths = select_files_in_folder_prompt(base_dir=dtm_fold, src_ext=['.tif', '.tiff'])
     
     dtm_df, abg_df, cust_id = import_dtm_files(
         env, 
