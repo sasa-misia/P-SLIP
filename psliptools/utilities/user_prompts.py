@@ -57,7 +57,8 @@ def _parse_files_in_folder(
 # %% === Function to parse a string with a selection
 def _parse_selection_string(
         possible_values: list[str],
-        raw_string: str=None
+        raw_string: str=None,
+        allow_repetitions: bool=False
     ) -> list[int]:
     """
     Parse a string with a selection of values.
@@ -65,6 +66,7 @@ def _parse_selection_string(
     Args:
         possible_values (list[str]): A list of the possible values.
         raw_string (str, optional): The raw string to parse. Defaults to None (all values are selected).
+        allow_repetitions (bool, optional): Whether to allow repetitions in the selection. Defaults to False.
 
     Returns:
         list[int]: A list of selected indices.
@@ -73,12 +75,6 @@ def _parse_selection_string(
     raw_string = raw_string.strip(' "')
 
     if raw_string:
-        # selected_indices = [
-        #     int(x.strip(' "')) 
-        #     if x.isdigit()
-        #     else possible_values.index(x) + 1
-        #     for x in raw_string.replace(';', ',').split(',')
-        # ]
         selected_indices = []
         for i, sel in enumerate(raw_string.replace(';', ',').split(',')):
             sel = sel.strip(' "')
@@ -94,13 +90,17 @@ def _parse_selection_string(
             else:
                 raise ValueError(f"Invalid input at index {i}: {sel}")
     else:
-        selected_indices = [i for i in range(1, len(possible_values) + 1)]
+        selected_indices = list(range(1, len(possible_values) + 1))
         
     for i, x in enumerate(selected_indices):
         if not isinstance(x, int):
-            raise ValueError(f"Element at index {i} of selected_indices is not an integer ({x} is {type(x)})")
+            raise TypeError(f"Element at index {i} of selected_indices is not an integer ({x} is {type(x)})")
         if x < 1 or x > len(possible_values):
             raise ValueError(f"Element at index {i} of selected_indices is out of range ({x} is out of 1:{len(possible_values)})")
+    
+    if not allow_repetitions:
+        seen = set()
+        selected_indices = [x for x in selected_indices if not(x in seen or (seen.add(x), False)[0])]
     return selected_indices
 
 # %% === Function to print an enumerate list of strings
@@ -130,9 +130,58 @@ def print_enumerated_list(
     if len(obj_list) != len(obj_type):
         raise ValueError("obj_list and obj_type must have the same length")
     
-    print("Available options:")
+    print("\nAvailable options:")
     for i, (o, t) in enumerate(zip(obj_list, obj_type)):
         print(f"{i+1}| {o} {t}")
+
+# %% === Function to re-order a list of strings
+def reorder_list_prompt(
+        obj_list: list[str],
+        usr_prompt: str=None,
+        obj_type: list[str]=None,
+        start_indices_from_1: bool = False
+    ) -> tuple[list[str], list[int]]:
+    """
+    Reorder a list of strings.
+
+    Args:
+        obj_list (list[str]): List of strings to reorder.
+        usr_prompt (str, optional): Prompt to display to the user.
+        obj_type (list[str], optional): List of types for each object in obj_list.
+
+    Returns:
+        tuple[list[str], list[int]]: Tuple of reordered list and indices.
+    """
+    _check_list_of_strings(obj_list)
+
+    if usr_prompt:
+        if not isinstance(usr_prompt, str):
+            raise ValueError(f"usr_prompt must be a string, not {type(usr_prompt)}")
+        if not usr_prompt.endswith(": "):
+            usr_prompt += ": "
+    else:
+        usr_prompt = 'Enter your order: '
+
+    print_enumerated_list(obj_list, obj_type)
+
+    print("\nYou can specify the numbers or names of the options in the desired order." \
+        + "Please use the numbers mentioned above(or press enter for default, which is the current order)" \
+        + "\nUse [,] or [;] to separate, and [:] for range (last included), e.g.: 4, 1:3, 5 = 4, 1, 2, 3, 5")
+
+    user_raw_input = input("\n"+usr_prompt).strip(' "')
+
+    reordered_indices_from_1 = _parse_selection_string(obj_list, user_raw_input)
+
+    if len(reordered_indices_from_1) != len(obj_list):
+        raise ValueError(f"Invalid input: {user_raw_input}. The number of reordered indices should be equal to {len(obj_list)}.")
+    
+    reordered_objs = [obj_list[x - 1] for x in reordered_indices_from_1]
+
+    if start_indices_from_1:
+        reordered_indices = reordered_indices_from_1
+    else:
+        reordered_indices = [x - 1 for x in reordered_indices_from_1]
+    return reordered_objs, reordered_indices
 
 # %% === Function to select one or multiple options from a list
 def select_from_list_prompt(
@@ -172,7 +221,7 @@ def select_from_list_prompt(
     
     print_enumerated_list(obj_list, obj_type)
 
-    print(f"\n You can specify the number{multi_completion} or name{multi_completion} " \
+    print(f"\nYou can specify the number{multi_completion} or name{multi_completion} " \
         + f"of the option{multi_completion} you want to select (or press enter for default: {default_index}) " \
         + f"{extra_prompt}")
 

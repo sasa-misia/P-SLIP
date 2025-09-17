@@ -73,6 +73,7 @@ def subtract_polygons_from_study_area(
                 ], ignore_index=True)
 
         logging.info(f"Updated study_area_rem_poly DataFrame for class '{class_name}'.")
+        
     return study_area_dict
 
 # %% === Main function
@@ -128,6 +129,7 @@ def main(
 
     env.config['inputs']['study_area'][0]['settings']['source_refined'] = True
     env.save_variable(variable_to_save=study_area_vars, variable_filename='study_area_vars.pkl') # It also updates the environment file
+
     return study_area_vars
 
 # %% === Command line interface

@@ -32,30 +32,31 @@ logging.basicConfig(level=logging.INFO,
 
 # %% === Methods to add associations
 def class_association(
-        prop_vars: Dict, 
-        association_df: pd.DataFrame, 
-        csv_class_id_column: str, 
-        prop_target_column: str, 
+        prop_df: pd.DataFrame, 
+        association_df: pd.DataFrame,
+        prop_class_id_column: str, 
+        association_class_id_column: str, 
         reference_classes_df: pd.DataFrame,
-        ) -> tuple[Dict[str, Any], bool]:
+        ) -> tuple[pd.DataFrame, bool]:
         """Helper function to process class associations"""
         processed = False
-        if association_df[csv_class_id_column].any():
-            only_associated_df = association_df[~association_df[csv_class_id_column].isna()]
+        if association_df[association_class_id_column].any():
+            only_associated_df = association_df[~association_df[association_class_id_column].isna()]
             for _, row in only_associated_df.iterrows():
-                idx_to_replace = prop_vars['prop_df']['class_name'] == row['class_name']
+                idx_to_replace = prop_df['class_name'] == row['class_name']
                 if idx_to_replace.sum() > 1:
                     raise ValueError(f"Multiple rows with the same class name: {row['class_name']}")
                 elif idx_to_replace.sum() == 0:
                     raise ValueError(f"No rows with the class name: {row['class_name']}")
                 
-                if not row[csv_class_id_column] in reference_classes_df['class_id'].values:
-                    raise ValueError(f"Invalid {csv_class_id_column}: {row[csv_class_id_column]}. Possible values: {list(reference_classes_df['class_id'].values)}")
+                if not row[association_class_id_column] in reference_classes_df['class_id'].values:
+                    raise ValueError(f"Invalid {association_class_id_column}: {row[association_class_id_column]}. Possible values: {list(reference_classes_df['class_id'].values)}")
                 
-                prop_vars['prop_df'].loc[idx_to_replace, prop_target_column] = row[csv_class_id_column]
+                prop_df.loc[idx_to_replace, prop_class_id_column] = row[association_class_id_column]
 
             processed = True
-        return prop_vars, processed
+            
+        return prop_df, processed
 
 # %% === Main function
 def main(
@@ -113,17 +114,21 @@ def main(
         rel_filename = f"{source_type}"
 
     prop_vars = env.load_variable(variable_filename=f'{rel_filename}_vars.pkl')
+    prop_df = prop_vars['prop_df']
 
-    prop_vars, standard_exists = class_association(prop_vars, association_df, 'standardized_class_id', 'standardized_class', standard_classes_df) # "prop_vars =" not necessary because dict are mutable and already updated inside the function
-    prop_vars, parameter_exists = class_association(prop_vars, association_df, 'parameters_class_id', 'parameters_class', parameter_classes_df) # "prop_vars =" not necessary because dict are mutable and already updated inside the function
+    prop_df, standard_exists = class_association(prop_df, association_df, 'standard_class', 'standard_class', standard_classes_df)
+    prop_df, parameter_exists = class_association(prop_df, association_df, 'parameter_class', 'parameter_class', parameter_classes_df)
+
+    prop_vars['prop_df'] = prop_df
 
     if standard_exists:
-        env.config['inputs'][source_type][curr_idx]['settings']['standard_classes_filename'] = os.path.basename(standard_classes_filepath)
+        env.config['inputs'][source_type][curr_idx]['settings']['standard_filename'] = os.path.basename(standard_classes_filepath)
     
     if parameter_exists:
-        env.config['inputs'][source_type][curr_idx]['settings']['parameter_classes_filename'] = os.path.basename(parameter_classes_filepath)
+        env.config['inputs'][source_type][curr_idx]['settings']['parameter_filename'] = os.path.basename(parameter_classes_filepath)
         
     env.save_variable(variable_to_save=prop_vars, variable_filename=f"{rel_filename}_vars.pkl")
+
     return prop_vars
 
 

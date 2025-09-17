@@ -7,8 +7,7 @@ import shapely
 import scipy.interpolate
 import scipy.spatial
 from .coordinates import (
-    get_projected_crs_from_bbox, 
-    create_bbox_from_grids, 
+    get_projected_crs_from_bbox,
     convert_bbox, 
     create_grid_from_bbox, 
     get_pixels_inside_polygon,

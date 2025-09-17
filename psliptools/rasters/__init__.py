@@ -24,6 +24,8 @@ from .coordinates import (
 )
 
 from .manage_raster import (
+    get_1d_idx_from_2d_mask,
+    get_1d_idx_from_2d_idx,
     get_2d_idx_from_1d_idx,
     get_2d_mask_from_1d_idx,
     mask_raster_with_1d_idx
@@ -54,6 +56,8 @@ __all__ = [
     "are_coords_geographic",
     "get_pixels_inside_polygon",
     "raster_within_polygon",
+    "get_1d_idx_from_2d_mask",
+    "get_1d_idx_from_2d_idx",
     "get_2d_idx_from_1d_idx",
     "get_2d_mask_from_1d_idx",
     "mask_raster_with_1d_idx",

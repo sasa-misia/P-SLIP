@@ -58,6 +58,7 @@ def obtain_config_idx_and_rel_filename(
         rel_filename = f"{source_type}_{source_subtype}"
     else:
         rel_filename = f"{source_type}"
+        
     return env, idx, rel_filename
 
 # %% === Main function
@@ -101,12 +102,12 @@ def main(
         poly_bound_geo=study_area_polygon,
         mask_out_poly=True,
         convert_to_geo=True,
-        points_lim=300000
+        points_lim=80000
     )
 
     prop_df['label'] = prop_df['class_name']
-    prop_df['standardized_class_id'] = None
-    prop_df['parameters_class_id'] = None
+    prop_df['standard_class'] = None
+    prop_df['parameter_class'] = None
     prop_df['info'] = None
 
     # Write the DataFrame to a CSV file excluding the 'geometry' column
@@ -128,6 +129,7 @@ def main(
     env.collect_input_files(file_type=[source_type], file_subtype=[source_subtype], multi_extension=True)
     
     env.save_variable(variable_to_save=prop_vars, variable_filename=f"{rel_filename}_vars.pkl")
+
     return prop_vars
     
 # %% === Command line interface

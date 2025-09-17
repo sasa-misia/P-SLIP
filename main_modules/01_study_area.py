@@ -59,6 +59,7 @@ def define_study_area_from_shapefile(shapefile_path, id_field, id_selection):
         'study_area_rem_poly': REM_POLY_DF,
         'study_area_extremes': study_area_extremes
     }
+
     return study_area_vars
 
 def define_study_area_from_rectangles(rectangle_polygons):
@@ -78,6 +79,7 @@ def define_study_area_from_rectangles(rectangle_polygons):
         'study_area_rem_poly': REM_POLY_DF,
         'study_area_extremes': study_area_extremes
     }
+
     return study_area_vars
 
 # %% === Main function to define the study area
@@ -151,6 +153,7 @@ def main(
     env.collect_input_files(file_type=[src_type], multi_extension=True)
 
     env.save_variable(variable_to_save=study_area_vars, variable_filename=f"{src_type}_vars.pkl")
+    
     return study_area_vars
 
  # %% === Command line interface

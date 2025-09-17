@@ -80,7 +80,7 @@ def get_xy_grids_from_profile(profile: dict) -> tuple[np.ndarray, np.ndarray]:
         profile (dict): A dictionary containing the raster profile.
 
     Returns:
-        tuple[np.ndarray, np.ndarray]: Tuple containing the x and y grids.
+        tuple(np.ndarray, np.ndarray): Tuple containing the x and y grids.
     """
     ref_grid_x, ref_grid_y = np.zeros((2, profile['height'], profile['width'])) # single command row and unpacked array
     for col in range(profile['width']):
@@ -236,7 +236,7 @@ def create_grid_from_bbox(
         resolution (np.ndarray): Grid resolution (pixels_x, pixels_y) (ex. [1800, 1800]).
 
     Returns:
-        tuple[np.ndarray, np.ndarray, dict]: Tuple containing the x and y coordinates of the grid and the raster profile (optional).
+        tuple(np.ndarray, np.ndarray, dict): Tuple containing the x and y coordinates of the grid and the raster profile (optional).
     """
     if not isinstance(bbox, np.ndarray):
         bbox = np.array(bbox)
@@ -303,7 +303,7 @@ def convert_coords(
         force_ndarray (bool, optional): Force the input (and output) coordinates to be numpy arrays. Defaults to False.
 
     Returns:
-        tuple[np.ndarray, np.ndarray]: Tuple containing the converted x and y coordinates.
+        tuple(np.ndarray, np.ndarray): Tuple containing the converted x and y coordinates.
     """
     if force_ndarray:
         if not isinstance(in_coords_x, np.ndarray) or not isinstance(in_coords_y, np.ndarray):
@@ -341,7 +341,7 @@ def convert_coords_from_list(
         y_coords (list): List of y coordinates, where each element of the list contains an array of y coordinates.
 
     Returns:
-        tuple[list, list]: Tuple containing the converted x and y coordinates in lists of numpy arrays.
+        tuple(list, list): Tuple containing the converted x and y coordinates in lists of numpy arrays.
     """
     out_coords_x, out_coords_y = [], []
     for x_coords, y_coords in zip(x_coords, y_coords):
@@ -504,7 +504,9 @@ def convert_grids_and_profile_to_prj(
 # %% === Function to obtain pixels that are inside a polygon
 def get_pixels_inside_polygon(
         geo_polygon: shapely.geometry.Polygon | shapely.geometry.MultiPolygon, 
-        raster_profile: dict
+        raster_profile: dict=None,
+        x_grid: np.ndarray=None,
+        y_grid: np.ndarray=None
     ) -> np.ndarray:
     """
     Get the pixels that are inside a polygon.
@@ -519,7 +521,26 @@ def get_pixels_inside_polygon(
     if not are_coords_geographic(geo_polygon.bounds[2], geo_polygon.bounds[3]):
         raise ValueError("The provided polygon is not in geographic coordinates. Please convert it to geographic coordinates before using it.")
     
-    ref_grid_x, ref_grid_y = get_xy_grids_from_profile(raster_profile)
+    if (x_grid is None or y_grid is None) and raster_profile is None:
+        raise ValueError('x_grid + y_grid or raster_profile must be provided!')
+    
+    if raster_profile:
+        ref_grid_x, ref_grid_y = get_xy_grids_from_profile(raster_profile)
+    else:
+        ref_grid_x = x_grid
+        ref_grid_y = y_grid
+        if are_coords_geographic(ref_grid_x, ref_grid_y):
+            raster_profile = {
+                'width': int(ref_grid_x.shape[1]),
+                'height': int(ref_grid_x.shape[0]),
+                'blockxsize': int(ref_grid_x.shape[1]),
+                'blockysize': 1,
+                'transform': transformer_from_grids(ref_grid_x, ref_grid_y),
+                'crs': rasterio.crs.CRS.from_epsg(4326)
+            } # Fake raster profile in geographic coordinates
+        else:
+            raise ValueError("The provided grids are not in geographic coordinates. Please convert them to geographic coordinates before using them.")
+    
     _, _, raster_profile_geo = convert_grids_and_profile_to_geo(
         in_grid_x=ref_grid_x,
         in_grid_y=ref_grid_y,
@@ -531,7 +552,9 @@ def get_pixels_inside_polygon(
 # %% === Function to check if raster is within a polygon and return a mask
 def raster_within_polygon(
         geo_polygon: shapely.geometry.Polygon | shapely.geometry.MultiPolygon, 
-        raster_profile: dict
+        raster_profile: dict=None,
+        x_grid: np.ndarray=None,
+        y_grid: np.ndarray=None
     ) -> tuple[bool, np.ndarray]:
     """
     Check if any part of the raster is within the given polygon.
@@ -543,7 +566,7 @@ def raster_within_polygon(
     Returns:
         tuple[bool, np.ndarray]: A tuple where the first element is True if the raster is within the polygon, and the second element is a mask of the pixels that are within the polygon.
     """
-    mask = get_pixels_inside_polygon(geo_polygon, raster_profile)
+    mask = get_pixels_inside_polygon(geo_polygon, raster_profile, x_grid, y_grid)
     return np.any(mask), mask
 
 # %% === Function to obtain the 1d index of the pixel that is closest to a given coordinate
@@ -569,7 +592,7 @@ def get_closest_pixel_idx(
     Returns:
         int: The 1d index of the pixel that is closest to the coordinate.
     """
-    if (x_grid is None and y_grid is None) and raster_profile is None:
+    if (x_grid is None or y_grid is None) and raster_profile is None:
         raise ValueError('x_grid + y_grid or raster_profile must be provided!')
     
     if raster_profile:

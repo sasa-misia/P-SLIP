@@ -1,3 +1,7 @@
+# %% === Setting matplotlib to plot on external windows
+import matplotlib
+matplotlib.use('Qt5Agg') # To plot in external window and not in interactive terminal
+
 # %% === Import necessary modules
 import numpy as np
 import pandas as pd

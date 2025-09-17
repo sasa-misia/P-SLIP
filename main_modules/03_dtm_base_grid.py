@@ -22,7 +22,8 @@ from psliptools.rasters import (
     convert_coords_to_geo, 
     resample_raster, 
     plot_elevation_3d,
-    mask_raster_with_1d_idx
+    mask_raster_with_1d_idx,
+    get_1d_idx_from_2d_mask
 )
 
 from psliptools.utilities import (
@@ -81,7 +82,7 @@ def import_dtm_files(
             in_coords_y=raster_y
         )
 
-        mask_idx_1d = np.where(mask_matrix.flatten(order='C')) # C order is the default and means row-major (row by row)
+        mask_idx_1d = get_1d_idx_from_2d_mask(mask_matrix, order='C') # C order is the default and means row-major (row by row)
 
         if apply_mask_to_raster:
             raster_data = mask_raster_with_1d_idx(raster_data, mask_idx_1d, profile=raster_profile)
@@ -103,21 +104,6 @@ def import_dtm_files(
     dtm_df = pd.DataFrame(dtm_data) # Convert the list of dictionaries to a DataFrame
     abg_df = pd.DataFrame(abg_data) # Convert the list of dictionaries to a DataFrame
 
-    # # === Less efficient way
-    # # Pre-initialize the DataFrame
-    # dtm_df = pd.DataFrame(columns=['path', 'raster_data', 'raster_profile'], index=range(len(files_path)))
-    # abg_df = pd.DataFrame(columns=['raster_lon', 'raster_lat'], index=range(len(files_path)))
-
-    # for i, dtm_path in enumerate(files_path):
-    #     raster_data, raster_profile, raster_x, raster_y = load_georaster(filepath=dtm_path, set_dtype='float32', convert_to_geo=False)
-    #     raster_lon, raster_lat = convert_coords_to_geo(
-    #         crs_in=raster_profile['crs'].to_epsg(), 
-    #         in_coords_x=raster_x, 
-    #         in_coords_y=raster_y
-    #     )
-    #     dtm_df.iloc[i] = [dtm_path, raster_data, raster_profile]
-    #     abg_df.iloc[i] = [raster_lon, raster_lat]
-    # # === End of less efficient way
     return dtm_df, abg_df, cust_id
 
 # %% === Main function to import DEM and define base grid
@@ -135,7 +121,7 @@ def main(
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
 
-    study_area_polygon = env.load_variable(variable_filename='study_area_vars.pkl')['study_area_cln_poly']
+    study_area_cln_poly = env.load_variable(variable_filename='study_area_vars.pkl')['study_area_cln_poly']
 
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
@@ -144,15 +130,15 @@ def main(
         dtm_fold = select_dir_prompt(default_dir=env.folders['inputs'][src_type]['path'], content_type=src_type)
         
         print("\n=== Raster selection ===")
-        dtm_paths = select_files_in_folder_prompt(base_dir=dtm_fold, src_ext=['.tif', '.tiff'])
+        dtm_paths = select_files_in_folder_prompt(base_dir=dtm_fold, src_ext=['.tif', '.tiff'], allow_multiple=True)
     
     dtm_df, abg_df, cust_id = import_dtm_files(
-        env, 
+        env,
         src_type, 
         dtm_paths, 
         resample_size=resample_size, 
         resample_method=resample_method, 
-        poly_mask=study_area_polygon,
+        poly_mask=study_area_cln_poly,
         apply_mask_to_raster=apply_mask_to_raster
     )
 
@@ -171,6 +157,7 @@ def main(
     # Check-plot
     if check_plot:
         plot_elevation_3d(dtm_df['raster_data'], abg_df['raster_lon'], abg_df['raster_lat'], mask_idx_1d=abg_df['mask_idx_1d'], projected=True)
+    
     return dtm_abg_vars
 
 # %% === Command line interface
