@@ -149,4 +149,24 @@ def mask_raster_with_1d_idx(
         out_raster[excluded] = profile['nodata']
     return out_raster
 
-# %% ===
+# %% === Function to pick a point from a raster with a 1d index
+def pick_point_from_1d_idx(
+        raster: np.ndarray, 
+        idx_1d: np.ndarray,
+        order: str=DEFAULT_ORDER_C
+    ) -> np.ndarray:
+    """
+    Pick a point from a raster with a 1D index array.
+
+    Args:
+        raster (np.ndarray): The raster to be picked from.
+        idx_1d (np.ndarray): A 1D array of indices.
+        order (str, optional): The order that was used to create the array ('C' -> C style, which means row-major; 
+            or 'F' -> Fortran style, which means column-major). Defaults to 'C'.
+
+    Returns:
+        np.ndarray: The picked point(s).
+    """
+    rows, cols = get_2d_idx_from_1d_idx(indices=idx_1d, shape=raster.shape, order=order)
+    values = raster[rows, cols]
+    return values

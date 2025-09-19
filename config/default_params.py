@@ -252,4 +252,6 @@ DEFAULT_PARAMETER_CLASSES = [
     for cls_id, params in PARAMETER_CLASS_NAME_MAPPER[type_key][1].items()
 ]
 
-# %%
+# %% === Default reference points csv
+REFERENCE_POINTS_FILENAME = 'reference_points.csv'
+REFERENCE_POINTS_CVS_COLUMNS = ['lon', 'lat', 'name', 'info']

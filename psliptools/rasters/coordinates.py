@@ -4,12 +4,16 @@ import rasterio.features
 import os
 import warnings
 import numpy as np
+import pandas as pd
 import pyproj
 import shapely
 import scipy.spatial
 
 # %% === Function to get raster crs
-def _get_crs(raster_path: str, set_crs: int=None) -> rasterio.crs.CRS:
+def _get_crs(
+        raster_path: str, 
+        set_crs: int=None
+    ) -> rasterio.crs.CRS:
     """
     Get the crs of a raster file.
 
@@ -35,8 +39,40 @@ def _get_crs(raster_path: str, set_crs: int=None) -> rasterio.crs.CRS:
         crs_obj = rasterio.crs.CRS.from_epsg(set_crs)
     return crs_obj
 
+# %% === Function to check if coordinates are given in a correct format, converting if necessary
+def _check_and_convert_coords(
+        x_coords: float | list[float] | np.ndarray | pd.Series,
+        y_coords: float | list[float] | np.ndarray | pd.Series
+    ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Check if coordinates are given in a correct format, converting if necessary.
+
+    Args:
+        x_coords (float | list[float] | np.ndarray | pd.Series): The x coordinates.
+        y_coords (float | list[float] | np.ndarray | pd.Series): The y coordinates.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: The x and y coordinates as numpy arrays.
+    """
+    if isinstance(x_coords, (float, list, pd.Series)):
+        x_coords = np.array(x_coords)
+    if isinstance(y_coords, (float, list, pd.Series)):
+        y_coords = np.array(y_coords)
+    
+    if not isinstance(x_coords, np.ndarray) or not isinstance(y_coords, np.ndarray):
+        raise ValueError("x_coords and y_coords must be of type float, list, np.ndarray or pd.Series.")
+    
+    if x_coords.ndim != y_coords.ndim or x_coords.size != y_coords.size:
+        raise ValueError("x_coords and y_coords must have the same number of dimensions and size.")
+    return x_coords, y_coords
+
+
 # %% === Function to get raster information
-def get_georaster_info(raster_path: str, set_crs: int=None, set_bbox: list | np.ndarray=None) -> dict:
+def get_georaster_info(
+        raster_path: str, 
+        set_crs: int=None, 
+        set_bbox: list | np.ndarray=None
+    ) -> dict:
     """
     Get information about a GeoTIFF raster file.
 
@@ -72,7 +108,9 @@ def get_georaster_info(raster_path: str, set_crs: int=None, set_bbox: list | np.
     return src_profile
 
 # %% === Function to create xy grids from profile
-def get_xy_grids_from_profile(profile: dict) -> tuple[np.ndarray, np.ndarray]:
+def get_xy_grids_from_profile(
+        profile: dict
+    ) -> tuple[np.ndarray, np.ndarray]:
     """
     Create x and y grids from a raster profile.
 
@@ -119,7 +157,9 @@ def get_bbox_from_profile(
     return np.array(bbox)
 
 # %% === Function to get the projected epsg code from a bounding box
-def get_projected_epsg_code_from_bbox(geo_bbox: list | np.ndarray) -> int:
+def get_projected_epsg_code_from_bbox(
+        geo_bbox: list | np.ndarray
+    ) -> int:
     """
     Get the projected crs from a bounding box.
 
@@ -163,7 +203,9 @@ def get_projected_epsg_code_from_bbox(geo_bbox: list | np.ndarray) -> int:
     return utm_epsg_code
 
 # %% === Function to get the projected crs from a bounding box
-def get_projected_crs_from_bbox(geo_bbox: list | np.ndarray) -> rasterio.crs.CRS:
+def get_projected_crs_from_bbox(
+        geo_bbox: list | np.ndarray
+    ) -> rasterio.crs.CRS:
     """ 
     Get the projected coordinate reference system (CRS) from a bounding box.
 
@@ -181,7 +223,10 @@ def get_projected_crs_from_bbox(geo_bbox: list | np.ndarray) -> rasterio.crs.CRS
     return utm_crs
 
 # %% === Check if arrays contain geographic coordinates
-def are_coords_geographic(lon: np.ndarray, lat: np.ndarray) -> bool:
+def are_coords_geographic(
+        lon: np.ndarray, 
+        lat: np.ndarray
+    ) -> bool:
     """
     Check if arrays contain geographic coordinates.
 
@@ -192,9 +237,7 @@ def are_coords_geographic(lon: np.ndarray, lat: np.ndarray) -> bool:
     Returns:
         bool: True if the arrays contain geographic coordinates, False otherwise.
     """
-    if not isinstance(lon, np.ndarray) or not isinstance(lat, np.ndarray):
-        lon = np.array(lon)
-        lat = np.array(lat)
+    lon, lat = _check_and_convert_coords(lon, lat)
     return np.all(lon >= -180) and np.all(lon <= 180) and np.all(lat >= -90) and np.all(lat <= 90)
 
 # %% === Function to create bounding box from coordinates
@@ -212,6 +255,7 @@ def create_bbox_from_grids(
     Returns:
         np.ndarray: Array of bounding box coordinates [xmin, ymin, xmax, ymax].
     """
+    coords_x, coords_y = _check_and_convert_coords(coords_x, coords_y)
     dx_pixel = abs(np.average(coords_x[:, 1] - coords_x[:, 0]))
     dy_pixel = abs(np.average(coords_y[1, :] - coords_y[0, :]))
     out_bbox = np.array([
@@ -306,11 +350,7 @@ def convert_coords(
         tuple(np.ndarray, np.ndarray): Tuple containing the converted x and y coordinates.
     """
     if force_ndarray:
-        if not isinstance(in_coords_x, np.ndarray) or not isinstance(in_coords_y, np.ndarray):
-            in_coords_x = np.array(in_coords_x)
-            in_coords_y = np.array(in_coords_y)
-        if in_coords_x.size != in_coords_y.size:
-            raise ValueError('Coordinates must have the same size')
+        in_coords_x, in_coords_y = _check_and_convert_coords(in_coords_x, in_coords_y)
     transformer = pyproj.Transformer.from_crs(crs_in, crs_out, always_xy=True)
     out_coords_x, out_coords_y = transformer.transform(in_coords_x, in_coords_y)
     # ===== Less efficient
@@ -328,8 +368,8 @@ def convert_coords(
 def convert_coords_from_list(
         crs_in: int,
         crs_out: int,
-        x_coords: list,
-        y_coords: list
+        x_coords: list[np.ndarray],
+        y_coords: list[np.ndarray]
     ) -> tuple[list, list]:
     """
     Convert coordinates inside lists from one coordinate reference system to another.
@@ -337,11 +377,11 @@ def convert_coords_from_list(
     Args:
         crs_in (int): The EPSG code of the input coordinate reference system.
         crs_out (int): The EPSG code of the output coordinate reference system.
-        x_coords (list): List of x coordinates, where each element of the list contains an array of x coordinates.
-        y_coords (list): List of y coordinates, where each element of the list contains an array of y coordinates.
+        x_coords (list(np.ndarray)): List of x coordinates, where each element of the list contains an array of x coordinates.
+        y_coords (list(np.ndarray)): List of y coordinates, where each element of the list contains an array of y coordinates.
 
     Returns:
-        tuple(list, list): Tuple containing the converted x and y coordinates in lists of numpy arrays.
+        tuple(list(np.ndarray), list(np.ndarray)): Tuple containing the converted x and y coordinates in lists of numpy arrays.
     """
     out_coords_x, out_coords_y = [], []
     for x_coords, y_coords in zip(x_coords, y_coords):
@@ -571,26 +611,28 @@ def raster_within_polygon(
 
 # %% === Function to obtain the 1d index of the pixel that is closest to a given coordinate
 def get_closest_pixel_idx(
-        x: np.ndarray,
-        y: np.ndarray,
+        x: float | list | np.ndarray | pd.Series,
+        y: float| list | np.ndarray | pd.Series,
         x_grid: np.ndarray=None,
         y_grid: np.ndarray=None,
         raster_profile: dict=None,
-        fill_outside: bool = True,
+        replace_out_idx: bool = True,
         fill_value: float = np.nan
     ) -> tuple[np.ndarray, np.ndarray]:
     """
     Get the 1d index of the pixel that is closest to a given coordinate.
 
     Args:
-        lon (float): The longitude of the coordinate.
-        lat (float): The latitude of the coordinate.
+        x (float | np.ndarray): The longitude(s) of the coordinate(s).
+        y (float | np.ndarray): The latitude(s) of the coordinate(s).
         x_grid (np.ndarray, optional): The x grid of the raster. If not provided, it will be obtained from the raster profile.
         y_grid (np.ndarray, optional): The y grid of the raster. If not provided, it will be obtained from the raster profile.
         raster_profile (dict, optional): The raster profile dictionary. If not provided, x_grid and y_grid must be provided.
+        replace_out_idx (bool, optional): Whether to replace the index with a fill value if it is outside of the raster (default is True).
+        fill_value (float, optional): The value to fill instead of the index if it is outside of the raster (default is np.nan).
 
     Returns:
-        int: The 1d index of the pixel that is closest to the coordinate.
+        tuple(np.ndarray, np.ndarray): A tuple containing the 1d index of the pixel that is closest to the coordinate and the distance to the pixel.
     """
     if (x_grid is None or y_grid is None) and raster_profile is None:
         raise ValueError('x_grid + y_grid or raster_profile must be provided!')
@@ -600,11 +642,13 @@ def get_closest_pixel_idx(
     else:
         ref_grid_x = x_grid
         ref_grid_y = y_grid
+
+    x, y = _check_and_convert_coords(x, y)
     
     if not are_coords_geographic(x, y):
         raise ValueError("The provided coordinate is not in geographic coordinates. Please convert it to geographic coordinates before using it.")
     
-    if x.ndim != 1 or y.ndim != 1:
+    if x.ndim > 1 or y.ndim > 1:
         raise ValueError('x and y must be 1d arrays!')
     if x.size != y.size:
         raise ValueError('x and y must have the same size!')
@@ -615,8 +659,8 @@ def get_closest_pixel_idx(
     kdtree = scipy.spatial.cKDTree(grid_points)
     dst_1d, idx_1d = kdtree.query(query_points, k=1)
 
-    # Fill value for points outside raster boundary (optional)
-    if fill_outside:
+    # Just a filler value for points outside raster boundary (optional)
+    if replace_out_idx:
         pixel_size = np.sqrt((ref_grid_x[1,1] - ref_grid_x[0,0])**2 + (ref_grid_y[1,1] - ref_grid_y[0,0])**2)
         idx_1d = np.where(dst_1d > pixel_size, fill_value, idx_1d)
     return idx_1d, dst_1d

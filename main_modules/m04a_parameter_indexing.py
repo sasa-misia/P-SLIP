@@ -93,7 +93,13 @@ def get_raw_associated_df(
 def group_associated_df(
         raw_associated_df: pd.DataFrame
     ) -> pd.DataFrame:
-    """Get the merged associated dataframe (classes merged based on parameter class, type and subtype)"""
+    """
+    Get the merged associated dataframe (classes merged based on parameter class, type and subtype).
+
+    It is important to maintain these three parameters because type and subtype 
+    are used to give the file to pick (each property may have a different filename),
+    while parameter_class gives the class to pick from that specific file.
+    """
     grouped_df_w_subtype = raw_associated_df.groupby(
         ['parameter_class', 'type', 'subtype'], 
         as_index=False
@@ -152,7 +158,7 @@ def align_and_index_associated_df(
 
     return associated_df
 
-# %% Main function
+# %% === Main function
 def main(
         gui_mode: bool=False, 
         base_dir: str=None
@@ -188,7 +194,7 @@ def main(
 
     associated_df = align_and_index_associated_df(associated_df, abg_df)
 
-    parameter_vars = {'association_df': associated_df}
+    parameter_vars = {'association_df': associated_df, 'originally_aligned': polygons_alignment_report['aligned']}
 
     env.save_variable(variable_to_save=parameter_vars, variable_filename="parameter_vars.pkl")
 

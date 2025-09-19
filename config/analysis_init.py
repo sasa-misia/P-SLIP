@@ -33,7 +33,9 @@ from .default_params import (
     STANDARD_CLASSES_FILENAME,
     DEFAULT_STANDARD_CLASSES,
     PARAMETER_CLASSES_FILENAME,
-    DEFAULT_PARAMETER_CLASSES
+    DEFAULT_PARAMETER_CLASSES,
+    REFERENCE_POINTS_FILENAME,
+    REFERENCE_POINTS_CVS_COLUMNS
 )
 
 from .version_writer import (
@@ -382,6 +384,13 @@ class AnalysisEnvironment:
             index=False
         )
         logger.info(f"Default parameter classes CSV generated at: {def_par_cls_filename}")
+
+        def_ref_pts_filename = os.path.join(self.folders['user_control']['path'], REFERENCE_POINTS_FILENAME)
+        pd.DataFrame(columns=REFERENCE_POINTS_CVS_COLUMNS).to_csv(
+            def_ref_pts_filename,
+            index=False
+        )
+        logger.info(f"Default reference points CSV generated at: {def_ref_pts_filename}")
 
     @classmethod
     def from_json(cls, file_path: str) -> "AnalysisEnvironment":

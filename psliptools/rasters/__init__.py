@@ -20,7 +20,8 @@ from .coordinates import (
     convert_grids_and_profile_to_geo,
     convert_bbox,
     get_pixels_inside_polygon,
-    raster_within_polygon
+    raster_within_polygon,
+    get_closest_pixel_idx
 )
 
 from .manage_raster import (
@@ -28,7 +29,8 @@ from .manage_raster import (
     get_1d_idx_from_2d_idx,
     get_2d_idx_from_1d_idx,
     get_2d_mask_from_1d_idx,
-    mask_raster_with_1d_idx
+    mask_raster_with_1d_idx,
+    pick_point_from_1d_idx
 )
 
 from .manipulate_raster import (
@@ -46,6 +48,10 @@ from .import_raster import (
     load_georaster
 )
 
+from .generate_raster import (
+    generate_grids_from_indices
+)
+
 __all__ = [
     "load_georaster",
     "get_georaster_info",
@@ -56,11 +62,13 @@ __all__ = [
     "are_coords_geographic",
     "get_pixels_inside_polygon",
     "raster_within_polygon",
+    "get_closest_pixel_idx",
     "get_1d_idx_from_2d_mask",
     "get_1d_idx_from_2d_idx",
     "get_2d_idx_from_1d_idx",
     "get_2d_mask_from_1d_idx",
     "mask_raster_with_1d_idx",
+    "pick_point_from_1d_idx",
     "create_bbox_from_grids",
     "create_grid_from_bbox",
     "convert_coords",
@@ -73,5 +81,6 @@ __all__ = [
     "resample_raster",
     "plot_elevation_2d",
     "plot_elevation_isometric",
-    "plot_elevation_3d"
+    "plot_elevation_3d",
+    "generate_grids_from_indices"
 ]
