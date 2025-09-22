@@ -25,7 +25,7 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from env_init import get_or_create_analysis_environment
+from main_modules.m00a_env_init import get_or_create_analysis_environment
 
 # %% === Set up logging configuration
 # This will log messages to the console and can be modified to log to a file if needed

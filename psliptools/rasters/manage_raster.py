@@ -78,8 +78,8 @@ def get_2d_idx_from_1d_idx(
     Returns:
         tuple(np.ndarray, np.ndarray): Tuple containing the row and column indices.
     """
-    if indices.ndim != 1:
-        raise ValueError('indices must be a 1D array')
+    if indices.ndim > 1:
+        raise ValueError('indices must be a 1D array or scalar')
     
     # Check that all numbers are integer or can be converted
     if not issubclass(indices.dtype.type, np.integer):
@@ -170,3 +170,5 @@ def pick_point_from_1d_idx(
     rows, cols = get_2d_idx_from_1d_idx(indices=idx_1d, shape=raster.shape, order=order)
     values = raster[rows, cols]
     return values
+
+# %%

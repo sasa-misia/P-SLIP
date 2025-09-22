@@ -11,7 +11,8 @@ from .csv_file_utils import (
 
 from .pandas_utils import (
     compare_dataframes,
-    compare_dataframes_columns
+    compare_dataframes_columns,
+    get_list_of_values_from_dataframe
 )
 
 from .user_prompts import (
@@ -41,6 +42,7 @@ __all__ = [
     "add_row_to_csv",
     "compare_dataframes",
     "compare_dataframes_columns",
+    "get_list_of_values_from_dataframe",
     "download_wms_raster",
     "print_enumerated_list",
     "reorder_list_prompt",

@@ -11,3 +11,4 @@ scikit-image
 scikit-learn
 pyproj
 mayavi
+pydantic

@@ -42,6 +42,7 @@ def compare_dataframes(
                 equality_matrix[r1, c1] = False
             else:
                 equality_matrix[r1, c1] = np.array_equal(item1, item2)
+
     return equality_matrix
 
 # %% === Method to compare elements of two dataframes
@@ -90,4 +91,62 @@ def compare_dataframes_columns(
                 is_in_dataframe2[r1, c1] = False
             else:
                 is_in_dataframe2[r1, c1] = np.array_equal(item1, item2)
+
     return is_in_dataframe2
+
+# %% === Function to obtain values from a dataframe
+def get_list_of_values_from_dataframe(
+        dataframe: pd.DataFrame, 
+        keys: str,
+        vals_column: str,
+        keys_column: str=None,
+        single_match: bool = False
+    ) -> list[any]:
+    """
+    Get values from a dataframe based on a keys and a values column.
+
+    Args:
+        dataframe (pd.DataFrame): The dataframe to search in.
+        keys (str): The keys to search for.
+        vals_column (str): The column name of the values to pick in the dataframe.
+        keys_column (str, optional): The column name of the keys in the dataframe.
+        single_match (bool, optional): If True, raise an error if multiple matches are found (default is False).
+
+    Returns:
+        list[any]: A list of objects corresponding to the keys, picked from the vals_column.
+    """
+    out_list = []
+
+    if isinstance(keys, str):
+        keys = [keys]
+
+    if single_match and len(keys) > 1:
+        raise ValueError("Multiple keys not allowed when single_match is True")
+
+    if keys_column is None:
+        # Trying to find the key column
+        keys_column = []
+        for col in dataframe.columns:
+            if keys in dataframe[col].unique():
+                keys_column.append(col)
+        if len(keys_column) == 0:
+            raise ValueError(f"Keys {keys} not found in the dataframe")
+        elif len(keys_column) > 1:
+            raise ValueError(f"Multiple keys found in the dataframe: {keys_column}")
+        keys_column = keys_column[0]
+    
+    # Check if keys are present in the dataframe
+    for key in keys:
+        if not key in dataframe[keys_column].unique():
+            raise ValueError(f"Key: {key} not found in the dataframe at column: {keys_column}")
+
+    csv_df = dataframe[dataframe[keys_column].isin(keys)]
+    for _, row in csv_df.iterrows():
+        out_list.append(row[vals_column])
+    
+    if single_match and len(out_list) > 1:
+        raise ValueError(f"Multiple matches found for {keys} in the dataframe, but single_match is set to True")
+
+    return out_list
+
+# %%

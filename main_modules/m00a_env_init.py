@@ -67,8 +67,10 @@ def get_or_create_analysis_environment(
         env = get_analysis_environment(base_dir=base_dir)
     else:
         if allow_creation:
-            if case_name is None and not gui_mode:
-                if case_name is None:
+            if case_name is None:
+                if gui_mode:
+                    raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+                else:
                     case_name = input("Specify the analysis name (enter for default [Not Defined - Standalone]): ").strip()
                     if not case_name:
                         case_name = DEFAULT_CASE_NAME

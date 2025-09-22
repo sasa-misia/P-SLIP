@@ -1,0 +1,28 @@
+================================================================================
+Rules of naming
+
+xNNyn_[script_name].py
+
+Where:
+1. x = type of script, which can be:
+    - m = main script
+    - o = optional script
+    - p = plot script
+
+2. NN = number of the script, which indicates the order of execution (for example, 01 must be executed before 02, etc.)
+
+3. y = type of script, which is represented by a letter (for example, a is an operation that is conceptually different from b)
+
+4. n = sub-order of the scripts of the same type (for example, a2 must be executed before a3, etc.). This number is optional and can be omitted, if there is only one script of the same type
+
+5. [script_name] = name of the script, which can be any string (for example, main_triang, test_basis, etc.)
+================================================================================
+
+Example of a name of a script:
+m02a2_read_properties_association.py
+
+- Type: m -> main script
+- Number: 02 -> it is a second order script
+- Letter: a -> it is a script of type a (a is just a letter to indicate that the script is conceptually different from other scripts of the same order, 02)
+- Sub-order: 2 -> the sub-order is 2, which means that this script must be executed after the script m02a1_[any_name].py
+- Name: read_properties_association -> name of the script, i.e., a summary of what the script does

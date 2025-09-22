@@ -32,7 +32,7 @@ from psliptools.utilities import (
 # )
 
 # Importing necessary modules from main_modules
-from env_init import get_or_create_analysis_environment
+from main_modules.m00a_env_init import get_or_create_analysis_environment
 
 # %% === Set up logging configuration
 # This will log messages to the console and can be modified to log to a file if needed
@@ -89,15 +89,18 @@ def main(
     for _, row in abg_df.iterrows():
         abg_shapes.append(row['raster_lon'].shape)
     
-    gd_grids = generate_grids_from_indices(
-        shapes=abg_shapes,
-        indices=association_df['abg_idx_1d'],
-        csv_paths=parameters_csv_path,
-        class_names=association_df['class_name'],
-        parameter_name='gd',
-        out_type='float32',
-        no_data=0
-    )
+    par_grids = {'GS':None, 'gd':None, 'c':None, 'cr':None, 'phi':None, 'kt':None, 'beta':None, 'A':None, 'lambda':None, 'n':None, 'E':None, 'ni':None}
+    for par in par_grids.keys():
+        par_grids[par] = generate_grids_from_indices(
+            indices=association_df['abg_idx_1d'],
+            classes=association_df['parameter_class'],
+            shapes=abg_shapes,
+            csv_paths=parameters_csv_path,
+            csv_parameter_column=par,
+            csv_classes_column='class_id',
+            out_type='float32',
+            no_data=0
+        )
 
     for i, row_ref_pnt in ref_points_df.iterrows():
         point_idxs, points_dists = np.zeros(abg_df.shape[0]), np.zeros(abg_df.shape[0])
@@ -110,12 +113,29 @@ def main(
             else:
                 raise ValueError(f"Not unique match found for point {i} (lon={row_ref_pnt['lon']}, lat={row_ref_pnt['lat']}) in DTM n. {n}")
         
-        point_dtm = int(np.nanargmin(points_dists))
-        ref_points_df.loc[i, 'dtm'] = point_dtm
-        ref_points_df.loc[i, 'idx_1d'] = int(point_idxs[point_dtm])
-        ref_points_df.loc[i, 'dist'] = points_dists[point_dtm]
-        ref_points_df.loc[i, 'gd'] = pick_point_from_1d_idx(gd_grids[point_dtm], point_idxs[point_dtm], order='C')
+        curr_sel_dtm = int(np.nanargmin(points_dists))
+        if np.isnan(point_idxs[curr_sel_dtm]):
+            warnings.warn(f"No match found for point {i} (lon={row_ref_pnt['lon']}, lat={row_ref_pnt['lat']}). Nearest DTM is {curr_sel_dtm}.", UserWarning)
+            continue
 
-    # TODO: Add code to extract reference points info
+        ref_points_df.loc[i, 'dtm'] = curr_sel_dtm
+        ref_points_df.loc[i, 'idx_1d'] = int(point_idxs[curr_sel_dtm])
+        ref_points_df.loc[i, 'dist'] = points_dists[curr_sel_dtm]
+        for par in par_grids.keys():
+            ref_points_df.loc[i, par] = pick_point_from_1d_idx(par_grids[par][curr_sel_dtm], point_idxs[curr_sel_dtm], order='C')
+
+    return ref_points_df
 
 # %% === Command line interface
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Information about the parameters of reference points.")
+    parser.add_argument('--base_dir', type=str, default=None, help="Base directory for the analysis.")
+    parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
+    args = parser.parse_args()
+
+    parameters_vars = main(
+        base_dir=args.base_dir, 
+        gui_mode=args.gui_mode
+    )
+
+# %%
