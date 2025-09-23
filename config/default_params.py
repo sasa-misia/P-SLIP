@@ -29,7 +29,7 @@ KNOWN_OPTIONAL_STATIC_INPUT_TYPES = [
     'land_use'
 ]
 KNOWN_DYNAMIC_INPUT_TYPES = [
-    'rainfalls', 
+    'rain',
     'temperature'
 ]
 DYNAMIC_SUBFOLDERS = [
@@ -254,4 +254,4 @@ DEFAULT_PARAMETER_CLASSES = [
 
 # %% === Default reference points csv
 REFERENCE_POINTS_FILENAME = 'reference_points.csv'
-REFERENCE_POINTS_CVS_COLUMNS = ['lon', 'lat', 'name', 'info']
+REFERENCE_POINTS_CVS_COLUMNS = ['lon', 'lat', 'id', 'date', 'info']

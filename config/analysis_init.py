@@ -45,18 +45,266 @@ from .version_writer import (
 # Import utility functions
 from psliptools.utilities import parse_csv_internal_path_field, check_raw_path, add_row_to_csv
 
-#%% Define the AnalysisEnvironment dataclass
+# %% === Helper functions ===
+def _retrieve_current_user() -> str:
+    """
+    Retrieve the current user.
+
+    Returns:
+        str: The current user.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Retrieving current user...")
+
+    # OS detection
+    if platform.system() == 'Windows':
+        user = os.environ.get('USERNAME', 'unknown')
+    else:
+        user = os.environ.get('USER', 'unknown')
+        logger.warning('Platform not yet tested. In case of problems, please contact the developer.')
+    
+    logger.info(f"Current user is: {user}")
+    return user
+        
+def _retrieve_app_version() -> str:
+    """
+    Retrieve the application version.
+
+    Returns:
+        str: The application version.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Retrieving application version...")
+
+    app_version = get_app_version()
+    if app_version:
+        logger.info(f"Application version is: {app_version}")
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        version_file_path = os.path.join(script_dir, 'version.txt')
+        with open(version_file_path, 'r') as f:
+            app_version = f.read().strip()
+            if app_version:
+                logger.info(f"Application version ({app_version}) read from {version_file_path}")
+            else:
+                logger.warning(f"No application version found in {version_file_path}. Using default version 'unknown'.")
+                app_version = 'unknown'
+    return app_version
+
+def _import_corrected_name(lib: str) -> str:
+    """
+    Import a library by its name, handling special cases for hyphenated names.
+    """
+    # Try to import the library using its name
+    try:
+        corrected_name = lib.split('.')[0].replace('-', '_')
+        importlib.import_module(corrected_name)
+        return corrected_name
+    except ImportError:
+        # If it fails, try manual mapping (add only special cases here)
+        corrected_name = lib.split('.')[0]
+        mapping = {
+            "scikit-image": "skimage", # first the library name, then the import name
+            "scikit-learn": "sklearn",
+            "gdal": "osgeo"
+        }
+        if corrected_name in mapping:
+            importlib.import_module(mapping[corrected_name])
+            return mapping[corrected_name]
+        # If it still fails, raise an error
+        raise ImportError(
+            f"Library '{lib}' could not be imported. Please ensure it is installed correctly or add entry to the mapping (eg: scikit-image: skimage)."
+        )
+
+def _check_libraries(required_file: str = LIBRARIES_CONFIG['required_file'],
+                     optional_file: str = LIBRARIES_CONFIG['optional_file']) -> Tuple[bool, bool]:
+    """
+    Verify if the required and optional libraries are installed.
+    If any required library is missing, an ImportError is raised.
+
+    Args:
+        required_file (str): Path to the TXT file with required libraries.
+        optional_file (str): Path to the TXT file with optional libraries.
+
+    Returns:
+        tuple: (required_status, optional_status) - True if all libraries are installed, False otherwise.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Checking required and optional libraries...")
+
+    config_dir = Path(__file__).parent.parent
+
+    def _parse_libs(file_path: Path) -> list[str]:
+        with open(file_path, 'r') as f:
+            return [
+                line.strip()
+                for line in f.readlines()
+                if line.strip() and not line.strip().startswith('#')
+            ]
+
+    required_libs = _parse_libs(config_dir / required_file)
+    optional_libs = _parse_libs(config_dir / optional_file)
+
+    missing_required = []
+    for lib in required_libs:
+        try:
+            _import_corrected_name(lib)
+        except ImportError:
+            missing_required.append(lib)
+
+    missing_optional = []
+    for lib in optional_libs:
+        try:
+            _import_corrected_name(lib)
+        except ImportError:
+            missing_optional.append(lib)
+
+    if missing_required:
+        error_msg = "The following required libraries must be installed:\n" + "\n".join(missing_required)
+        logger.error(error_msg)
+        raise ImportError(error_msg)
+
+    if missing_optional:
+        warn_msg = "It is recommended to install the following optional libraries:\n" + "\n".join(missing_optional)
+        logger.warning(warn_msg)
+
+    logger.info("Library check completed: required OK=%s, optional OK=%s", len(missing_required) == 0, len(missing_optional) == 0)
+    return (len(missing_required) == 0, len(missing_optional) == 0)
+
+def _create_nested_folders(base_path: str, structure: list) -> Dict[str, Any]:
+    """
+    Recursively create nested folders and return a dict with their paths.
+
+    Args:
+        base_path (str): The parent directory.
+        structure (list): List of str or dict (for subfolders).
+
+    Returns:
+        dict: A dictionary with folder names as keys and their paths as values.
+    """
+    logger = logging.getLogger(__name__)
+    result = {'path': base_path}
+    if not os.path.exists(base_path):
+        os.makedirs(base_path)
+        logger.info(f"New folder created: {base_path}")
+    else:
+        logger.info(f"Folder already exists: {base_path}")
+
+    for item in structure:
+        if isinstance(item, str):
+            sub_path = os.path.join(base_path, item)
+            result[item] = {'path': sub_path}
+            if not os.path.exists(sub_path):
+                os.makedirs(sub_path)
+                logger.info(f"New subfolder created: {sub_path}")
+            else:
+                logger.info(f"Subfolder already exists: {sub_path}")
+        elif isinstance(item, dict):
+            for subkey, subval in item.items():
+                sub_path = os.path.join(base_path, subkey)
+                result[subkey] = _create_nested_folders(sub_path, subval)
+    return result
+
+def _update_paths(paths_dict: Dict[str, Any], old_base: str, new_base: str) -> None:
+    """
+    Recursively update paths in the environment dictionary.
+
+    Args:
+        paths_dict (dict): Dictionary containing environment paths.
+        old_base (str): Old base path to be replaced.
+        new_base (str): New base path to replace the old one.
+
+    Returns:
+        None
+    """
+    for key, value in paths_dict.items():
+        if isinstance(value, dict):
+            _update_paths(value, old_base, new_base)
+        elif key == 'path' and isinstance(value, str) and value.startswith(old_base):
+            paths_dict[key] = value.replace(old_base, new_base, 1)
+
+def _create_inputs_csv(inp_csv_base_dir: str) -> str:
+    """
+    Create the input files CSV in the specified directory.
+
+    Args:
+        inp_csv_base_dir (str): Directory where the input CSV will be created.
+
+    Returns:
+        str: Path to the created CSV file.
+    """
+    logger = logging.getLogger(__name__)
+    if not os.path.exists(inp_csv_base_dir):
+        logger.error(f"The specified input CSV base directory does not exist: {inp_csv_base_dir}")
+        raise FileNotFoundError(f"The specified input CSV base directory does not exist: {inp_csv_base_dir}")
+    inp_csv_path = os.path.join(inp_csv_base_dir, RAW_INPUT_FILENAME)
+    input_files_df = pd.DataFrame(columns=RAW_INPUT_CSV_COLUMNS)
+    input_files_df.to_csv(inp_csv_path, index=False)
+    logger.info(f"Input CSV created at: {inp_csv_path}")
+    return inp_csv_path
+
+def _check_inputs_csv(inp_csv_path: str) -> bool:
+    """
+    Check the input CSV for required columns and external files, and warn the user if found.
+
+    Args:
+        inp_csv_path (str): Path to the input CSV.
+
+    Returns:
+        bool: True if all input files are internal, False otherwise.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Checking input files CSV: {inp_csv_path}")
+
+    inp_csv_base_dir = os.path.dirname(inp_csv_path)
+
+    if not os.path.exists(inp_csv_path):
+        logger.warning(f"File {RAW_INPUT_FILENAME} does not exist in {inp_csv_base_dir}.")
+        raise FileNotFoundError(f"The file {RAW_INPUT_FILENAME} does not exist in the specified directory: {inp_csv_base_dir}")
+
+    # Read the CSV into a DataFrame
+    input_files_df = pd.read_csv(inp_csv_path)
+
+    # Check for missing required columns in the CSV
+    missing_cols = [col for col in RAW_INPUT_CSV_COLUMNS if col not in input_files_df.columns]
+    if missing_cols:
+        logger.error(f"File {RAW_INPUT_FILENAME} is missing required columns: {missing_cols}")
+        raise ValueError(f"The file {RAW_INPUT_FILENAME} does not contain the required columns: {missing_cols}")
+    
+    if input_files_df.empty:
+        logger.info(f"The input files CSV {RAW_INPUT_FILENAME} is empty. No input files to check.")
+        return True
+    else:
+        # Identify rows where the file is not internal (i.e., external files)
+        external_mask = ~input_files_df.apply(
+            lambda row: parse_csv_internal_path_field(row['internal'], row['path'], inp_csv_base_dir), axis=1
+        )
+
+        # Warn if any external files are found
+        if external_mask.any():
+            external_paths = input_files_df.loc[external_mask, 'path'].tolist()
+            logger.warning(
+                f"Some input files are external to the 'inputs' folder: {external_paths}\n"
+                f"You must check the paths of these files in {RAW_INPUT_FILENAME}, and update them, if the path is not correct."
+            )
+            return False
+        else:
+            logger.info(f"All input files of {RAW_INPUT_FILENAME} are internal to the 'inputs' folder.")
+            return True
+
+# %% === Define the AnalysisEnvironment dataclass ===
 @dataclass
 class AnalysisEnvironment:
     """Class to store the analysis environment details."""
 
     # Metadata
     case_name: str
-    user: str = 'unknown'  # Default user if not specified
+    creator_user: str = 'unknown'  # Default user if not specified
+    creation_time: str = field(default_factory=lambda: pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
+    current_user: str = 'unknown'  # Placeholder for the current user
+    last_update: str = field(default_factory=lambda: pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
     app_version: str = 'unknown' # Placeholder for the application version
     user_platform: str = field(default_factory=lambda: platform.system())
-    path_separator: str = os.path.sep
-    creation_time: str = field(default_factory=lambda: pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
     folders: dict = field(default_factory=lambda: {})
     config: dict = field(default_factory=lambda: copy.deepcopy(ANALYSIS_CONFIGURATION))
 
@@ -72,15 +320,65 @@ class AnalysisEnvironment:
             self.config = copy.deepcopy(ANALYSIS_CONFIGURATION)
 
     # Function to save the environment to a JSON file
-    def to_json(self, file_path: str) -> None:
+    def to_json(
+            self, 
+            file_path: str
+        ) -> None:
         """
         Save the environment to a JSON file, including dynamic attributes.
         
         Args:
             file_path (str): The path to the JSON file.
         """
+        self.current_user = _retrieve_current_user()
+        self.last_update = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.app_version = _retrieve_app_version()
+        self.user_platform = platform.system()
+        
         with open(file_path, 'w') as f:
             json.dump(self.__dict__, f, indent=4)
+    
+    # Function to create analysis folders
+    def create_folder_structure(
+            self,
+            base_dir: str
+        ) -> None:
+        """
+        Create the folder structure for the analysis.
+        This function creates the main analysis directory and subdirectories.
+
+        Args:
+            base_dir (str): Base directory for the analysis. Must already exist.
+
+        Returns:
+            None
+        """
+        logger = logging.getLogger(__name__)
+        logger.info(f"Starting folder structure creation for case: {self.case_name}")
+
+        # Check if base_dir is provided and exists
+        if not os.path.isdir(base_dir):
+            raise ValueError(f"The specified base directory does not exist: {base_dir}")
+
+        self.folders['base'] = {'path': base_dir}
+
+        # Dynamically create folder structure attributes
+        for key, substructure in ANALYSIS_FOLDER_STRUCTURE.items():
+            main_path = os.path.join(base_dir, key)
+            nested_dict = _create_nested_folders(main_path, substructure)
+            # Set the attribute directly (now declared in dataclass)
+            self.folders[key] = nested_dict
+
+        # Create or update the csv of the input files, in the main input folder
+        inp_csv_path = _create_inputs_csv(self.folders['inputs']['path'])
+        logger.info(f"File {RAW_INPUT_FILENAME} created: {inp_csv_path}")
+
+        # Save the environment to a JSON file
+        env_file_path = os.path.join(self.folders['base']['path'], ENVIRONMENT_FILENAME)
+        self.to_json(env_file_path)
+        logger.info(f"Analysis environment saved to: {env_file_path}")
+
+        logger.info(f"Analysis folder structure created successfully for: {self.case_name}")
     
     # Function to add an input file to the RAW_INPUT_FILENAME
     def add_input_file(
@@ -89,12 +387,11 @@ class AnalysisEnvironment:
             file_type: str,
             file_subtype: Optional[str] = None,
             force_add: bool = True,
-            ) -> tuple[bool, str]:
+        ) -> tuple[bool, str]:
         """
         Add a new input file to the analysis environment and row in the input files CSV.
 
         Args:
-            analysis_env (AnalysisEnvironment): The analysis environment object.
             file_path (str): Path to the input file to be added.
             file_type (str): Type of the input file (e.g., 'shapefile', 'raster', etc.).
             file_subtype (str, optional): Subtype of the input file (e.g., 'recording', 'forecast', etc.).
@@ -133,7 +430,7 @@ class AnalysisEnvironment:
             logger.info(f"File {file_path} not added in the input files CSV.")
         return (row_added, new_id)
     
-    # Functions to save a v
+    # Functions to save a variable
     def save_variable(
             self, 
             variable_to_save: Dict[str, Any], 
@@ -190,6 +487,7 @@ class AnalysisEnvironment:
         if os.path.isabs(environment_filename):
             environment_filename = os.path.basename(environment_filename)
             logger.warning("environment_filename was provided as an absolute path, converted to filename only.")
+
         env_file_path = os.path.join(self.folders['base']['path'], environment_filename)
         self.to_json(env_file_path)
 
@@ -407,277 +705,7 @@ class AnalysisEnvironment:
                 setattr(obj, k, v)
         return obj
 
-#%% Helper functions
-def _import_corrected_name(lib: str) -> str:
-    """
-    Import a library by its name, handling special cases for hyphenated names.
-    """
-    # Try to import the library using its name
-    try:
-        corrected_name = lib.split('.')[0].replace('-', '_')
-        importlib.import_module(corrected_name)
-        return corrected_name
-    except ImportError:
-        # If it fails, try manual mapping (add only special cases here)
-        corrected_name = lib.split('.')[0]
-        mapping = {
-            "scikit-image": "skimage", # first the library name, then the import name
-            "scikit-learn": "sklearn",
-            "gdal": "osgeo"
-        }
-        if corrected_name in mapping:
-            importlib.import_module(mapping[corrected_name])
-            return mapping[corrected_name]
-        # If it still fails, raise an error
-        raise ImportError(
-            f"Library '{lib}' could not be imported. Please ensure it is installed correctly or add entry to the mapping (eg: scikit-image: skimage)."
-        )
-
-def _check_libraries(required_file: str = LIBRARIES_CONFIG['required_file'],
-                     optional_file: str = LIBRARIES_CONFIG['optional_file']) -> Tuple[bool, bool]:
-    """
-    Verify if the required and optional libraries are installed.
-    If any required library is missing, an ImportError is raised.
-
-    Args:
-        required_file (str): Path to the TXT file with required libraries.
-        optional_file (str): Path to the TXT file with optional libraries.
-
-    Returns:
-        tuple: (required_status, optional_status) - True if all libraries are installed, False otherwise.
-    """
-    logger = logging.getLogger(__name__)
-    config_dir = Path(__file__).parent.parent
-
-    def _parse_libs(file_path: Path) -> list[str]:
-        with open(file_path, 'r') as f:
-            return [
-                line.strip()
-                for line in f.readlines()
-                if line.strip() and not line.strip().startswith('#')
-            ]
-
-    required_libs = _parse_libs(config_dir / required_file)
-    optional_libs = _parse_libs(config_dir / optional_file)
-
-    missing_required = []
-    for lib in required_libs:
-        try:
-            _import_corrected_name(lib)
-        except ImportError:
-            missing_required.append(lib)
-
-    missing_optional = []
-    for lib in optional_libs:
-        try:
-            _import_corrected_name(lib)
-        except ImportError:
-            missing_optional.append(lib)
-
-    if missing_required:
-        error_msg = "The following required libraries must be installed:\n" + "\n".join(missing_required)
-        logger.error(error_msg)
-        raise ImportError(error_msg)
-
-    if missing_optional:
-        warn_msg = "It is recommended to install the following optional libraries:\n" + "\n".join(missing_optional)
-        logger.warning(warn_msg)
-
-    logger.info("Library check completed: required OK=%s, optional OK=%s", len(missing_required) == 0, len(missing_optional) == 0)
-    return (len(missing_required) == 0, len(missing_optional) == 0)
-
-def _create_nested_folders(base_path: str, structure: list) -> Dict[str, Any]:
-    """
-    Recursively create nested folders and return a dict with their paths.
-
-    Args:
-        base_path (str): The parent directory.
-        structure (list): List of str or dict (for subfolders).
-
-    Returns:
-        dict: A dictionary with folder names as keys and their paths as values.
-    """
-    logger = logging.getLogger(__name__)
-    result = {'path': base_path}
-    if not os.path.exists(base_path):
-        os.makedirs(base_path)
-        logger.info(f"New folder created: {base_path}")
-
-    for item in structure:
-        if isinstance(item, str):
-            sub_path = os.path.join(base_path, item)
-            result[item] = {'path': sub_path}
-            if not os.path.exists(sub_path):
-                os.makedirs(sub_path)
-                logger.info(f"New subfolder created: {sub_path}")
-        elif isinstance(item, dict):
-            for subkey, subval in item.items():
-                sub_path = os.path.join(base_path, subkey)
-                result[subkey] = _create_nested_folders(sub_path, subval)
-    return result
-
-def _update_paths(env_dict: Dict[str, Any], old_base: str, new_base: str) -> None:
-    """
-    Recursively update paths in the environment dictionary.
-
-    Args:
-        env_dict (dict): Dictionary containing environment paths.
-        old_base (str): Old base path to be replaced.
-        new_base (str): New base path to replace the old one.
-
-    Returns:
-        None
-    """
-    for key, value in env_dict.items():
-        if isinstance(value, dict):
-            _update_paths(value, old_base, new_base)
-        elif key == 'path' and isinstance(value, str) and value.startswith(old_base):
-            env_dict[key] = value.replace(old_base, new_base, 1)
-
-def _create_inputs_csv(inp_csv_base_dir: str) -> str:
-    """
-    Create the input files CSV in the specified directory.
-
-    Args:
-        inp_csv_base_dir (str): Directory where the input CSV will be created.
-
-    Returns:
-        str: Path to the created CSV file.
-    """
-    logger = logging.getLogger(__name__)
-    if not os.path.exists(inp_csv_base_dir):
-        logger.error(f"The specified input CSV base directory does not exist: {inp_csv_base_dir}")
-        raise FileNotFoundError(f"The specified input CSV base directory does not exist: {inp_csv_base_dir}")
-    inp_csv_path = os.path.join(inp_csv_base_dir, RAW_INPUT_FILENAME)
-    input_files_df = pd.DataFrame(columns=RAW_INPUT_CSV_COLUMNS)
-    input_files_df.to_csv(inp_csv_path, index=False)
-    logger.info(f"Input CSV created at: {inp_csv_path}")
-    return inp_csv_path
-
-def _check_inputs_csv(inp_csv_path: str) -> bool:
-    """
-    Check the input CSV for required columns and external files, and warn the user if found.
-
-    Args:
-        inp_csv_path (str): Path to the input CSV.
-
-    Returns:
-        bool: True if all input files are internal, False otherwise.
-    """
-    logger = logging.getLogger(__name__)
-    logger.info(f"Checking input files CSV: {inp_csv_path}")
-
-    inp_csv_base_dir = os.path.dirname(inp_csv_path)
-
-    if not os.path.exists(inp_csv_path):
-        logger.warning(f"File {RAW_INPUT_FILENAME} does not exist in {inp_csv_base_dir}.")
-        raise FileNotFoundError(f"The file {RAW_INPUT_FILENAME} does not exist in the specified directory: {inp_csv_base_dir}")
-
-    # Read the CSV into a DataFrame
-    input_files_df = pd.read_csv(inp_csv_path)
-
-    # Check for missing required columns in the CSV
-    missing_cols = [col for col in RAW_INPUT_CSV_COLUMNS if col not in input_files_df.columns]
-    if missing_cols:
-        logger.error(f"File {RAW_INPUT_FILENAME} is missing required columns: {missing_cols}")
-        raise ValueError(f"The file {RAW_INPUT_FILENAME} does not contain the required columns: {missing_cols}")
-    
-    if input_files_df.empty:
-        logger.info(f"The input files CSV {RAW_INPUT_FILENAME} is empty. No input files to check.")
-        return True
-    else:
-        # Identify rows where the file is not internal (i.e., external files)
-        external_mask = ~input_files_df.apply(
-            lambda row: parse_csv_internal_path_field(row['internal'], row['path'], inp_csv_base_dir), axis=1
-        )
-
-        # Warn if any external files are found
-        if external_mask.any():
-            external_paths = input_files_df.loc[external_mask, 'path'].tolist()
-            logger.warning(
-                f"Some input files are external to the 'inputs' folder: {external_paths}\n"
-                f"You must check the paths of these files in {RAW_INPUT_FILENAME}, and update them, if the path is not correct."
-            )
-            return False
-        else:
-            logger.info(f"All input files of {RAW_INPUT_FILENAME} are internal to the 'inputs' folder.")
-            return True
-
-def _create_folder_structure(base_dir: str, case_name: str) -> AnalysisEnvironment:
-    """
-    Create the folder structure for the analysis.
-    This function creates the main analysis directory and subdirectories.
-
-    Args:
-        base_dir (str): Base directory for the analysis. Must exist.
-        case_name (str): Name of the case study.
-
-    Returns:
-        AnalysisEnvironment: Object with the details of the analysis environment.
-    """
-    logger = logging.getLogger(__name__)
-    logger.info(f"Starting folder structure creation for case: {case_name}")
-
-    # OS detection
-    if platform.system() == 'Windows':
-        user = os.environ.get('USERNAME', 'unknown')
-    else:
-        user = os.environ.get('USER', 'unknown')
-        logger.warning('Platform not yet tested. In case of problems, please contact the developer.')
-    
-    # Write and read the application version from a file
-    app_version = get_app_version()
-    if app_version:
-        logger.info(f"Application version is: {app_version}")
-    else:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        version_file_path = os.path.join(script_dir, 'version.txt')
-        with open(version_file_path, 'r') as f:
-            app_version = f.read().strip()
-            if app_version:
-                logger.info(f"Application version ({app_version}) read from {version_file_path}")
-            else:
-                logger.warning(f"No application version found in {version_file_path}. Using default version 'unknown'.")
-                app_version = 'unknown'
-
-    # Library check
-    logger.info("Checking required and optional libraries...")
-    _check_libraries()
-    logger.info("Library check completed.")
-
-    # Create the analysis environment object
-    env = AnalysisEnvironment(
-        case_name=case_name,
-        user=user,
-        app_version=app_version
-    )
-
-    # Check if base_dir is provided and exists
-    if not os.path.isdir(base_dir):
-        raise ValueError(f"The specified base directory does not exist: {base_dir}")
-
-    env.folders['base'] = {'path': base_dir}
-
-    # Dynamically create folder structure attributes
-    for key, substructure in ANALYSIS_FOLDER_STRUCTURE.items():
-        main_path = os.path.join(base_dir, key)
-        nested_dict = _create_nested_folders(main_path, substructure)
-        # Set the attribute directly (now declared in dataclass)
-        env.folders[key] = nested_dict
-
-    # Create or update the csv of the input files, in the main input folder
-    inp_csv_path = _create_inputs_csv(env.folders['inputs']['path'])
-    logger.info(f"File {RAW_INPUT_FILENAME} created: {inp_csv_path}")
-
-    # Save the environment to a JSON file
-    env_file_path = os.path.join(env.folders['base']['path'], ENVIRONMENT_FILENAME)
-    env.to_json(env_file_path)
-    logger.info(f"Analysis environment saved to: {env_file_path}")
-
-    logger.info(f"Analysis folder structure created successfully for: {case_name}")
-    return env
-
-#%% Functions to create or get the analysis environment
+# %% === Methods to create or get the analysis environment ===
 def create_analysis_environment(base_dir: str, case_name: Optional[str] = None) -> AnalysisEnvironment:
     """
     Create a new analysis and its folder structure.
@@ -689,6 +717,8 @@ def create_analysis_environment(base_dir: str, case_name: Optional[str] = None) 
     Returns:
         AnalysisEnvironment: Object with the details of the analysis environment.
     """
+    _check_libraries()
+
     logger = logging.getLogger(__name__)
     logger.info(f"Start creating environment in: {base_dir}")
 
@@ -705,7 +735,18 @@ def create_analysis_environment(base_dir: str, case_name: Optional[str] = None) 
     if case_name is None:
         case_name = DEFAULT_CASE_NAME
     
-    env = _create_folder_structure(base_dir=base_dir, case_name=case_name)
+    user = _retrieve_current_user()
+    
+    app_version = _retrieve_app_version()
+    
+    # Create the analysis environment object
+    env = AnalysisEnvironment(
+        case_name=case_name,
+        creator_user=user,
+        app_version=app_version
+    )
+    
+    env.create_folder_structure(base_dir)
 
     env.generate_default_csv()
 
@@ -721,6 +762,8 @@ def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
     Returns:
         AnalysisEnvironment: Object with the details of the analysis environment.
     """
+    _check_libraries()
+
     logger = logging.getLogger(__name__)
     logger.info(f"Start loading environment from: {base_dir}")
 
@@ -733,8 +776,10 @@ def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
     env_file_path = os.path.join(base_dir, ENVIRONMENT_FILENAME)
     if os.path.exists(env_file_path):
         logger.info(f"Existing {ENVIRONMENT_FILENAME} found in {base_dir}. Loading environment...")
+
         env = AnalysisEnvironment.from_json(env_file_path)
         old_base = env.folders['base']['path']
+        
         # If the base directory has changed, update all paths accordingly
         if os.path.abspath(old_base) != os.path.abspath(base_dir):
             logger.warning(f"Base directory has changed from '{old_base}' to '{base_dir}'. Updating all paths...")
@@ -745,6 +790,7 @@ def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
                 else:
                     logger.error(f"Unexpected type for attribute 'folders.{key}': {type(val)}. Expected dict.")
                     raise TypeError(f"Expected dict for attribute 'folders.{key}', got {type(val)}.")
+                
             # Save the updated environment to file
             env.to_json(env_file_path)
             logger.info("All paths updated and environment saved.")
@@ -759,9 +805,12 @@ def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
             else:
                 logger.info(f"File {RAW_INPUT_FILENAME} already exists: {inp_csv_path}")
                 _check_inputs_csv(inp_csv_path)
+
         else:
             logger.info("Base directory unchanged. Environment loaded as is.")
+
         return env
+    
     else:
         raise FileNotFoundError(f"No existing analysis environment found in {base_dir}.")
     

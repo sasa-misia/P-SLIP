@@ -26,7 +26,7 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment
+from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename
 
 # %% === Set up logging configuration
 # This will log messages to the console and can be modified to log to a file if needed
@@ -35,41 +35,19 @@ logging.basicConfig(level=logging.INFO,
                     datefmt=LOG_CONFIG['date_format'])
 
 # %% === Methods to import shapefiles with main properties
-def obtain_config_idx_and_rel_filename(
-        env: AnalysisEnvironment, 
-        source_type: str, 
-        source_subtype: str=None
-    ) -> tuple[AnalysisEnvironment, int, str]:
-    idx = 0
-    if source_subtype:
-        if env.config['inputs'][source_type][0]['settings']: # if the setting dictionary of the first element [0] is not empty, then you should overwrite or add an element to the list
-            poss_idx = []
-            for i, d in enumerate(env.config['inputs'][source_type]):
-                if 'source_subtype' in d['settings'].keys():
-                    if d['settings']['source_subtype'] == source_subtype:
-                        poss_idx.append(i)
-            if len(poss_idx) > 1:
-                raise ValueError("Multiple subtypes with the same name were found. Please check the subtype.")
-            elif len(poss_idx) ==  1:
-                idx = poss_idx[0]
-            else:
-                idx += len(env.config['inputs'][source_type]) # This must be before the append!
-                env.config['inputs'][source_type].append({})
-        rel_filename = f"{source_type}_{source_subtype}"
-    else:
-        rel_filename = f"{source_type}"
-        
-    return env, idx, rel_filename
+
 
 # %% === Main function
 def main(
-        source_type: str="land_use", 
-        source_subtype: str=None, 
         gui_mode: bool=False, 
-        base_dir: str=None
+        base_dir: str=None,
+        source_type: str="land_use", 
+        source_subtype: str=None
     ) -> Dict[str, Any]:
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
         raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
+    
+    source_mode = 'shapefile'
 
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
 
@@ -120,7 +98,7 @@ def main(
     _, cust_id = env.add_input_file(file_path=src_path, file_type=source_type, file_subtype=source_subtype)
 
     env.config['inputs'][source_type][idx_config]['settings'] = {
-        'source_mode': 'shapefile',
+        'source_mode': source_mode,
         'source_field': sel_shp_field,
         'source_subtype': source_subtype,
         'association_filename': association_filename
@@ -135,17 +113,17 @@ def main(
 # %% === Command line interface
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Import shapefiles with main properties")
-    parser.add_argument("--source_type", type=str, default="land_use", help="Source type (e.g., " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES) + ")")
-    parser.add_argument("--source_subtype", type=str, default=None, help="Source subtype (optional)")
     parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
     parser.add_argument("--base_dir", type=str, default=None, help="Base directory for the analysis")
+    parser.add_argument("--source_type", type=str, default="land_use", help="Source type (e.g., " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES) + ")")
+    parser.add_argument("--source_subtype", type=str, default=None, help="Source subtype (optional)")
     args = parser.parse_args()
 
     prop_vars = main(
-        source_type=args.source_type, 
-        source_subtype=args.source_subtype,
         gui_mode=args.gui_mode, 
-        base_dir=args.base_dir
+        base_dir=args.base_dir,
+        source_type=args.source_type, 
+        source_subtype=args.source_subtype
     )
 
 # %%
