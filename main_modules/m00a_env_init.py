@@ -12,12 +12,16 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config.analysis_init import create_analysis_environment, get_analysis_environment, AnalysisEnvironment
 from config.default_params import LOG_CONFIG, ENVIRONMENT_FILENAME, DEFAULT_CASE_NAME
 
-
-# %% === Set up logging configuration
-# This will log messages to the console and can be modified to log to a file if needed
-logging.basicConfig(level=logging.INFO,
-                    format=LOG_CONFIG['format'], 
-                    datefmt=LOG_CONFIG['date_format'])
+# %% === Logger
+# This will log messages to the console and when the AnalysisEnvironment is created or loaded, it will log to a file
+def setup_logger():
+    logging.basicConfig(
+        level=logging.INFO,
+        format=LOG_CONFIG['format'], 
+        datefmt=LOG_CONFIG['date_format']
+    )
+    logger = logging.getLogger(__name__)
+    return logger
 
 # %% === Main function to initialize or load the analysis environment
 # This function is responsible for creating or loading the analysis environment based on user input.

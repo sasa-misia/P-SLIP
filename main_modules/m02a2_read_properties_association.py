@@ -1,7 +1,6 @@
 # %% === Import necessary modules
 import os
 import sys
-import logging
 import pandas as pd
 import argparse
 from typing import Dict, Any
@@ -10,7 +9,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    LOG_CONFIG,
     KNOWN_OPTIONAL_STATIC_INPUT_TYPES,
     STANDARD_CLASSES_FILENAME,
     PARAMETER_CLASSES_FILENAME
@@ -22,13 +20,9 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment
-
-# %% === Set up logging configuration
-# This will log messages to the console and can be modified to log to a file if needed
-logging.basicConfig(level=logging.INFO,
-                    format=LOG_CONFIG['format'], 
-                    datefmt=LOG_CONFIG['date_format'])
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+logger = setup_logger()
+logger.info("=== Associate properties to polygons ===")
 
 # %% === Methods to add associations
 def class_association(

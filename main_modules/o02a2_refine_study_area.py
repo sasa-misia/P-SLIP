@@ -1,7 +1,6 @@
 # %% === Import necessary modules
 import os
 import sys
-import logging
 import pandas as pd
 import argparse
 from typing import Dict, Any
@@ -10,8 +9,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    AnalysisEnvironment,
-    LOG_CONFIG,
     KNOWN_OPTIONAL_STATIC_INPUT_TYPES
 )
 
@@ -25,13 +22,9 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment
-
-# %% === Set up logging configuration
-# This will log messages to the console and can be modified to log to a file if needed
-logging.basicConfig(level=logging.INFO,
-                    format=LOG_CONFIG['format'],
-                    datefmt=LOG_CONFIG['date_format'])
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+logger = setup_logger()
+logger.info("=== Refine study area ===")
 
 # %% === Methods to subtract polygons from study area
 def subtract_polygons_from_study_area(
@@ -47,7 +40,7 @@ def subtract_polygons_from_study_area(
 
     study_area_subtracted_poly_list = subtract_polygons(study_area_dict['study_area_cln_poly'], polygons_to_remove)
     if len(study_area_subtracted_poly_list) != 1:
-        logging.error("Polygon subtraction resulted in multiple or no polygons.")
+        logger.error("Polygon subtraction resulted in multiple or no polygons.")
         raise ValueError("Polygon subtraction resulted in multiple or no polygons.")
 
     study_area_dict['study_area_cln_poly'] = study_area_subtracted_poly_list[0]
@@ -57,11 +50,11 @@ def subtract_polygons_from_study_area(
                         (study_area_dict['study_area_rem_poly']['subtype'] == subtype) # It is a pandas series
         
         if replace_index.sum() > 1:
-            logging.error("Multiple polygon matches found for replace_index in study_area_rem_poly.")
+            logger.error("Multiple polygon matches found for replace_index in study_area_rem_poly.")
             raise ValueError("Multiple polygon matches found for replace_index in study_area_rem_poly.")
         elif replace_index.sum() == 1:
             study_area_dict['study_area_rem_poly'].loc[replace_index, 'geometry'] = geometry
-            logging.info(f"Replaced existing polygon for class '{class_name}' in study_area_rem_poly DataFrame.")
+            logger.info(f"Replaced existing polygon for class '{class_name}' in study_area_rem_poly DataFrame.")
         else:
             study_area_dict['study_area_rem_poly'] = pd.concat(
                 [
@@ -72,7 +65,7 @@ def subtract_polygons_from_study_area(
                                    'geometry': geometry}]) # Remember that if you use dict, it must be a list of dicts!
                 ], ignore_index=True)
 
-        logging.info(f"Updated study_area_rem_poly DataFrame for class '{class_name}'.")
+        logger.info(f"Updated study_area_rem_poly DataFrame for class '{class_name}'.")
         
     return study_area_dict
 
@@ -98,17 +91,17 @@ def main(
     if not os.path.exists(os.path.join(env.folders['variables']['path'], rem_filename)):
         matching_files = [f for f in os.listdir(env.folders['variables']['path']) if f.startswith(f"{source_type}")]
         if len(matching_files) == 0:
-            logging.error(f"No existing variable files found for source type '{source_type}' in the variables directory.")
+            logger.error(f"No existing variable files found for source type '{source_type}' in the variables directory.")
             raise FileNotFoundError(f"No existing variable files found for source type '{source_type}' in the variables directory.")
         elif len(matching_files) == 1:
             rem_filename = matching_files[0]
-            logging.info(f"Only one matching file found: {rem_filename}. Using this file.")
+            logger.info(f"Only one matching file found: {rem_filename}. Using this file.")
         elif len(matching_files) > 1:
             if gui_mode:
                 raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
             else:
                 rem_filename = select_from_list_prompt(matching_files, "Select the file containing polygons to remove from study area:")[0]
-                logging.info(f"Multiple matching files found. Selected file: {rem_filename}")
+                logger.info(f"Multiple matching files found. Selected file: {rem_filename}")
 
     rem_poly_vars = env.load_variable(variable_filename=rem_filename)
 
@@ -117,7 +110,7 @@ def main(
     else:
         poly_labels_to_remove = select_from_list_prompt(rem_poly_vars['prop_df']['class_name'].to_list(), usr_prompt="Select the classes to remove:", allow_multiple=True)
     
-    logging.info(f"Selected classes to remove: {poly_labels_to_remove}")
+    logger.info(f"Selected classes to remove: {poly_labels_to_remove}")
 
     study_area_vars = subtract_polygons_from_study_area(
         study_area_dict=study_area_vars,

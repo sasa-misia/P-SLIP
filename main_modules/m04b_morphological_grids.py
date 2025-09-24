@@ -2,14 +2,12 @@
 import os
 import sys
 import argparse
-import logging
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    AnalysisEnvironment,
-    LOG_CONFIG
+    AnalysisEnvironment
 )
 
 # # Importing necessary modules from psliptools
@@ -23,13 +21,9 @@ from config import (
 # )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment
-
-# %% === Set up logging configuration
-# This will log messages to the console and can be modified to log to a file if needed
-logging.basicConfig(level=logging.INFO,
-                    format=LOG_CONFIG['format'], 
-                    datefmt=LOG_CONFIG['date_format'])
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+logger = setup_logger()
+logger.info("=== Create morphological grids ===")
 
 # %% === Methods to create morphological grids
 

@@ -12,6 +12,7 @@ import platform
 import importlib
 import json
 import logging
+import logging.handlers
 import pandas as pd
 import copy
 import pickle
@@ -35,7 +36,8 @@ from .default_params import (
     PARAMETER_CLASSES_FILENAME,
     DEFAULT_PARAMETER_CLASSES,
     REFERENCE_POINTS_FILENAME,
-    REFERENCE_POINTS_CVS_COLUMNS
+    REFERENCE_POINTS_CVS_COLUMNS,
+    LOG_CONFIG
 )
 
 from .version_writer import (
@@ -44,6 +46,50 @@ from .version_writer import (
 
 # Import utility functions
 from psliptools.utilities import parse_csv_internal_path_field, check_raw_path, add_row_to_csv
+
+# %% === Logger ===
+_log_memory_handler = logging.handlers.MemoryHandler(capacity=1000, flushLevel=logging.ERROR)
+
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(logging.Formatter(LOG_CONFIG['format'], LOG_CONFIG['date_format']))
+
+logging.basicConfig(
+    level=logging.INFO,
+    format=LOG_CONFIG['format'],
+    datefmt=LOG_CONFIG['date_format'],
+    handlers=[_log_memory_handler, _stream_handler]
+)
+
+def _setup_session_logger(logfile_path: str):
+    """
+    Set up the session logger, redirecting logs to both file and terminal.
+
+    Args:
+        logfile_path (str): Path to the log file.
+    """
+    logger = logging.getLogger()  # root logger, don't use getLogger(__name__)
+    logger.info(f"Setting up session logger to file...")
+
+    # Remove all FileHandler and StreamHandler from root logger
+    for h in logger.handlers[:]:
+        if isinstance(h, (logging.FileHandler, logging.StreamHandler)):
+            logger.removeHandler(h)
+
+    # Add new FileHandler
+    file_handler = logging.FileHandler(logfile_path, encoding='utf-8')
+    file_handler.setFormatter(logging.Formatter(LOG_CONFIG['format'], LOG_CONFIG['date_format']))
+    logger.addHandler(file_handler)
+
+    # Add StreamHandler for terminal output
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(logging.Formatter(LOG_CONFIG['format'], LOG_CONFIG['date_format']))
+    logger.addHandler(stream_handler)
+
+    # Move logs to file
+    _log_memory_handler.setTarget(file_handler)
+    _log_memory_handler.flush()
+
+    logger.info(f"Logger redirected to: {logfile_path}")
 
 # %% === Helper functions ===
 def _retrieve_current_user() -> str:
@@ -160,12 +206,12 @@ def _check_libraries(required_file: str = LIBRARIES_CONFIG['required_file'],
             missing_optional.append(lib)
 
     if missing_required:
-        error_msg = "The following required libraries must be installed:\n" + "\n".join(missing_required)
+        error_msg = "The following required libraries must be installed: [" + "; ".join(missing_required) + "]"
         logger.error(error_msg)
         raise ImportError(error_msg)
 
     if missing_optional:
-        warn_msg = "It is recommended to install the following optional libraries:\n" + "\n".join(missing_optional)
+        warn_msg = "It is recommended to install the following optional libraries: [" + "; ".join(missing_optional) + "]"
         logger.warning(warn_msg)
 
     logger.info("Library check completed: required OK=%s, optional OK=%s", len(missing_required) == 0, len(missing_optional) == 0)
@@ -745,10 +791,15 @@ def create_analysis_environment(base_dir: str, case_name: Optional[str] = None) 
         creator_user=user,
         app_version=app_version
     )
-    
+
     env.create_folder_structure(base_dir)
 
     env.generate_default_csv()
+
+    # Set up the session logger
+    current_datetime = pd.Timestamp.now().strftime('%Y-%m-%d_%H-%M-%S')
+    log_file_path = os.path.join(env.folders['logs']['path'], f"{env.current_user}_{env.case_name}_session_{current_datetime}.log")
+    _setup_session_logger(log_file_path)
 
     return env
 
@@ -808,6 +859,11 @@ def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
 
         else:
             logger.info("Base directory unchanged. Environment loaded as is.")
+
+        # Set up a session log file
+        current_datetime = pd.Timestamp.now().strftime('%Y-%m-%d_%H-%M-%S')
+        log_file_path = os.path.join(env.folders['logs']['path'], f"{env.current_user}_{env.case_name}_session_{current_datetime}.log")
+        _setup_session_logger(log_file_path)
 
         return env
     

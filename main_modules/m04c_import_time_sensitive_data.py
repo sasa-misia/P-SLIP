@@ -2,14 +2,12 @@
 import os
 import sys
 import argparse
-import logging
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
     AnalysisEnvironment,
-    LOG_CONFIG,
     KNOWN_DYNAMIC_INPUT_TYPES,
     DYNAMIC_SUBFOLDERS
 )
@@ -24,17 +22,14 @@ from psliptools.utilities import (
     select_file_prompt
 )
 
-# from psliptools.geometries import (
-# )
+from psliptools.scattered import (
+    load_time_sensitive_data_from_csv
+)
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename
-
-# %% === Set up logging configuration
-# This will log messages to the console and can be modified to log to a file if needed
-logging.basicConfig(level=logging.INFO,
-                    format=LOG_CONFIG['format'], 
-                    datefmt=LOG_CONFIG['date_format'])
+from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename, setup_logger
+logger = setup_logger()
+logger.info("=== Importing time-sensitive data ===")
 
 # %% === Methods to import time sensitive data as rainfall and temperature
 SOURCE_MODES = ['station', 'satellite']
@@ -44,7 +39,7 @@ def main(
         gui_mode: bool=False, 
         base_dir: str=None,
         source_mode: str="station",
-        source_type: str="rainfalls", 
+        source_type: str="rain", 
         source_subtype: str="recordings",
         delta_time_hours: float=1,
         aggregation_mode: str="sum"
@@ -69,18 +64,45 @@ def main(
 
     study_area_cln_poly = env.load_variable(variable_filename='study_area_vars.pkl')['study_area_cln_poly']
 
+    logger.info(f"Importing time-sensitive data [{source_type}] from [{source_subtype}] in [{source_mode}] mode...")
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
         print("\n=== Directory selection ===")
-        data_fold = select_dir_prompt(default_dir=env.folders['inputs'][source_type]['path'], content_type=source_type)
+        data_fold = select_dir_prompt(
+            default_dir=env.folders['inputs'][source_type][source_subtype]['path'], 
+            content_type=source_type
+        )
         
         print("\n=== Data files selection ===")
-        data_paths = select_files_in_folder_prompt(base_dir=data_fold, src_ext=allowed_extensions, allow_multiple=True)
+        data_paths = select_files_in_folder_prompt(
+            base_dir=data_fold, 
+            src_ext=allowed_extensions, 
+            allow_multiple=True, 
+            usr_prompt="Number, name or full path of the data files (ex. data.csv): "
+        )
 
+        gauge_info_path = None
         if source_mode == 'station':
             print("\n=== Gauge info file selection ===")
-            gauge_info_path = select_file_prompt(base_dir=env.folders['user_control']['path'], usr_prompt="Name or full path of the gauge info file (ex. gauge_info.csv): ", src_ext=allowed_extensions)
+            gauge_info_path = select_file_prompt(
+                base_dir=env.folders['inputs'][source_type][source_subtype]['path'], 
+                usr_prompt="Name or full path of the gauge info file (ex. gauge_info.csv): ", 
+                src_ext=allowed_extensions
+            )
+
+    if gauge_info_path in data_paths:
+        data_paths.remove(gauge_info_path)
+
+    for data_pth in data_paths:
+        data_df = load_time_sensitive_data_from_csv(
+            file_path=data_pth,
+            start_date_column=None,
+            end_date_column=None,
+            value_columns=None,
+            value_names=None,
+            date_format=None
+        )
     
     # TODO: Add code to import time-sensitive data as rainfall and temperature
 

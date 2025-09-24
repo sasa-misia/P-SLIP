@@ -1,7 +1,6 @@
 # %% === Import necessary modules
 import os
 import sys
-import logging
 import argparse
 from typing import Dict, Any
 
@@ -9,8 +8,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    AnalysisEnvironment,
-    LOG_CONFIG,
     KNOWN_OPTIONAL_STATIC_INPUT_TYPES
 )
 
@@ -26,13 +23,9 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename
-
-# %% === Set up logging configuration
-# This will log messages to the console and can be modified to log to a file if needed
-logging.basicConfig(level=logging.INFO,
-                    format=LOG_CONFIG['format'], 
-                    datefmt=LOG_CONFIG['date_format'])
+from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename, setup_logger
+logger = setup_logger()
+logger.info("=== Import polygons with main properties ===")
 
 # %% === Methods to import shapefiles with main properties
 
