@@ -75,6 +75,12 @@ def _parse_time_sensitive_dataframe(
     datetime_df = data_df.select_dtypes(include=['datetime64[ns]'])
     numeric_df = data_df.select_dtypes(include=['float64', 'int64'])
 
+    if len(datetime_df.columns) != 2:
+        raise ValueError("Expected two datetime columns in the dataframe (start and end date)")
+
+    if len(numeric_df.columns) == 0:
+        raise ValueError("No numeric columns found in the dataframe")
+
     return data_df, datetime_df, numeric_df
 
 # %% === Method to load time-sensitive scattered data in csv format
