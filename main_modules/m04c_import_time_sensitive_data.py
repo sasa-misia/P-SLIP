@@ -93,15 +93,20 @@ def main(
 
     if gauge_info_path in data_paths:
         data_paths.remove(gauge_info_path)
+    
+    if source_type == 'rain':
+        fill_method = 'zero'
+    elif source_type == 'temperature':
+        fill_method = 'linear'
+    else:
+        fill_method = None
 
     for data_pth in data_paths:
         data_df = load_time_sensitive_data_from_csv(
             file_path=data_pth,
-            start_date_column=None,
-            end_date_column=None,
-            value_columns=None,
             value_names=None,
-            date_format=None
+            fill_method=fill_method,
+            round_datetime=True
         )
     
     # TODO: Add code to import time-sensitive data as rainfall and temperature
