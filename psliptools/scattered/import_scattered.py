@@ -2,6 +2,7 @@
 import warnings
 import numpy as np
 import pandas as pd
+import os
 
 # %% === Method to fill gaps in a series with the mean between the first and last non-empty values
 def _fill_missing_values_with_mean(
@@ -45,20 +46,20 @@ def _fill_missing_values_with_mean(
                 gap_mean = (prev_val + next_val) / 2
                 # Fill the gap
                 column_data.iloc[i:gap_end+1] = gap_mean
+    
     return column_data
 
-# %% === Helper method to parse and validate a time-sensitive dataframe
-def _parse_time_sensitive_dataframe(
-        data_df: pd.DataFrame,
-        fill_method: str | int=None,
-        round_datetime: bool=True
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+# %% === Method to fill gaps in a series with different methods
+def _fill_missing_values_of_numeric_series(
+        column_data: pd.Series,
+        fill_method: str | int | float='zero'
+    ) -> pd.Series:
     """
-    Parse and validate a time-sensitive dataframe.
+    Fill missing values in a pandas Series with different methods.
 
     Args:
-        data_df (pd.DataFrame): The dataframe to parse and validate.
-        fill_method (str, optional): The method to use for filling missing values (default: None).
+        column_data (pd.Series): The pandas numeric Series to fill.
+        fill_method (str, optional): The method to use for filling missing values (default: 'zero').
             Possible values are
                 1. 'zero' - Fill missing values with 0.
                 2. 'mean' - Fill missing values with the mean bewteen the first and last non-empty values.
@@ -68,16 +69,16 @@ def _parse_time_sensitive_dataframe(
                 6. 'linear' - Fill missing values with the linear interpolation between the first and last non-empty values.
                 7. 'quadratic' - Fill missing values with the quadratic interpolation between the first and last non-empty values.
                 8. 'cubic' - Fill missing values with the cubic interpolation between the first and last non-empty values.
-        round_datetime (bool, optional): If True, round datetime columns to the nearest minute (default: True).
 
     Returns:
-        tuple(pd.DataFrame, pd.DataFrame, pd.DataFrame): A tuple containing the parsed dataframe, the datetime columns, and the numeric columns.
+        pd.Series: The filled pandas Series.
     """
-    if not isinstance(data_df, pd.DataFrame):
-        raise TypeError("data_df must be a pandas DataFrame.")
-    
+    column_data = column_data.copy()
+
     if isinstance(fill_method, (int, float)):
-        if fill_method == 1:
+        if fill_method == 0:
+            fill_method = None
+        elif fill_method == 1:
             fill_method = 'zero'
         elif fill_method == 2:
             fill_method = 'mean'
@@ -96,8 +97,71 @@ def _parse_time_sensitive_dataframe(
         else:
             raise ValueError(f"Invalid numeric value for fill method: {fill_method}")
     
+    if not isinstance(column_data, pd.Series):
+        raise TypeError("col_data must be a pandas Series.")
+    if column_data.isnull().all():
+        raise ValueError("Column data is entirely missing.")
+    if not pd.api.types.is_numeric_dtype(column_data.dtype):
+        raise TypeError("Column data must be numeric.")
     if not isinstance(fill_method, (str, type(None))):
         raise TypeError("fill_method must be a string or None.")
+    
+    if fill_method is None:
+        return column_data
+        
+    if fill_method == 'zero':
+        column_data = column_data.fillna(0)
+    elif fill_method == 'mean':
+        column_data = _fill_missing_values_with_mean(column_data)
+    elif fill_method == 'nearest':
+        column_data = column_data.interpolate(method='nearest')
+    elif fill_method == 'previous':
+        column_data = column_data.ffill()
+    elif fill_method == 'next':
+        column_data = column_data.bfill()
+    elif fill_method == 'linear':
+        column_data = column_data.interpolate(method='linear')
+    elif fill_method == 'quadratic':
+        column_data = column_data.interpolate(method='quadratic')
+    elif fill_method == 'cubic':
+        column_data = column_data.interpolate(method='cubic')
+    else:
+        raise ValueError(f"Invalid fill method: {fill_method}")
+    
+    return column_data
+
+# %% === Helper method to parse and validate a time-sensitive dataframe
+def _parse_time_sensitive_dataframe(
+        data_df: pd.DataFrame,
+        fill_method: str | int | float=None,
+        round_datetime: bool=True
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Parse and validate a time-sensitive dataframe.
+
+    Args:
+        data_df (pd.DataFrame): The dataframe to parse and validate.
+        fill_method (str, optional): The method to use for filling missing values (default: None).
+            Possible values are
+                0. None - Do not fill missing values.
+                1. 'zero' - Fill missing values with 0.
+                2. 'mean' - Fill missing values with the mean bewteen the first and last non-empty values.
+                3. 'nearest' - Fill missing values with the nearest non-empty value.
+                4. 'previous' - Fill missing values with the previous non-empty value.
+                5. 'next' - Fill missing values with the next non-empty value.
+                6. 'linear' - Fill missing values with the linear interpolation between the first and last non-empty values.
+                7. 'quadratic' - Fill missing values with the quadratic interpolation between the first and last non-empty values.
+                8. 'cubic' - Fill missing values with the cubic interpolation between the first and last non-empty values.
+        round_datetime (bool, optional): If True, round datetime columns to the nearest minute (default: True).
+
+    Returns:
+        tuple(pd.DataFrame, pd.DataFrame, pd.DataFrame): A tuple containing the parsed dataframe, the datetime columns, and the numeric columns.
+    """
+    if not isinstance(data_df, pd.DataFrame):
+        raise TypeError("data_df must be a pandas DataFrame.")
+    
+    if not isinstance(fill_method, (str, int, float, type(None))):
+        raise TypeError("fill_method must be a string, integer, float, or None.")
     
     if not isinstance(round_datetime, bool):
         raise TypeError("round_datetime must be a boolean.")
@@ -124,24 +188,10 @@ def _parse_time_sensitive_dataframe(
         if pd.api.types.is_numeric_dtype(data_df[col].dtype):
             missing_row_ids = data_df[data_df[col].isnull()].index.to_list()
             if len(missing_row_ids) > 0 and fill_method is not None:
-                if fill_method == 'zero':
-                    data_df[col] = data_df[col].fillna(0)
-                elif fill_method == 'mean':
-                    data_df[col] = _fill_missing_values_with_mean(data_df[col])
-                elif fill_method == 'nearest':
-                    data_df[col] = data_df[col].interpolate(method='nearest')
-                elif fill_method == 'previous':
-                    data_df[col] = data_df[col].ffill()
-                elif fill_method == 'next':
-                    data_df[col] = data_df[col].bfill()
-                elif fill_method == 'linear':
-                    data_df[col] = data_df[col].interpolate(method='linear')
-                elif fill_method == 'quadratic':
-                    data_df[col] = data_df[col].interpolate(method='quadratic')
-                elif fill_method == 'cubic':
-                    data_df[col] = data_df[col].interpolate(method='cubic')
-                else:
-                    raise ValueError(f"Invalid fill method: {fill_method}")
+                data_df[col] = _fill_missing_values_of_numeric_series(
+                    column_data=data_df[col], 
+                    fill_method=fill_method
+                )
                 
                 warnings.warn(
                     f"Missing values in column [{col}] at rows {[x + 2 for x in missing_row_ids]} have been filled with {fill_method} mode", # + 2 because the csv first row is for header and starts from 1, not 0!
@@ -172,6 +222,7 @@ def _parse_time_sensitive_dataframe(
             # Handle timezone-aware datetime conversion
             if data_df[col].dt.tz is not None:
                 data_df[col] = data_df[col].dt.tz_localize(None)
+            
             data_df[col] = data_df[col].astype('datetime64[ns]')
     
     datetime_df = data_df.select_dtypes(include=['datetime64[ns]'])
@@ -185,12 +236,161 @@ def _parse_time_sensitive_dataframe(
 
     return data_df, datetime_df, numeric_df
 
+# %% === Method to change time resolution of time-sensitive data
+def _change_time_sensitive_dataframe_resolution(
+        datetime_df: pd.DataFrame,
+        numeric_df: pd.DataFrame | pd.Series,
+        delta_time: pd.Timedelta,
+        aggregation_method: list[str]=['sum'],
+        last_date: pd.Timestamp=None
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Change the time resolution of a time-sensitive dataframe.
+
+    Args:
+        datetime_df (pd.DataFrame): The dataframe containing datetime columns.
+        numeric_df (pd.DataFrame): The dataframe containing numeric columns.
+        delta_time (pd.Timedelta): The desired time resolution.
+        aggregation_method (list[str]): The aggregation method to use (default: ['sum']).
+            Possible values of each element of the list are 
+                1. 'mean' - The aggregated rows will be the mean of the original rows.
+                2. 'sum' - The aggregated rows will be the sum of the original rows.
+                3. 'min' - The aggregated rows will be the minimum of the original rows.
+                4. 'max' - The aggregated rows will be the maximum of the original rows.
+        last_date (pd.Timestamp, optional): The last date to include in the aggregation. 
+            All dates greater than this will be filtered out. If None, use the last available date.
+
+    Returns:
+        tuple(pd.DataFrame, pd.DataFrame): A tuple containing the datetime dataframe and the numeric dataframe.
+    """
+    if not isinstance(datetime_df, pd.DataFrame):
+        raise TypeError("Expected a pandas DataFrame for datetime_df")
+    if not isinstance(numeric_df, (pd.DataFrame, pd.Series)):
+        if isinstance(numeric_df, pd.Series):
+            numeric_df = numeric_df.to_frame()
+        raise TypeError("Expected a pandas DataFrame or Series for numeric_df")
+    if not isinstance(delta_time, pd.Timedelta):
+        raise TypeError("Expected a pandas Timedelta for delta_time")
+    if not isinstance(aggregation_method, list):
+        raise TypeError("Expected a list for aggregation_method")
+    if not all(isinstance(method, str) for method in aggregation_method):
+        raise TypeError("Expected a list of strings for aggregation_method")
+    if last_date is not None and not isinstance(last_date, pd.Timestamp):
+        raise TypeError("Expected a pandas Timestamp for last_date")
+    
+    if len(aggregation_method) == 1:
+        aggregation_method = aggregation_method * numeric_df.shape[1]
+    
+    if len(aggregation_method) != numeric_df.shape[1]:
+        raise ValueError("Expected the same number of aggregation methods as numeric columns")
+    
+    datetime_df = datetime_df.copy()
+    numeric_df = numeric_df.copy()
+
+    if not (datetime_df.shape[1] == 2 and (datetime_df.columns == ['start_date', 'end_date']).all()):
+        raise ValueError("Expected two datetime columns in the dataframe (start_date and end_date)")
+    
+    # Filter data based on last_date if provided
+    if last_date is not None:
+        # Find the closest end_date to the specified last_date
+        time_diffs = (datetime_df['end_date'] - last_date).abs()
+        closest_idx = time_diffs.idxmin()
+        closest_end_date = datetime_df.loc[closest_idx, 'end_date']
+
+        datetimes_after_last_date = datetime_df['end_date'] > closest_end_date
+        count_removed = datetimes_after_last_date.sum()
+        if datetimes_after_last_date.any():
+            warnings.warn(
+                f"Filtering out {count_removed} rows after last_date ({last_date})",
+                stacklevel=2
+            )
+
+        # Filter out dates greater than the closest end_date
+        mask = datetime_df['end_date'] <= closest_end_date
+        datetime_df = datetime_df[mask].reset_index(drop=True)
+        numeric_df = numeric_df[mask].reset_index(drop=True)
+    
+    # Check if new delta is multiple of existing delta
+    if len(datetime_df) > 1:
+        existing_delta = datetime_df['end_date'].iloc[1] - datetime_df['end_date'].iloc[0]
+        if delta_time.total_seconds() % existing_delta.total_seconds() != 0:
+            raise ValueError(f"New delta time ({delta_time}) must be a multiple of existing delta time ({existing_delta})")
+    else:
+        raise ValueError("Not enough data points for aggregation after filtering")
+    
+    # Calculate the number of complete groups backwards from last_end_date
+    expected_rows_per_group = int(delta_time.total_seconds() / existing_delta.total_seconds())
+    
+    # Create group labels by assigning each row to a group starting from the end
+    groups = []
+    current_group = 0
+    remaining_in_group = expected_rows_per_group
+    
+    # Go backwards through the dataframe
+    for i in range(len(datetime_df) - 1, -1, -1):
+        groups.insert(0, current_group) # This is to add at the beginning of the list, not append at the end
+        remaining_in_group -= 1
+        
+        if remaining_in_group == 0:
+            current_group += 1
+            remaining_in_group = expected_rows_per_group
+    
+    # Check for incomplete group at the beginning
+    first_group_complete = True
+    if len(groups) > 0 and groups.count(groups[0]) < expected_rows_per_group:
+        first_group_complete = False
+        warnings.warn(
+            f"Incomplete group found at the beginning with {groups.count(groups[0])} rows. " # groups.count(groups[0]) to count how many rows are in the first group, because count returns the number of times the value appears in the list
+            f"This group will be aggregated with available data and start_date will be adjusted to maintain {delta_time} duration.",
+            stacklevel=2
+        )
+    
+    # Convert groups to pandas Series for grouping
+    groups_series = pd.Series(groups, index=datetime_df.index)
+    
+    # Aggregate datetime columns: first start_date and last end_date for each group
+    datetime_agg_df = datetime_df.groupby(groups_series).agg({
+        'start_date': 'first',
+        'end_date': 'last'
+    })
+    
+    # Aggregate numeric columns with specified method
+    numeric_agg_df = pd.DataFrame()
+    for idx, col in enumerate(numeric_df.columns):
+        curr_aggregation_method = aggregation_method[idx]
+        if curr_aggregation_method == 'mean':
+            numeric_agg_df[col] = numeric_df.groupby(groups_series)[col].mean()
+        elif curr_aggregation_method == 'sum':
+            numeric_agg_df[col] = numeric_df.groupby(groups_series)[col].sum()
+        elif curr_aggregation_method == 'min':
+            numeric_agg_df[col] = numeric_df.groupby(groups_series)[col].min()
+        elif curr_aggregation_method == 'max':
+            numeric_agg_df[col] = numeric_df.groupby(groups_series)[col].max()
+        else:
+            raise ValueError(f"Invalid aggregation method at index {idx}: {curr_aggregation_method}")
+    
+    # Reverse the order to have chronological order (earliest group first)
+    datetime_agg_df = datetime_agg_df.iloc[::-1].reset_index(drop=True)
+    numeric_agg_df = numeric_agg_df.iloc[::-1].reset_index(drop=True)
+    
+    # Adjust start_date for incomplete first group to maintain correct duration
+    if not first_group_complete and len(datetime_agg_df) > 0:
+        datetime_agg_df.loc[0, 'start_date'] = datetime_agg_df.loc[0, 'end_date'] - delta_time
+
+    if len(datetime_agg_df) != len(numeric_agg_df):
+        raise ValueError("Number of rows in datetime dataframe and numeric dataframe do not match")
+    
+    return datetime_agg_df, numeric_agg_df
+
 # %% === Method to load time-sensitive scattered data in csv format
 def load_time_sensitive_data_from_csv(
         file_path: str,
         value_names: list[str]=None,
-        fill_method: str | int=None,
-        round_datetime: bool=True
+        fill_method: str | int | float=None,
+        round_datetime: bool=True,
+        delta_time_hours: float | int=None,
+        aggregation_method: list[str]=['sum'],
+        last_date: pd.Timestamp=None
     ) -> pd.DataFrame:
     """
     Load time-sensitive data from a CSV file.
@@ -200,6 +400,7 @@ def load_time_sensitive_data_from_csv(
         value_names (list[str]): A list of value names corresponding to the value columns.
         fill_method (str, optional): The method to use for filling missing values (default: None).
             Possible values are
+                0. None - Do not fill missing values.
                 1. 'zero' - Fill missing values with 0.
                 2. 'mean' - Fill missing values with the mean bewteen the first and last non-empty values.
                 3. 'nearest' - Fill missing values with the nearest non-empty value.
@@ -209,13 +410,28 @@ def load_time_sensitive_data_from_csv(
                 7. 'quadratic' - Fill missing values with the quadratic interpolation between the first and last non-empty values.
                 8. 'cubic' - Fill missing values with the cubic interpolation between the first and last non-empty values.
         round_datetime (bool, optional): If True, round datetime columns to the nearest minute (default: True).
+        delta_time_hours (float, optional): The time interval in hours for aggregating data (default: None).
+        aggregation_method (list[str], optional): A list of aggregation methods for aggregating data (default: ['sum']).
+        last_date (pd.Timestamp, optional): The last date to include in the aggregation. 
+            All dates greater than this will be filtered out. If None, use the last available date.
 
     Returns:
         pd.DataFrame: A DataFrame containing the loaded data.
     """
+    if not isinstance(file_path, str) or not os.path.exists(file_path):
+        raise TypeError("file_path must be a string and the file must exist.")
+    if not isinstance(value_names, (list, type(None))):
+        raise TypeError("value_names must be a list or None.")
+    if not isinstance(fill_method, (str, int, float, type(None))):
+        raise TypeError("fill_method must be a string, integer or None.")
+    if not isinstance(round_datetime, bool):
+        raise TypeError("round_datetime must be a boolean.")
+    if not isinstance(delta_time_hours, (float, int, type(None))):
+        raise TypeError("delta_time_hours must be a float, integer or None.")
+    
     data_df = pd.read_csv(file_path)
 
-    _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(data_df, fill_method=None, round_datetime=True)
+    _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(data_df, fill_method=fill_method, round_datetime=round_datetime)
 
     datetime_df.columns = ['start_date', 'end_date']
 
@@ -228,24 +444,19 @@ def load_time_sensitive_data_from_csv(
         if len(value_names) != len(numeric_df.columns):
             raise ValueError(f"Numeric part of the csv has {len(numeric_df.columns)} columns. Current values_names list has {len(value_names)} elements!")
         numeric_df.columns = value_names
+
+    if delta_time_hours:
+        datetime_df, numeric_df = _change_time_sensitive_dataframe_resolution(
+            numeric_df=numeric_df,
+            datetime_df=datetime_df,
+            delta_time=pd.Timedelta(hours=delta_time_hours),
+            aggregation_method=aggregation_method,
+            last_date=last_date
+        )
     
     data_df = pd.concat([datetime_df, numeric_df], axis=1)
     
     return data_df
-
-# %% === Method to load gauges table in csv format
-def load_time_sensitive_gauges_from_csv(
-        file_path: str
-    ) -> pd.DataFrame:
-    """
-    Load gauges table from a CSV file.
-
-    Args:
-        file_path (str): The path to the CSV file.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing the loaded gauges table.
-    """
 
 # %% === Method to merge and align time-sensitive data and gauges table
 def merge_scattered_time_sensitive_data(
@@ -263,4 +474,18 @@ def merge_scattered_time_sensitive_data(
 
     Returns:
         dict[str, pd.DataFrame]: A dictionary mapping gauge names to aligned DataFrames data.
+    """
+
+# %% === Method to load gauges table in csv format
+def load_time_sensitive_gauges_from_csv(
+        file_path: str
+    ) -> pd.DataFrame:
+    """
+    Load gauges table from a CSV file.
+
+    Args:
+        file_path (str): The path to the CSV file.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the loaded gauges table.
     """

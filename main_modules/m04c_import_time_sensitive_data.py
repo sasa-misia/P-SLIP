@@ -2,6 +2,7 @@
 import os
 import sys
 import argparse
+import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -42,7 +43,8 @@ def main(
         source_type: str="rain", 
         source_subtype: str="recordings",
         delta_time_hours: float=1,
-        aggregation_mode: str="sum"
+        aggregation_mode: str=["sum"],
+        last_date: pd.Timestamp=None
     ) -> None:
     """Main function to import time sensitive data"""
     if not source_mode in SOURCE_MODES:
@@ -101,13 +103,21 @@ def main(
     else:
         fill_method = None
 
+    data_list = []
     for data_pth in data_paths:
-        data_df = load_time_sensitive_data_from_csv(
-            file_path=data_pth,
-            value_names=None,
-            fill_method=fill_method,
-            round_datetime=True
+        data_list.append(
+            load_time_sensitive_data_from_csv(
+                file_path=data_pth,
+                value_names=None,
+                fill_method=fill_method,
+                round_datetime=True,
+                delta_time_hours=delta_time_hours,
+                aggregation_method=aggregation_mode,
+                last_date=last_date
+            )
         )
+    
+
     
     # TODO: Add code to import time-sensitive data as rainfall and temperature
 
