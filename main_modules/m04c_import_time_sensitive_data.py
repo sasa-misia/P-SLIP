@@ -20,11 +20,15 @@ from config import (
 from psliptools.utilities import (
     select_dir_prompt,
     select_files_in_folder_prompt,
-    select_file_prompt
+    select_file_prompt,
+    label_list_elements_prompt,
+    get_csv_column_names,
+    rename_csv_header
 )
 
 from psliptools.scattered import (
-    load_time_sensitive_data_from_csv
+    load_time_sensitive_data_from_csv,
+    load_time_sensitive_gauges_from_csv
 )
 
 # Importing necessary modules from main_modules
@@ -37,14 +41,16 @@ SOURCE_MODES = ['station', 'satellite']
 
 # %% === Main function
 def main(
-        gui_mode: bool=False, 
+        gui_mode: bool=False,
         base_dir: str=None,
         source_mode: str="station",
-        source_type: str="rain", 
+        source_type: str="rain",
         source_subtype: str="recordings",
+        round_datetimes_to_nearest_minute: bool=True,
         delta_time_hours: float=1,
         aggregation_mode: str=["sum"],
-        last_date: pd.Timestamp=None
+        last_date: pd.Timestamp=None,
+        rename_csv_data_columns: bool=False
     ) -> None:
     """Main function to import time sensitive data"""
     if not source_mode in SOURCE_MODES:
@@ -93,31 +99,52 @@ def main(
                 src_ext=allowed_extensions
             )
 
-    if gauge_info_path in data_paths:
-        data_paths.remove(gauge_info_path)
-    
     if source_type == 'rain':
         fill_method = 'zero'
     elif source_type == 'temperature':
         fill_method = 'linear'
     else:
         fill_method = None
-
-    data_list = []
-    for data_pth in data_paths:
-        data_list.append(
-            load_time_sensitive_data_from_csv(
-                file_path=data_pth,
-                value_names=None,
-                fill_method=fill_method,
-                round_datetime=True,
-                delta_time_hours=delta_time_hours,
-                aggregation_method=aggregation_mode,
-                last_date=last_date
-            )
-        )
     
-
+    if source_mode == 'station':
+        if gauge_info_path in data_paths:
+            data_paths.remove(gauge_info_path)
+        
+        if rename_csv_data_columns:
+            print("\n=== Renaming of data files columns ===")
+            for data_pth in data_paths:
+                old_datetime_and_numeric_col_names = get_csv_column_names(csv_path=data_pth, data_type=['datetime', 'number'])
+                if gui_mode:
+                    raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+                else:
+                    new_datetime_and_numeric_col_names = label_list_elements_prompt(
+                        obj_list=old_datetime_and_numeric_col_names,
+                        usr_prompt=f"Enter the new labels for the datetim and numeric columns in {data_pth} (comma separated, press enter for default, which is the same names): "
+                    )
+                rename_csv_header(
+                    csv_path=data_pth,
+                    new_header=new_datetime_and_numeric_col_names,
+                    data_type=['datetime', 'number']
+                )
+        
+        data_list = []
+        for data_pth in data_paths:
+            data_list.append(
+                load_time_sensitive_data_from_csv(
+                    file_path=data_pth,
+                    fill_method=fill_method,
+                    round_datetime=round_datetimes_to_nearest_minute,
+                    delta_time_hours=delta_time_hours,
+                    aggregation_method=aggregation_mode,
+                    last_date=last_date,
+                    datetime_columns_names=['start_date', 'end_date'],
+                    numeric_columns_names=None # Same as imported
+                )
+            )
+        
+        station_df = load_time_sensitive_gauges_from_csv(file_path=gauge_info_path)
+    else:
+        raise NotImplementedError("Satellite mode is not supported in this script yet. Please contact the developer.")
     
     # TODO: Add code to import time-sensitive data as rainfall and temperature
 

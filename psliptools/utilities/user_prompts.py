@@ -106,7 +106,8 @@ def _parse_selection_string(
 # %% === Function to print an enumerate list of strings
 def print_enumerated_list(
         obj_list: list[str],
-        obj_type: list[str]=None
+        obj_type: list[str]=None,
+        usr_prompt: str=None
     ) -> None:
     """
     Print an enumerate list of strings.
@@ -130,7 +131,17 @@ def print_enumerated_list(
     if len(obj_list) != len(obj_type):
         raise ValueError("obj_list and obj_type must have the same length")
     
-    print("\nAvailable options:")
+    if usr_prompt:
+        if not isinstance(usr_prompt, str):
+            raise ValueError(f"usr_prompt must be a string, not {type(usr_prompt)}")
+        if not usr_prompt.startswith("\n"):
+            usr_prompt = "\n" + usr_prompt
+        if not usr_prompt.endswith(": "):
+            usr_prompt += ": "
+    else:
+        usr_prompt = "\nAvailable options:"
+    
+    print(usr_prompt)
     for i, (o, t) in enumerate(zip(obj_list, obj_type)):
         print(f"{i+1}| {o} {t}")
 
@@ -148,6 +159,7 @@ def reorder_list_prompt(
         obj_list (list[str]): List of strings to reorder.
         usr_prompt (str, optional): Prompt to display to the user.
         obj_type (list[str], optional): List of types for each object in obj_list.
+        start_indices_from_1 (bool, optional): Whether to start the indices from 1 instead of 0, with the output list.
 
     Returns:
         tuple[list[str], list[int]]: Tuple of reordered list and indices.
@@ -162,7 +174,7 @@ def reorder_list_prompt(
     else:
         usr_prompt = 'Enter your order: '
 
-    print_enumerated_list(obj_list, obj_type)
+    print_enumerated_list(obj_list, obj_type, usr_prompt='Elements to reorder: ')
 
     print("\nYou can specify the numbers or names of the options in the desired order." \
         + "Please use the numbers mentioned above(or press enter for default, which is the current order)" \
@@ -183,6 +195,41 @@ def reorder_list_prompt(
         reordered_indices = [x - 1 for x in reordered_indices_from_1]
     return reordered_objs, reordered_indices
 
+# %% === Function to label each element of a list
+def label_list_elements_prompt(
+        obj_list: list[str],
+        usr_prompt: str=None
+    ) -> list[str]:
+    """
+    Label each element of a list.
+
+    Args:
+        obj_list (list[str]): List of elements to label.
+        usr_prompt (str, optional): Prompt to display to the user.
+
+    Returns:
+        list[str]: List of labeled elements.
+    """
+    _check_list_of_strings(obj_list)
+
+    if usr_prompt:
+        if not isinstance(usr_prompt, str):
+            raise ValueError(f"usr_prompt must be a string, not {type(usr_prompt)}")
+        if not usr_prompt.endswith(": "):
+            usr_prompt += ": "
+    else:
+        usr_prompt = 'Enter your labels (follow thesame order as the elements, separated by commas) (default is the same as the elements): '
+        
+    print_enumerated_list(obj_list, usr_prompt='Elements to label: ')
+
+    labels = input("\n"+usr_prompt).strip(' "').replace(';', ',').split(',')
+    labels = [x.strip() for x in labels]
+    if labels == ['']:
+        labels = obj_list
+    if len(labels) != len(obj_list):
+        raise ValueError(f"Invalid input: {labels}. The number of labels should be equal to {len(obj_list)}.")
+    return labels
+
 # %% === Function to select one or multiple options from a list
 def select_from_list_prompt(
         obj_list: list[str],
@@ -195,7 +242,9 @@ def select_from_list_prompt(
 
     Args:
         obj_list (list[str]): List of options to select from.
+        usr_prompt (str, optional): Prompt to display to the user.
         allow_multiple (bool, optional): If True, allows multiple selections.
+        obj_type (list[str], optional): List of types for each object in obj_list.
 
     Returns:
         list[int]: List of selected indices.
@@ -281,6 +330,8 @@ def select_files_in_folder_prompt(
 
     Args:
         base_dir (str): Base directory to select files from.
+        usr_prompt (str, optional): Prompt to display to the user.
+        allow_multiple (bool, optional): If True, allows multiple selections.
         src_ext (str, optional): File extension to filter by.
 
     Returns:
@@ -309,6 +360,18 @@ def select_file_prompt(
         src_ext: str | list[str]=None,
         default_file: str=None
     ) -> str:
+    """
+    Select a file from a directory.
+
+    Args:
+        base_dir (str): Base directory to select files from.
+        usr_prompt (str, optional): Prompt to display to the user.
+        src_ext (str, optional): File extension to filter by.
+        default_file (str, optional): Default file to select.
+
+    Returns:
+        str: Selected file.
+    """
     if not base_dir:
         base_dir = select_dir_prompt()
 

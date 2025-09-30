@@ -16,6 +16,7 @@ def _is_relative_path(raw_inp_path: str, csv_base_dir: str) -> bool:
     """
     abs_pth = os.path.abspath(os.path.join(csv_base_dir, raw_inp_path)) if not os.path.isabs(raw_inp_path) else raw_inp_path
     abs_inp = os.path.abspath(csv_base_dir)
+
     return abs_pth.startswith(abs_inp)
 
 # %% === Function to parse a supposed boolean field that indicates if a path is internal
@@ -40,6 +41,7 @@ def parse_csv_internal_path_field(bool_field: str | int | float, path_field: str
     elif isinstance(bool_field, (int, float)):
         if bool_field in (1, 0):
             return bool(bool_field)
+        
     # If value is missing or not recognized, fallback to path check
     return _is_relative_path(path_field, csv_base_dir)
 
@@ -110,6 +112,7 @@ def check_raw_path(csv_path: str, type: str, subtype: str = None) -> bool:
     entry_exists = type in input_files_df['type'].values
     if subtype:
         entry_exists = entry_exists and subtype in input_files_df['subtype'].values
+    
     return entry_exists
 
 # %% === Function to add a new row to the CSV file containing the list of inputs
@@ -183,3 +186,162 @@ def add_row_to_csv(
         return (False, None)
     else:
         raise ValueError(f"Row for {path_type} with subtype {path_subtype} not added in {csv_path}")
+
+# %% === Function to merge manually detect datetime columns, that might be read as strings, with auto-detection
+def _detect_datetime_columns(df: pd.DataFrame) -> list[str]:
+    """
+    Manually detect columns that contain datetime strings but might be read as object/string type.
+    
+    Args:
+        df (pd.DataFrame): DataFrame to analyze.
+        
+    Returns:
+        list[str]: List of column names that likely contain datetime data.
+    """
+    manually_detected_datetime_cols = []
+    for col in df.columns:
+        if df[col].dtype == 'object':  # String columns
+            # Try to convert a sample to datetime
+            sample_size = min(20, len(df))
+            sample_data = df[col].head(sample_size)
+            
+            # Check if values look like datetime strings
+            datetime_patterns = [
+                r'\d{4}-\d{2}-\d{2}',  # YYYY-MM-DD
+                r'\d{2}/\d{2}/\d{4}',  # MM/DD/YYYY or DD/MM/YYYY
+                r'\d{4}/\d{2}/\d{2}',  # YYYY/MM/DD
+                r'\d{2}-\d{2}-\d{4}',  # MM-DD-YYYY or DD-MM-YYYY
+            ]
+            
+            pattern_matches = any(
+                sample_data.str.contains(pattern, na=False).any() 
+                for pattern in datetime_patterns
+            )
+            
+            if pattern_matches:
+                manually_detected_datetime_cols.append(col)
+    
+    auto_detected_datetime_cols = df.select_dtypes(include=['datetime', 'datetime64']).columns.to_list()
+
+    detected_datetime_cols = list(dict.fromkeys(manually_detected_datetime_cols + auto_detected_datetime_cols)) # Remove duplicated preserving the order
+    
+    return detected_datetime_cols
+
+# %% === Function to detect actual string columns (not just object dtype)
+def _detect_string_columns(df: pd.DataFrame, exclude_datetimes: bool=True) -> list[str]:
+    """
+    Detect columns that contain actual string data (not just object dtype).
+    
+    Args:
+        df (pd.DataFrame): DataFrame to analyze.
+        exclude_datetime_cols (list[str]): Columns to exclude (datetime columns).
+        
+    Returns:
+        list[str]: List of column names that contain actual string data.
+    """
+    string_cols = []
+    
+    if exclude_datetimes:
+        exclude_datetime_cols = _detect_datetime_columns(df)
+    else:
+        exclude_datetime_cols = []
+    
+    for col in df.columns:
+        if df[col].dtype == 'object' and col not in exclude_datetime_cols:
+            # Check if the column contains actual string data
+            sample_size = min(20, len(df))
+            sample_data = df[col].head(sample_size)
+            
+            # Check if values are strings (not mixed types)
+            if sample_data.apply(lambda x: isinstance(x, str)).all():
+                string_cols.append(col)
+    
+    return string_cols
+
+# %% === Function to obtain the name of the columns with a specific data type in a CSV file
+def get_csv_column_names(
+        csv_path: str, 
+        data_type: str | list[str]=None
+    ) -> list[str]:
+    """
+    Obtain the name of the columns with a specific data type in a CSV file.
+
+    Args:
+        csv_path (str): Path to the CSV file.
+        data_type (str): Data type to search for (e.g., 'number', 'string', 'datetime', 'timedelta', 'bool', 'category', 'object', etc.).
+
+    Returns:
+        list[str]: List of column names with the specified data type.
+    """
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV file not found at {csv_path}")
+    
+    csv_first_rows = pd.read_csv(csv_path, nrows=5)
+    
+    if data_type is None:
+        dtype_cols = csv_first_rows.columns.to_list()
+    else:
+        if not isinstance(data_type, list):
+            data_type = [data_type]
+        
+        if [isinstance(x, str) for x in data_type].count(False) > 0:
+            raise ValueError("data_type must be a string or a list of strings")
+        
+        # Manual datetime detection for string columns that might be datetime
+        datetime_cols = _detect_datetime_columns(csv_first_rows)
+        
+        # Detect actual string columns (not just object dtype)
+        string_cols = _detect_string_columns(csv_first_rows, datetime_cols)
+        
+        # Get generic object columns (excluding datetime and string columns)
+        pandas_object_cols = csv_first_rows.select_dtypes(include=['object']).columns.to_list()
+        object_cols = [col for col in pandas_object_cols if col not in datetime_cols and col not in string_cols]
+        
+        # Map data_type requests to actual column lists
+        type_mapping = {
+            'datetime': datetime_cols,
+            'string': string_cols,
+            'object': object_cols  # Generic object columns (not strings or datetime)
+        }
+        
+        # For standard types, use pandas select_dtypes, otherwise, for 'datetime', 'string', and 'object' use the internal method, which is different from pandas
+        dtype_cols = []
+        for dtype in data_type:
+            if dtype in type_mapping:
+                dtype_cols.extend(type_mapping[dtype])
+            else:
+                # Use pandas for other types
+                dtype_cols.extend(csv_first_rows.select_dtypes(include=[dtype]).columns.to_list())
+        
+        # Remove duplicates while preserving order
+        dtype_cols = list(dict.fromkeys(dtype_cols))
+    
+    return dtype_cols
+
+# %% === Function to rename the header row of a CSV file
+def rename_csv_header(
+        csv_path: str, 
+        new_header: list[str],
+        data_type: str | list[str]=None
+    ) -> None:
+    """
+    Rename the header row of a CSV file.
+
+    Args:
+        csv_path (str): Path to the CSV file.
+        data_type (str): Data type to search for (e.g., 'number', 'string', etc.).
+        new_header (str): New header name.
+    """
+    csv_df = pd.read_csv(csv_path, header=0)
+    old_sel_header = get_csv_column_names(csv_path, data_type)
+    if len(old_sel_header) != len(new_header):
+        raise ValueError("The number of new headers must match the number of selected columns.")
+    
+    # Create a mapping dictionary for column renaming
+    rename_mapping = dict(zip(old_sel_header, new_header))
+    
+    # Rename only the selected columns
+    csv_df.rename(columns=rename_mapping, inplace=True)
+    csv_df.to_csv(csv_path, index=False)
+    
+# %%

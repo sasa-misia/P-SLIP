@@ -249,9 +249,9 @@ def _change_time_sensitive_dataframe_resolution(
 
     Args:
         datetime_df (pd.DataFrame): The dataframe containing datetime columns.
-        numeric_df (pd.DataFrame): The dataframe containing numeric columns.
+        numeric_df (pd.DataFrame | pd.Series): The dataframe containing numeric columns.
         delta_time (pd.Timedelta): The desired time resolution.
-        aggregation_method (list[str]): The aggregation method to use (default: ['sum']).
+        aggregation_method (list[str], optional): The aggregation method to use (default: ['sum']).
             Possible values of each element of the list are 
                 1. 'mean' - The aggregated rows will be the mean of the original rows.
                 2. 'sum' - The aggregated rows will be the sum of the original rows.
@@ -385,19 +385,19 @@ def _change_time_sensitive_dataframe_resolution(
 # %% === Method to load time-sensitive scattered data in csv format
 def load_time_sensitive_data_from_csv(
         file_path: str,
-        value_names: list[str]=None,
         fill_method: str | int | float=None,
         round_datetime: bool=True,
         delta_time_hours: float | int=None,
         aggregation_method: list[str]=['sum'],
-        last_date: pd.Timestamp=None
+        last_date: pd.Timestamp=None,
+        datetime_columns_names: list[str]=['start_date', 'end_date'],
+        numeric_columns_names: list[str]=None
     ) -> pd.DataFrame:
     """
     Load time-sensitive data from a CSV file.
 
     Args:
         file_path (str): The path to the CSV file.
-        value_names (list[str]): A list of value names corresponding to the value columns.
         fill_method (str, optional): The method to use for filling missing values (default: None).
             Possible values are
                 0. None - Do not fill missing values.
@@ -414,14 +414,18 @@ def load_time_sensitive_data_from_csv(
         aggregation_method (list[str], optional): A list of aggregation methods for aggregating data (default: ['sum']).
         last_date (pd.Timestamp, optional): The last date to include in the aggregation. 
             All dates greater than this will be filtered out. If None, use the last available date.
+        datetime_columns_names (list[str], optional): A list of datetime column names (default: None).
+        numeric_columns_names (list[str], optional): A list of numeric column names (default: None).
 
     Returns:
         pd.DataFrame: A DataFrame containing the loaded data.
     """
     if not isinstance(file_path, str) or not os.path.exists(file_path):
         raise TypeError("file_path must be a string and the file must exist.")
-    if not isinstance(value_names, (list, type(None))):
-        raise TypeError("value_names must be a list or None.")
+    if not isinstance(datetime_columns_names, (list)):
+        raise TypeError("datetime_names must be a list of strings.")
+    if not isinstance(numeric_columns_names, (list, type(None))):
+        raise TypeError("value_names must be a list of strings or None.")
     if not isinstance(fill_method, (str, int, float, type(None))):
         raise TypeError("fill_method must be a string, integer or None.")
     if not isinstance(round_datetime, bool):
@@ -433,17 +437,26 @@ def load_time_sensitive_data_from_csv(
 
     _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(data_df, fill_method=fill_method, round_datetime=round_datetime)
 
-    datetime_df.columns = ['start_date', 'end_date']
+    if len(datetime_df.columns) != 2:
+        raise ValueError(f"Time-sensitive part of the csv has {len(datetime_df.columns)} columns. Expected 2 columns: start_date, end_date")
+    
+    if len(datetime_columns_names) != len(datetime_df.columns):
+        raise ValueError(f"Time-sensitive part of the csv has {len(datetime_df.columns)} columns. Current datetime_columns_names list has {len(datetime_columns_names)} elements!")
 
-    diff_end_start = datetime_df['end_date'] - datetime_df['start_date']
+    datetime_df.columns = datetime_columns_names
+
+    if datetime_df.iloc[0,1] < datetime_df.iloc[0,0]:
+        raise ValueError("Start date of the time-sensitive data is greater than end date.")
+
+    diff_end_start = datetime_df[datetime_columns_names[1]] - datetime_df[datetime_columns_names[0]]
     not_uniform_row_ids = diff_end_start[diff_end_start != diff_end_start.iloc[1]].index.to_list()
     if not_uniform_row_ids:
         raise ValueError("Duration of the time-sensitive data (end-start) is not uniform. Non-uniform rows: " + str(not_uniform_row_ids))
 
-    if value_names:
-        if len(value_names) != len(numeric_df.columns):
-            raise ValueError(f"Numeric part of the csv has {len(numeric_df.columns)} columns. Current values_names list has {len(value_names)} elements!")
-        numeric_df.columns = value_names
+    if numeric_columns_names:
+        if len(numeric_columns_names) != len(numeric_df.columns):
+            raise ValueError(f"Numeric part of the csv has {len(numeric_df.columns)} columns. Current numeric_columns_names list has {len(numeric_columns_names)} elements!")
+        numeric_df.columns = numeric_columns_names
 
     if delta_time_hours:
         datetime_df, numeric_df = _change_time_sensitive_dataframe_resolution(
@@ -457,6 +470,202 @@ def load_time_sensitive_data_from_csv(
     data_df = pd.concat([datetime_df, numeric_df], axis=1)
     
     return data_df
+
+# %% === Method to detect column type of gauges table
+def _advanced_column_detection(
+        series: pd.Series
+    ) -> dict:
+    """
+    Advanced column detection using multiple heuristics.
+    Returns confidence scores for different column types.
+
+    Args:
+        series (pd.Series): The column to detect from a dataframe.
+
+    Returns:
+        dict: A dictionary containing confidence scores for different column types.
+    """
+    name_lower = series.name.lower()
+    sample_data = series.to_list()
+    results = {
+        'station': 0.0,
+        'latitude': 0.0,
+        'longitude': 0.0,
+        'altitude': 0.0
+    }
+    
+    # Pattern matching (multilingual)
+    patterns = {
+        'station': ['stat', 'staz', 'station', 'gauge', 'id', 'stazione', 'poste'],
+        'latitude': ['lat', 'latitude', 'latitud', 'breite'],
+        'longitude': ['lon', 'long', 'longitude', 'länge', 'longitud'],
+        'altitude': ['alt', 'elev', 'height', 'quota', 'höhe', 'altura']
+    }
+    
+    for col_type, pattern_list in patterns.items():
+        for pattern in pattern_list:
+            if pattern in name_lower:
+                results[col_type] += 0.35
+    
+    # Data type analysis
+    numeric_count = sum(1 for x in sample_data if isinstance(x, (int, float)))
+    string_count = sum(1 for x in sample_data if isinstance(x, str))
+    
+    if numeric_count > string_count:
+        results['station'] -= 0.2
+    else:
+        results['station'] += 0.2
+        results['latitude'] -= 0.1
+        results['longitude'] -= 0.1
+        results['altitude'] -= 0.1
+    
+    # Value range analysis (for numeric columns)
+    if numeric_count > 0:
+        numeric_values = [x for x in sample_data if isinstance(x, (int, float))]
+        min_val, max_val = min(numeric_values), max(numeric_values)
+        
+        # Latitude typically between -90 and 90
+        if -90 <= min_val <= 90 and -90 <= max_val <= 90:
+            results['latitude'] += 0.4
+        
+        # Longitude typically between -180 and 180
+        if -180 <= min_val <= 180 and -180 <= max_val <= 180:
+            results['longitude'] += 0.4
+        
+        # Altitude typically positive
+        if min_val >= 0:
+            results['altitude'] += 0.2
+    
+    return results
+
+# %% === Method to detect column type smartly
+def _smart_column_detection(
+        df: pd.DataFrame, 
+        target_columns: list[str]=None,
+        confidence_threshold: float=0.5
+    ) -> tuple[dict, dict]:
+    """
+    Smart column detection with fallback strategies.
+
+    Args:
+        df (pd.DataFrame): The DataFrame to detect columns from.
+        target_columns (list): The target columns to detect.
+        confidence_threshold (float): The confidence threshold for column detection.
+
+    Returns:
+        tuple(dict, dict): A tuple containing the detected columns and their confidence scores.
+    """
+    detected = {}
+    confidence_scores = {}
+    
+    for col in df.columns:
+        scores = _advanced_column_detection(df[col])
+        
+        for col_type, score in scores.items():
+            if score > confidence_threshold:
+                if col_type not in detected or score > confidence_scores.get(col_type, 0):
+                    detected[col_type] = col
+                    confidence_scores[col_type] = score
+    
+    # Fallback: if not detected, use the first column that is compatible
+    if target_columns:
+        for col_type in target_columns:
+            if col_type not in detected:
+                for col in df.columns:
+                    sample_data = df[col].tolist()
+                    if col_type == 'station':
+                        compatible = all(isinstance(x, str) for x in sample_data)
+                    else:
+                        compatible = all(isinstance(x, (int, float)) for x in sample_data)
+                    
+                    if compatible and col not in detected.values():
+                        detected[col_type] = col
+                        confidence_scores[col_type] = 0.0
+                        warnings.warn(f"Fallback: using column [{col}] as {col_type} column.", stacklevel=2)
+                        break
+    
+    return detected, confidence_scores
+
+# %% === Method to load gauges table in csv format
+def load_time_sensitive_gauges_from_csv(
+        file_path: str,
+        station_column: str | int=None,
+        longitude_column: str | int=None,
+        latitude_column: str | int=None,
+        altitude_column: str | int=None
+    ) -> pd.DataFrame:
+    """
+    Load gauges table from a CSV file.
+
+    Args:
+        file_path (str): The path to the CSV file.
+        station_column (str | int, optional): The name or index of the station column (default: None).
+        longitude_column (str | int, optional): The name or index of the longitude column (default: None).
+        latitude_column (str | int, optional): The name or index of the latitude column (default: None).
+        altitude_column (str | int, optional): The name or index of the altitude column (default: None).
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the loaded gauges table.
+    """
+    if not isinstance(file_path, str) or not os.path.exists(file_path):
+        raise TypeError("file_path must be a string and the file must exist.")
+    if not isinstance(station_column, (str, int, type(None))):
+        raise TypeError("station_column must be a string, integer or None.")
+    if not isinstance(longitude_column, (str, int, type(None))):
+        raise TypeError("longitude_column must be a string, integer or None.")
+    if not isinstance(latitude_column, (str, int, type(None))):
+        raise TypeError("latitude_column must be a string, integer or None.")
+    if not isinstance(altitude_column, (str, int, type(None))):
+        raise TypeError("altitude_column must be a string, integer or None.")
+    
+    station_df = pd.read_csv(file_path)
+
+    auto_col_detection, _ = _smart_column_detection(station_df, ['station', 'longitude', 'latitude', 'altitude'])
+
+    if isinstance(station_column, int):
+        station_column = station_df.columns[station_column]
+    elif isinstance(station_column, str):
+        if station_column not in station_df.columns:
+            raise ValueError(f"Column [{station_column}] not found in the DataFrame.")
+    elif isinstance(station_column, type(None)):
+        station_column = auto_col_detection['station']
+        warnings.warn(f"Auto detection: using column [{col}] as the station column.", stacklevel=2)
+    
+    if isinstance(longitude_column, int):
+        longitude_column = station_df.columns[longitude_column]
+    elif isinstance(longitude_column, str):
+        if longitude_column not in station_df.columns:
+            raise ValueError(f"Column [{longitude_column}] not found in the DataFrame.")
+    elif isinstance(longitude_column, type(None)):
+        longitude_column = auto_col_detection['longitude']
+        warnings.warn(f"Auto detection: using column [{col}] as the longitude column.", stacklevel=2)
+    
+    if isinstance(latitude_column, int):
+        latitude_column = station_df.columns[latitude_column]
+    elif isinstance(latitude_column, str):
+        if latitude_column not in station_df.columns:
+            raise ValueError(f"Column [{latitude_column}] not found in the DataFrame.")
+    elif isinstance(latitude_column, type(None)):
+        latitude_column = auto_col_detection['latitude']
+        warnings.warn(f"Auto detection: using column [{col}] as the latitude column.", stacklevel=2)
+    
+    if isinstance(altitude_column, int):
+        altitude_column = station_df.columns[altitude_column]
+    elif isinstance(altitude_column, str):
+        if altitude_column not in station_df.columns:
+            raise ValueError(f"Column [{altitude_column}] not found in the DataFrame.")
+    elif isinstance(altitude_column, type(None)):
+        altitude_column = auto_col_detection['altitude']
+        warnings.warn(f"Auto detection: using column [{col}] as the altitude column.", stacklevel=2)
+
+    selected_columns = list(dict.fromkeys([station_column, longitude_column, latitude_column, altitude_column])) # Remove duplicates while preserving order
+    if len(selected_columns) != 4:
+        raise ValueError("The gauges table must have 4 columns: station, longitude, latitude and altitude.")
+
+    station_df = station_df[selected_columns]
+    station_df.columns = ["station", "longitude", "latitude", "altitude"]
+    
+    return station_df
 
 # %% === Method to merge and align time-sensitive data and gauges table
 def merge_scattered_time_sensitive_data(
@@ -474,18 +683,4 @@ def merge_scattered_time_sensitive_data(
 
     Returns:
         dict[str, pd.DataFrame]: A dictionary mapping gauge names to aligned DataFrames data.
-    """
-
-# %% === Method to load gauges table in csv format
-def load_time_sensitive_gauges_from_csv(
-        file_path: str
-    ) -> pd.DataFrame:
-    """
-    Load gauges table from a CSV file.
-
-    Args:
-        file_path (str): The path to the CSV file.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing the loaded gauges table.
     """

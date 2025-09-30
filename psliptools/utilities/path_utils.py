@@ -1,6 +1,8 @@
+# %% === Import necessary libraries
 import pandas as pd
 import os
 
+# %% === Helper method to resolve relative paths
 def _resolve_path(base_dir: str, path: str) -> str:
     """
     Resolve a path to an absolute path, joining with base_dir if path is relative.
@@ -16,6 +18,7 @@ def _resolve_path(base_dir: str, path: str) -> str:
         return os.path.abspath(os.path.join(base_dir, path))
     return path
 
+# %% === Method to get the absolute path to a specified P-SLIP folder
 def get_raw_fold(csv_path: str, fold_type: str, fold_subtype: str = None) -> str:
     """
     Get the absolute path to a specified P-SLIP folder type as defined in the CSV file containing the list of inputs.
@@ -56,6 +59,7 @@ def get_raw_fold(csv_path: str, fold_type: str, fold_subtype: str = None) -> str
     else:
         raise ValueError(f"The value in column 'path' is not a valid directory for folder type '{fold_type}'.")
 
+# %% === Method to get the absolute paths to specified P-SLIP file types
 def get_raw_files(csv_path: str, file_type: str, file_subtype: str = None) -> list[str]:
     """
     Get the absolute paths to specified P-SLIP folder types as defined in the CSV file containing the list of inputs.
@@ -93,6 +97,7 @@ def get_raw_files(csv_path: str, file_type: str, file_subtype: str = None) -> li
     
     return resolved_paths
 
+# %% === Method to get the absolute path to a specified P-SLIP folder
 def get_fold_from_csv(csv_path: str, key_column: str, key_value: str, path_column: str) -> str:
     """
     Search a CSV file for the row where key_column == key_value (only unique match 

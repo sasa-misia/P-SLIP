@@ -1,10 +1,10 @@
-#%% # Import necessary libraries
+# %% === Import necessary libraries
 import owslib
 import os
 from owslib.wms import WebMapService
 import requests
 
-#%% # Function to download raster from WMS
+# %% === Function to download raster from WMS
 def download_wms_raster(
         url: str, 
         out_path: str, 
@@ -13,7 +13,7 @@ def download_wms_raster(
         width: int=4096, 
         height: int=4096
     ) -> None:
-    # Creazione dell'oggetto WMS
+    # Creation of WebMapService
     wms = WebMapService(url)
 
     if len(wms.contents.keys()) > 1:
@@ -26,7 +26,7 @@ def download_wms_raster(
     else:
         raise ValueError("No layers found in WMS")
 
-    # Richiesta dei dati raster in formato GeoTIFF
+    # Request of GeoTIFF
     params = {
         "SERVICE": "WMS",
         "VERSION": "1.3.0",
@@ -56,4 +56,4 @@ def download_wms_raster(
         with open(path, "wb") as f:
             f.write(web_image.read())
 
-#%%
+# %% ===

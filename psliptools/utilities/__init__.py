@@ -6,7 +6,9 @@ from .csv_file_utils import (
     parse_csv_internal_path_field, 
     update_external_paths_in_csv,
     check_raw_path,
-    add_row_to_csv
+    add_row_to_csv,
+    get_csv_column_names,
+    rename_csv_header
 )
 
 from .pandas_utils import (
@@ -18,6 +20,7 @@ from .pandas_utils import (
 from .user_prompts import (
     print_enumerated_list,
     reorder_list_prompt,
+    label_list_elements_prompt,
     select_from_list_prompt,
     select_files_in_folder_prompt,
     select_dir_prompt,
@@ -40,12 +43,15 @@ __all__ = [
     "parse_csv_internal_path_field",
     "update_external_paths_in_csv",
     "add_row_to_csv",
+    "get_csv_column_names",
+    "rename_csv_header",
     "compare_dataframes",
     "compare_dataframes_columns",
     "get_list_of_values_from_dataframe",
     "download_wms_raster",
     "print_enumerated_list",
     "reorder_list_prompt",
+    "label_list_elements_prompt",
     "select_from_list_prompt",
     "select_files_in_folder_prompt",
     "select_dir_prompt",
