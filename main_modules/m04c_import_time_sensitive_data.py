@@ -28,7 +28,8 @@ from psliptools.utilities import (
 
 from psliptools.scattered import (
     load_time_sensitive_data_from_csv,
-    load_time_sensitive_gauges_from_csv
+    load_time_sensitive_gauges_from_csv,
+    merge_time_sensitive_data_with_gauges
 )
 
 # Importing necessary modules from main_modules
@@ -143,6 +144,8 @@ def main(
             )
         
         station_df = load_time_sensitive_gauges_from_csv(file_path=gauge_info_path)
+
+
     else:
         raise NotImplementedError("Satellite mode is not supported in this script yet. Please contact the developer.")
     

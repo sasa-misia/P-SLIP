@@ -382,6 +382,393 @@ def _change_time_sensitive_dataframe_resolution(
     
     return datetime_agg_df, numeric_agg_df
 
+# %% === Helper method to detect column type of gauges table
+def _advanced_column_detection(
+        series: pd.Series
+    ) -> dict:
+    """
+    Advanced column detection using multiple heuristics.
+    Returns confidence scores for different column types.
+
+    Args:
+        series (pd.Series): The column to detect from a dataframe.
+
+    Returns:
+        dict: A dictionary containing confidence scores for different column types.
+    """
+    name_lower = series.name.lower()
+    sample_data = series.to_list()
+    results = {
+        'station': 0.0,
+        'latitude': 0.0,
+        'longitude': 0.0,
+        'altitude': 0.0,
+        'start_date': 0.0,
+        'end_date': 0.0,
+        'cumulative_rain': 0.0,
+        'peak_rain': 0.0,
+        'average_temperature': 0.0,
+        'maximum_temperature': 0.0,
+        'minimum_temperature': 0.0
+    }
+    
+    # Enhanced pattern matching with expected data types
+    patterns = {
+        'station': {
+            'patterns': ['stat', 'staz', 'gauge', 'id', 'poste'],
+            'expected_type': 'string'
+        },
+        'latitude': {
+            'patterns': ['lat', 'latit', 'breite'],
+            'expected_type': 'numeric',
+            'range': (-90, 90)
+        },
+        'longitude': {
+            'patterns': ['lon', 'long', 'länge'],
+            'expected_type': 'numeric',
+            'range': (-180, 180)
+        },
+        'altitude': {
+            'patterns': ['alt', 'elev', 'height', 'quota', 'höhe'],
+            'expected_type': 'numeric',
+            'range': (0, None)  # Positive values
+        },
+        'start_date': {
+            'patterns': ['start', 'inizio', 'begin', 'debut', 'anfang', 'inicio', 'from'],
+            'expected_type': 'datetime'
+        },
+        'end_date': {
+            'patterns': ['end', 'fin', 'to'],
+            'expected_type': 'datetime'
+        },
+        'cumulative_rain': {
+            'patterns': ['cum', 'tot', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia'],
+            'expected_type': 'numeric',
+            'range': (0, 1000)  # Reasonable rain values
+        },
+        'peak_rain': {
+            'patterns': ['pk', 'peak', 'max', 'mas', 'máx', 'höchst', 'picco', 'rain', 'pioggia', 'regen', 'lluvia'],
+            'expected_type': 'numeric',
+            'range': (0, 1000)  # Reasonable rain values
+        },
+        'average_temperature': {
+            'patterns': ['avg', 'aver', 'med', 'durchschnitt', 'promedio', 'temp'],
+            'expected_type': 'numeric',
+            'range': (-50, 50)  # Reasonable temperature range
+        },
+        'maximum_temperature': {
+            'patterns': ['max', 'mas', 'máx', 'höchst', 'temp'],
+            'expected_type': 'numeric',
+            'range': (-50, 50)  # Reasonable temperature range
+        },
+        'minimum_temperature': {
+            'patterns': ['min', 'mín', 'niedrigst', 'temp'],
+            'expected_type': 'numeric',
+            'range': (-50, 50)  # Reasonable temperature range
+        }
+    }
+    
+    LOAD_BUFFER_SIZE = 50
+    BASE_PATTERN_MATCH_SCORE = 0.3
+    ADDITIONAL_PATTERN_MATCH_SCORE = 0.15
+    TYPE_MATCH_SCORE = 0.3
+    RANGE_MATCH_SCORE = 0.3
+    
+    # Enhanced type analysis with datetime conversion attempt
+    datetime_count = 0
+    numeric_count = 0
+    string_count = 0
+    
+    # Try to convert to datetime first - only if values are strings
+    datetime_converted = []
+    try:
+        # Only attempt datetime conversion if we have string values
+        sample_head = series.head(LOAD_BUFFER_SIZE)
+        if sample_head.dtype == 'object' or any(isinstance(x, str) for x in sample_head):
+            datetime_test = pd.to_datetime(sample_head, errors='coerce')
+            datetime_count = datetime_test.notna().sum()
+            datetime_converted = datetime_test.tolist()
+    except:
+        pass
+    
+    # Count remaining types
+    for i, value in enumerate(sample_data[:LOAD_BUFFER_SIZE]):  # Check first LOAD_BUFFER_SIZE values
+        if datetime_count > 0 and i < len(datetime_converted) and not pd.isna(datetime_converted[i]):
+            # This value was successfully converted to datetime
+            continue
+        elif isinstance(value, (int, float)):
+            numeric_count += 1
+        elif isinstance(value, str):
+            string_count += 1
+    
+    # Determine dominant type
+    type_counts = {
+        'datetime': datetime_count,
+        'numeric': numeric_count,
+        'string': string_count
+    }
+    dominant_type = max(type_counts, key=type_counts.get)
+    is_datetime_dominant = dominant_type == 'datetime'
+    is_numeric_dominant = dominant_type == 'numeric'
+    is_string_dominant = dominant_type == 'string'
+    
+    # Unified pattern and type analysis
+    for col_type, pattern_info in patterns.items():
+        pattern_list = pattern_info['patterns']
+        expected_type = pattern_info['expected_type']
+        
+        # Pattern matching
+        pattern_count = sum(1 for pattern in pattern_list if pattern in name_lower)
+        if pattern_count > 0:
+            results[col_type] += BASE_PATTERN_MATCH_SCORE + (pattern_count - 1) * ADDITIONAL_PATTERN_MATCH_SCORE
+        
+        # Enhanced type compatibility check
+        if expected_type == 'string':
+            if is_string_dominant:
+                results[col_type] += TYPE_MATCH_SCORE
+            else:
+                results[col_type] -= TYPE_MATCH_SCORE
+        elif expected_type == 'datetime':
+            if is_datetime_dominant:
+                results[col_type] += TYPE_MATCH_SCORE
+            elif is_string_dominant:
+                results[col_type] += TYPE_MATCH_SCORE / 3  # Partial credit for string (could be unconverted datetime)
+            else:
+                results[col_type] -= TYPE_MATCH_SCORE
+        elif expected_type == 'numeric':
+            if is_numeric_dominant:
+                results[col_type] += TYPE_MATCH_SCORE
+            else:
+                results[col_type] -= TYPE_MATCH_SCORE
+        else:
+            raise ValueError(f"Unknown expected type: {expected_type}")
+        
+        # Range validation for numeric columns (only if numeric dominant)
+        if expected_type == 'numeric' and is_numeric_dominant and 'range' in pattern_info:
+            # Get numeric values from the full sample (not just first 50)
+            numeric_values_full = [x for x in sample_data if isinstance(x, (int, float)) and not pd.isna(x)]
+            if numeric_values_full:
+                min_val, max_val = min(numeric_values_full), max(numeric_values_full)
+                range_min, range_max = pattern_info['range']
+                in_range = True
+                
+                if range_min is not None and min_val < range_min:
+                    in_range = False
+                if range_max is not None and max_val > range_max:
+                    in_range = False
+                
+                if in_range:
+                    results[col_type] += RANGE_MATCH_SCORE
+    
+    return results
+
+# %% === Helper method to perform a cross-validation of detection and scores
+def _cross_columns_check(
+        df: pd.DataFrame,
+        detected: dict,
+        confidence_scores: dict,
+        all_scores: dict
+    ) -> tuple[dict, dict]:
+    """
+    Perform a cross-validation of detection and scores.
+
+    Args:
+        df (pd.DataFrame): The DataFrame to detect columns from.
+        detected (dict): The detected columns (keys: column names, values: detected types).
+        confidence_scores (dict): The confidence scores for detected columns.
+        all_scores (dict): All scores for all columns.
+
+    Returns:
+        tuple(dict, dict): A tuple containing the detected columns and their confidence scores, eventually swapped.
+    """
+    # Create reverse mapping for easier access (only for assigned columns)
+    type_to_column = {col_type: col for col, col_type in detected.items() if col_type is not None}
+    
+    # Cross-column relationship analysis - re-evaluate assignments if needed
+    if len(type_to_column) >= 2:
+        # Temperature relationships: max > avg > min (check majority of values)
+        if 'maximum_temperature' in type_to_column and 'average_temperature' in type_to_column:
+            max_col = type_to_column['maximum_temperature']
+            avg_col = type_to_column['average_temperature']
+            
+            # Check majority of values (at least 70% should satisfy the relationship)
+            valid_comparisons = (df[max_col] > df[avg_col]).dropna()
+            if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
+                # Relationship violation: max should be greater than avg for majority
+                max_score = all_scores[max_col]['maximum_temperature']
+                avg_score = all_scores[avg_col]['average_temperature']
+                
+                detected[max_col] = 'average_temperature'
+                detected[avg_col] = 'maximum_temperature'
+                confidence_scores[max_col] = all_scores[avg_col]['average_temperature']
+                confidence_scores[avg_col] = all_scores[max_col]['maximum_temperature']
+                warnings.warn(f"Swapped temperature columns based on value relationships: {max_col} <-> {avg_col}", stacklevel=2)
+        
+        if 'average_temperature' in type_to_column and 'minimum_temperature' in type_to_column:
+            avg_col = type_to_column['average_temperature']
+            min_col = type_to_column['minimum_temperature']
+            
+            # Check majority of values
+            valid_comparisons = (df[avg_col] > df[min_col]).dropna()
+            if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
+                # Relationship violation: avg should be greater than min for majority
+                avg_score = all_scores[avg_col]['average_temperature']
+                min_score = all_scores[min_col]['minimum_temperature']
+                
+                detected[avg_col] = 'minimum_temperature'
+                detected[min_col] = 'average_temperature'
+                confidence_scores[avg_col] = all_scores[min_col]['minimum_temperature']
+                confidence_scores[min_col] = all_scores[avg_col]['average_temperature']
+                warnings.warn(f"Swapped temperature columns based on value relationships: {avg_col} <-> {min_col}", stacklevel=2)
+        
+        # Date relationships: end_date > start_date (check majority of values)
+        if 'start_date' in type_to_column and 'end_date' in type_to_column:
+            start_col = type_to_column['start_date']
+            end_col = type_to_column['end_date']
+            
+            # Try to convert to datetime first, don't just check dtype
+            start_series = pd.to_datetime(df[start_col], errors='coerce')
+            end_series = pd.to_datetime(df[end_col], errors='coerce')
+            
+            # Only check if we have valid datetime conversions
+            valid_mask = start_series.notna() & end_series.notna()
+            if valid_mask.sum() > 0:  # At least some valid datetime pairs
+                # Check majority of valid values
+                valid_comparisons = (end_series[valid_mask] > start_series[valid_mask])
+                if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
+                    # Relationship violation: end_date should be after start_date for majority
+                    start_score = all_scores[start_col]['start_date']
+                    end_score = all_scores[end_col]['end_date']
+                    
+                    detected[start_col] = 'end_date'
+                    detected[end_col] = 'start_date'
+                    confidence_scores[start_col] = all_scores[end_col]['end_date']
+                    confidence_scores[end_col] = all_scores[start_col]['start_date']
+                    warnings.warn(f"Swapped date columns based on temporal relationships: {start_col} <-> {end_col}", stacklevel=2)
+        
+        # Rain relationships: peak rain >= cumulative rain (check majority of values)
+        if 'peak_rain' in type_to_column and 'cumulative_rain' in type_to_column:
+            peak_col = type_to_column['peak_rain']
+            cumul_col = type_to_column['cumulative_rain']
+            
+            # Check majority of values
+            valid_comparisons = (df[peak_col] >= df[cumul_col]).dropna()
+            if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
+                # Relationship violation: peak should be >= cumulative for majority
+                peak_score = all_scores[peak_col]['peak_rain']
+                cumul_score = all_scores[cumul_col]['cumulative_rain']
+                
+                detected[peak_col] = 'cumulative_rain'
+                detected[cumul_col] = 'peak_rain'
+                confidence_scores[peak_col] = all_scores[cumul_col]['cumulative_rain']
+                confidence_scores[cumul_col] = all_scores[peak_col]['peak_rain']
+                warnings.warn(f"Swapped rain columns based on value relationships: {peak_col} <-> {cumul_col}", stacklevel=2)
+    
+    return detected, confidence_scores
+
+# %% === Helper method to detect column type smartly
+def _smart_columns_detection(
+        df: pd.DataFrame, 
+        target_columns: list[str]=None,
+        confidence_threshold: float=0.5
+    ) -> tuple[dict, dict]:
+    """
+    Smart column detection with fallback strategies.
+
+    Args:
+        df (pd.DataFrame): The DataFrame to detect columns from.
+        target_columns (list): The target columns to detect.
+        confidence_threshold (float): The confidence threshold for column detection.
+
+    Returns:
+        tuple(dict, dict): A tuple containing the detected columns and their confidence scores.
+    """
+    detected = {}  # Keys: column names, Values: detected type or None
+    scores = {}  # Keys: column names, Values: confidence score for detected type
+    all_scores = {}  # Store scores for all columns to allow re-evaluation
+    
+    # Initialize detected and confidence_scores for all columns
+    for col in df.columns:
+        detected[col] = None
+        scores[col] = 0.0
+    
+    # First pass: collect scores for all columns
+    for col in df.columns:
+        scores_results = _advanced_column_detection(df[col])
+        all_scores[col] = scores_results
+        
+        # Find the best type for this column
+        best_type = None
+        best_score = 0.0
+        
+        for col_type, score in scores_results.items():
+            if score > confidence_threshold and score > best_score:
+                best_type = col_type
+                best_score = score
+        
+        if best_type:
+            detected[col] = best_type
+            scores[col] = best_score
+    
+    # Resolve conflicts: if multiple columns are assigned to the same type,
+    # keep only the one with highest score
+    type_to_column = {}
+    for col, col_type in detected.items():
+        if col_type is not None:  # Only consider columns with detected types
+            if col_type not in type_to_column:
+                type_to_column[col_type] = col  # Store only the column name
+            else:
+                # Compare scores between current assigned column and new column
+                last_col_assigned = type_to_column[col_type]
+                if scores[col] > scores[last_col_assigned]:
+                    # New column has higher score, demote the current one
+                    detected[last_col_assigned] = None
+                    scores[last_col_assigned] = 0.0
+                    type_to_column[col_type] = col  # Update to new column
+                else:
+                    # Current column has higher score, demote the new one
+                    detected[col] = None
+                    scores[col] = 0.0
+    
+    # Cross-column relationship check
+    detected, scores = _cross_columns_check(df, detected, scores, all_scores)
+    
+    # Fallback: if target columns are specified and not detected, use compatible columns
+    if target_columns:
+        # Create reverse mapping from type to column
+        type_assigned = {col_type: col for col, col_type in detected.items()}
+        
+        for col_type in target_columns:
+            if col_type not in type_assigned:
+                # Find compatible column that hasn't been assigned yet
+                for col in df.columns:
+                    if detected[col] is None:  # Only consider unassigned columns
+                        sample_data = df[col].tolist()
+                        
+                        if col_type == 'station':
+                            compatible = all(isinstance(x, str) for x in sample_data)
+                        elif col_type in ['latitude', 'longitude', 'altitude', 'cumulative_rain', 
+                                        'peak_rain', 'average_temperature', 'maximum_temperature', 
+                                        'minimum_temperature']:
+                            compatible = all(isinstance(x, (int, float)) for x in sample_data)
+                        elif col_type in ['start_date', 'end_date']:
+                            # For dates, check if they can be converted to datetime
+                            try:
+                                datetime_test = pd.to_datetime(df[col].head(20), errors='coerce')
+                                compatible = datetime_test.notna().sum() > 10  # At least 10 valid dates
+                            except:
+                                compatible = False
+                        else:
+                            compatible = False
+                        
+                        if compatible:
+                            detected[col] = col_type
+                            scores[col] = 0.0  # Fallback assignment has 0 confidence
+                            warnings.warn(f"Fallback: using column [{col}] as {col_type} column.", stacklevel=2)
+                            break
+    
+    return detected, scores
+
 # %% === Method to load time-sensitive scattered data in csv format
 def load_time_sensitive_data_from_csv(
         file_path: str,
@@ -390,7 +777,7 @@ def load_time_sensitive_data_from_csv(
         delta_time_hours: float | int=None,
         aggregation_method: list[str]=['sum'],
         last_date: pd.Timestamp=None,
-        datetime_columns_names: list[str]=['start_date', 'end_date'],
+        datetime_columns_names: list[str]=None,
         numeric_columns_names: list[str]=None
     ) -> pd.DataFrame:
     """
@@ -422,8 +809,8 @@ def load_time_sensitive_data_from_csv(
     """
     if not isinstance(file_path, str) or not os.path.exists(file_path):
         raise TypeError("file_path must be a string and the file must exist.")
-    if not isinstance(datetime_columns_names, (list)):
-        raise TypeError("datetime_names must be a list of strings.")
+    if not isinstance(datetime_columns_names, (list, type(None))):
+        raise TypeError("datetime_names must be a list of strings or None.")
     if not isinstance(numeric_columns_names, (list, type(None))):
         raise TypeError("value_names must be a list of strings or None.")
     if not isinstance(fill_method, (str, int, float, type(None))):
@@ -433,22 +820,27 @@ def load_time_sensitive_data_from_csv(
     if not isinstance(delta_time_hours, (float, int, type(None))):
         raise TypeError("delta_time_hours must be a float, integer or None.")
     
-    data_df = pd.read_csv(file_path)
+    raw_data_df = pd.read_csv(file_path)
 
-    _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(data_df, fill_method=fill_method, round_datetime=round_datetime)
+    _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(raw_data_df, fill_method=fill_method, round_datetime=round_datetime)
 
     if len(datetime_df.columns) != 2:
         raise ValueError(f"Time-sensitive part of the csv has {len(datetime_df.columns)} columns. Expected 2 columns: start_date, end_date")
-    
-    if len(datetime_columns_names) != len(datetime_df.columns):
-        raise ValueError(f"Time-sensitive part of the csv has {len(datetime_df.columns)} columns. Current datetime_columns_names list has {len(datetime_columns_names)} elements!")
 
-    datetime_df.columns = datetime_columns_names
+    if datetime_columns_names:
+        if len(datetime_columns_names) != len(datetime_df.columns):
+            raise ValueError(f"Time-sensitive part of the csv has {len(datetime_df.columns)} columns. Current datetime_columns_names list has {len(datetime_columns_names)} elements!")
+        datetime_df.columns = datetime_columns_names
+    else:
+        auto_datetime_col_detection, _ = _smart_columns_detection(datetime_df)
+        if any([x is None for _, x in auto_datetime_col_detection.items()]):
+            raise ValueError("Unable to detect datetime columns. Please provide datetime_columns_names manually.")
+        datetime_df.columns = [x for _, x in auto_datetime_col_detection.items()]
 
     if datetime_df.iloc[0,1] < datetime_df.iloc[0,0]:
         raise ValueError("Start date of the time-sensitive data is greater than end date.")
 
-    diff_end_start = datetime_df[datetime_columns_names[1]] - datetime_df[datetime_columns_names[0]]
+    diff_end_start = datetime_df.iloc[:,1] - datetime_df.iloc[:,0]
     not_uniform_row_ids = diff_end_start[diff_end_start != diff_end_start.iloc[1]].index.to_list()
     if not_uniform_row_ids:
         raise ValueError("Duration of the time-sensitive data (end-start) is not uniform. Non-uniform rows: " + str(not_uniform_row_ids))
@@ -457,6 +849,11 @@ def load_time_sensitive_data_from_csv(
         if len(numeric_columns_names) != len(numeric_df.columns):
             raise ValueError(f"Numeric part of the csv has {len(numeric_df.columns)} columns. Current numeric_columns_names list has {len(numeric_columns_names)} elements!")
         numeric_df.columns = numeric_columns_names
+    else:
+        auto_numeric_col_detection, _ = _smart_columns_detection(numeric_df)
+        if any([x is None for _, x in auto_numeric_col_detection.items()]):
+            raise ValueError("Unable to detect numeric columns. Please provide numeric_columns_names manually.")
+        numeric_df.columns = [x for _, x in auto_numeric_col_detection.items()]
 
     if delta_time_hours:
         datetime_df, numeric_df = _change_time_sensitive_dataframe_resolution(
@@ -470,121 +867,6 @@ def load_time_sensitive_data_from_csv(
     data_df = pd.concat([datetime_df, numeric_df], axis=1)
     
     return data_df
-
-# %% === Method to detect column type of gauges table
-def _advanced_column_detection(
-        series: pd.Series
-    ) -> dict:
-    """
-    Advanced column detection using multiple heuristics.
-    Returns confidence scores for different column types.
-
-    Args:
-        series (pd.Series): The column to detect from a dataframe.
-
-    Returns:
-        dict: A dictionary containing confidence scores for different column types.
-    """
-    name_lower = series.name.lower()
-    sample_data = series.to_list()
-    results = {
-        'station': 0.0,
-        'latitude': 0.0,
-        'longitude': 0.0,
-        'altitude': 0.0
-    }
-    
-    # Pattern matching (multilingual)
-    patterns = {
-        'station': ['stat', 'staz', 'station', 'gauge', 'id', 'stazione', 'poste'],
-        'latitude': ['lat', 'latitude', 'latitud', 'breite'],
-        'longitude': ['lon', 'long', 'longitude', 'länge', 'longitud'],
-        'altitude': ['alt', 'elev', 'height', 'quota', 'höhe', 'altura']
-    }
-    
-    for col_type, pattern_list in patterns.items():
-        for pattern in pattern_list:
-            if pattern in name_lower:
-                results[col_type] += 0.35
-    
-    # Data type analysis
-    numeric_count = sum(1 for x in sample_data if isinstance(x, (int, float)))
-    string_count = sum(1 for x in sample_data if isinstance(x, str))
-    
-    if numeric_count > string_count:
-        results['station'] -= 0.2
-    else:
-        results['station'] += 0.2
-        results['latitude'] -= 0.1
-        results['longitude'] -= 0.1
-        results['altitude'] -= 0.1
-    
-    # Value range analysis (for numeric columns)
-    if numeric_count > 0:
-        numeric_values = [x for x in sample_data if isinstance(x, (int, float))]
-        min_val, max_val = min(numeric_values), max(numeric_values)
-        
-        # Latitude typically between -90 and 90
-        if -90 <= min_val <= 90 and -90 <= max_val <= 90:
-            results['latitude'] += 0.4
-        
-        # Longitude typically between -180 and 180
-        if -180 <= min_val <= 180 and -180 <= max_val <= 180:
-            results['longitude'] += 0.4
-        
-        # Altitude typically positive
-        if min_val >= 0:
-            results['altitude'] += 0.2
-    
-    return results
-
-# %% === Method to detect column type smartly
-def _smart_column_detection(
-        df: pd.DataFrame, 
-        target_columns: list[str]=None,
-        confidence_threshold: float=0.5
-    ) -> tuple[dict, dict]:
-    """
-    Smart column detection with fallback strategies.
-
-    Args:
-        df (pd.DataFrame): The DataFrame to detect columns from.
-        target_columns (list): The target columns to detect.
-        confidence_threshold (float): The confidence threshold for column detection.
-
-    Returns:
-        tuple(dict, dict): A tuple containing the detected columns and their confidence scores.
-    """
-    detected = {}
-    confidence_scores = {}
-    
-    for col in df.columns:
-        scores = _advanced_column_detection(df[col])
-        
-        for col_type, score in scores.items():
-            if score > confidence_threshold:
-                if col_type not in detected or score > confidence_scores.get(col_type, 0):
-                    detected[col_type] = col
-                    confidence_scores[col_type] = score
-    
-    # Fallback: if not detected, use the first column that is compatible
-    if target_columns:
-        for col_type in target_columns:
-            if col_type not in detected:
-                for col in df.columns:
-                    sample_data = df[col].tolist()
-                    if col_type == 'station':
-                        compatible = all(isinstance(x, str) for x in sample_data)
-                    else:
-                        compatible = all(isinstance(x, (int, float)) for x in sample_data)
-                    
-                    if compatible and col not in detected.values():
-                        detected[col_type] = col
-                        confidence_scores[col_type] = 0.0
-                        warnings.warn(f"Fallback: using column [{col}] as {col_type} column.", stacklevel=2)
-                        break
-    
-    return detected, confidence_scores
 
 # %% === Method to load gauges table in csv format
 def load_time_sensitive_gauges_from_csv(
@@ -620,7 +902,10 @@ def load_time_sensitive_gauges_from_csv(
     
     station_df = pd.read_csv(file_path)
 
-    auto_col_detection, _ = _smart_column_detection(station_df, ['station', 'longitude', 'latitude', 'altitude'])
+    auto_col_detection, _ = _smart_columns_detection(station_df, ['station', 'longitude', 'latitude', 'altitude'])
+    
+    # Create reverse mapping for easier access (only assigned columns)
+    type_to_column = {col_type: col for col, col_type in auto_col_detection.items() if col_type is not None}
 
     if isinstance(station_column, int):
         station_column = station_df.columns[station_column]
@@ -628,8 +913,10 @@ def load_time_sensitive_gauges_from_csv(
         if station_column not in station_df.columns:
             raise ValueError(f"Column [{station_column}] not found in the DataFrame.")
     elif isinstance(station_column, type(None)):
-        station_column = auto_col_detection['station']
-        warnings.warn(f"Auto detection: using column [{col}] as the station column.", stacklevel=2)
+        station_column = type_to_column.get('station')
+        if station_column is None:
+            raise ValueError("Station column not detected and no manual specification provided.")
+        warnings.warn(f"Auto detection: using column [{station_column}] as the station column.", stacklevel=2)
     
     if isinstance(longitude_column, int):
         longitude_column = station_df.columns[longitude_column]
@@ -637,8 +924,10 @@ def load_time_sensitive_gauges_from_csv(
         if longitude_column not in station_df.columns:
             raise ValueError(f"Column [{longitude_column}] not found in the DataFrame.")
     elif isinstance(longitude_column, type(None)):
-        longitude_column = auto_col_detection['longitude']
-        warnings.warn(f"Auto detection: using column [{col}] as the longitude column.", stacklevel=2)
+        longitude_column = type_to_column.get('longitude')
+        if longitude_column is None:
+            raise ValueError("Longitude column not detected and no manual specification provided.")
+        warnings.warn(f"Auto detection: using column [{longitude_column}] as the longitude column.", stacklevel=2)
     
     if isinstance(latitude_column, int):
         latitude_column = station_df.columns[latitude_column]
@@ -646,8 +935,10 @@ def load_time_sensitive_gauges_from_csv(
         if latitude_column not in station_df.columns:
             raise ValueError(f"Column [{latitude_column}] not found in the DataFrame.")
     elif isinstance(latitude_column, type(None)):
-        latitude_column = auto_col_detection['latitude']
-        warnings.warn(f"Auto detection: using column [{col}] as the latitude column.", stacklevel=2)
+        latitude_column = type_to_column.get('latitude')
+        if latitude_column is None:
+            raise ValueError("Latitude column not detected and no manual specification provided.")
+        warnings.warn(f"Auto detection: using column [{latitude_column}] as the latitude column.", stacklevel=2)
     
     if isinstance(altitude_column, int):
         altitude_column = station_df.columns[altitude_column]
@@ -655,8 +946,10 @@ def load_time_sensitive_gauges_from_csv(
         if altitude_column not in station_df.columns:
             raise ValueError(f"Column [{altitude_column}] not found in the DataFrame.")
     elif isinstance(altitude_column, type(None)):
-        altitude_column = auto_col_detection['altitude']
-        warnings.warn(f"Auto detection: using column [{col}] as the altitude column.", stacklevel=2)
+        altitude_column = type_to_column.get('altitude')
+        if altitude_column is None:
+            raise ValueError("Altitude column not detected and no manual specification provided.")
+        warnings.warn(f"Auto detection: using column [{altitude_column}] as the altitude column.", stacklevel=2)
 
     selected_columns = list(dict.fromkeys([station_column, longitude_column, latitude_column, altitude_column])) # Remove duplicates while preserving order
     if len(selected_columns) != 4:
@@ -668,7 +961,7 @@ def load_time_sensitive_gauges_from_csv(
     return station_df
 
 # %% === Method to merge and align time-sensitive data and gauges table
-def merge_scattered_time_sensitive_data(
+def merge_time_sensitive_data_with_gauges(
         time_sensitive_data: list[pd.DataFrame],
         time_sensitive_gauges: list[str],
         gauges_table: pd.DataFrame
@@ -684,3 +977,5 @@ def merge_scattered_time_sensitive_data(
     Returns:
         dict[str, pd.DataFrame]: A dictionary mapping gauge names to aligned DataFrames data.
     """
+
+    # TODO: implement
