@@ -1,6 +1,5 @@
 # %% === Import necessary modules
 import warnings
-import numpy as np
 import pandas as pd
 import os
 
@@ -194,7 +193,7 @@ def _parse_time_sensitive_dataframe(
                 )
                 
                 warnings.warn(
-                    f"Missing values in column [{col}] at rows {[x + 2 for x in missing_row_ids]} have been filled with {fill_method} mode", # + 2 because the csv first row is for header and starts from 1, not 0!
+                    f"Missing values in column [{col}] at rows {[x + 2 for x in missing_row_ids]} have been filled with {fill_method} mode", # + 2 because the csv first row is for header, plus, the index should start from 1, not 0!
                     stacklevel=2
                 )
             
@@ -206,8 +205,9 @@ def _parse_time_sensitive_dataframe(
                 if data_df[col].dtype == 'object':
                     data_df[col] = data_df[col].infer_objects(copy=False) # Suggested to convert first to infer_objects
                 data_df[col] = data_df[col].interpolate(method='linear')
+
                 warnings.warn(
-                    f"Missing values in column [{col}] at rows {[x + 2 for x in missing_row_ids]} have been filled with linear interpolation", # + 2 because the csv first row is for header and starts from 1, not 0!
+                    f"Missing values in column [{col}] at rows {[x + 2 for x in missing_row_ids]} have been filled with linear interpolation", # + 2 because the csv first row is for header and should start from 1, not 0!
                     stacklevel=2
                 )
             
@@ -595,9 +595,6 @@ def _cross_columns_check(
             valid_comparisons = (df[max_col] > df[avg_col]).dropna()
             if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
                 # Relationship violation: max should be greater than avg for majority
-                max_score = all_scores[max_col]['maximum_temperature']
-                avg_score = all_scores[avg_col]['average_temperature']
-                
                 detected[max_col] = 'average_temperature'
                 detected[avg_col] = 'maximum_temperature'
                 confidence_scores[max_col] = all_scores[avg_col]['average_temperature']
@@ -612,9 +609,6 @@ def _cross_columns_check(
             valid_comparisons = (df[avg_col] > df[min_col]).dropna()
             if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
                 # Relationship violation: avg should be greater than min for majority
-                avg_score = all_scores[avg_col]['average_temperature']
-                min_score = all_scores[min_col]['minimum_temperature']
-                
                 detected[avg_col] = 'minimum_temperature'
                 detected[min_col] = 'average_temperature'
                 confidence_scores[avg_col] = all_scores[min_col]['minimum_temperature']
@@ -637,9 +631,6 @@ def _cross_columns_check(
                 valid_comparisons = (end_series[valid_mask] > start_series[valid_mask])
                 if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
                     # Relationship violation: end_date should be after start_date for majority
-                    start_score = all_scores[start_col]['start_date']
-                    end_score = all_scores[end_col]['end_date']
-                    
                     detected[start_col] = 'end_date'
                     detected[end_col] = 'start_date'
                     confidence_scores[start_col] = all_scores[end_col]['end_date']
@@ -655,9 +646,6 @@ def _cross_columns_check(
             valid_comparisons = (df[peak_col] >= df[cumul_col]).dropna()
             if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
                 # Relationship violation: peak should be >= cumulative for majority
-                peak_score = all_scores[peak_col]['peak_rain']
-                cumul_score = all_scores[cumul_col]['cumulative_rain']
-                
                 detected[peak_col] = 'cumulative_rain'
                 detected[cumul_col] = 'peak_rain'
                 confidence_scores[peak_col] = all_scores[cumul_col]['cumulative_rain']
@@ -747,9 +735,10 @@ def _smart_columns_detection(
                         
                         if col_type == 'station':
                             compatible = all(isinstance(x, str) for x in sample_data)
-                        elif col_type in ['latitude', 'longitude', 'altitude', 'cumulative_rain', 
-                                        'peak_rain', 'average_temperature', 'maximum_temperature', 
-                                        'minimum_temperature']:
+                        elif col_type in [
+                            'latitude', 'longitude', 'altitude', 
+                            'cumulative_rain', 'peak_rain', 
+                            'average_temperature', 'maximum_temperature', 'minimum_temperature']:
                             compatible = all(isinstance(x, (int, float)) for x in sample_data)
                         elif col_type in ['start_date', 'end_date']:
                             # For dates, check if they can be converted to datetime
@@ -836,6 +825,7 @@ def load_time_sensitive_data_from_csv(
         if any([x is None for _, x in auto_datetime_col_detection.items()]):
             raise ValueError("Unable to detect datetime columns. Please provide datetime_columns_names manually.")
         datetime_df.columns = [x for _, x in auto_datetime_col_detection.items()]
+        warnings.warn(f"Auto detection: using columns {[x for x in auto_datetime_col_detection.keys()]} as {[x for x in auto_datetime_col_detection.values()]} columns.", stacklevel=2)
 
     if datetime_df.iloc[0,1] < datetime_df.iloc[0,0]:
         raise ValueError("Start date of the time-sensitive data is greater than end date.")
@@ -854,6 +844,7 @@ def load_time_sensitive_data_from_csv(
         if any([x is None for _, x in auto_numeric_col_detection.items()]):
             raise ValueError("Unable to detect numeric columns. Please provide numeric_columns_names manually.")
         numeric_df.columns = [x for _, x in auto_numeric_col_detection.items()]
+        warnings.warn(f"Auto detection: using columns {[x for x in auto_numeric_col_detection.keys()]} as {[x for x in auto_numeric_col_detection.values()]} columns.", stacklevel=2)
 
     if delta_time_hours:
         datetime_df, numeric_df = _change_time_sensitive_dataframe_resolution(
@@ -913,10 +904,11 @@ def load_time_sensitive_gauges_from_csv(
         if station_column not in station_df.columns:
             raise ValueError(f"Column [{station_column}] not found in the DataFrame.")
     elif isinstance(station_column, type(None)):
-        station_column = type_to_column.get('station')
+        station_key = 'station'
+        station_column = type_to_column.get(station_key)
         if station_column is None:
             raise ValueError("Station column not detected and no manual specification provided.")
-        warnings.warn(f"Auto detection: using column [{station_column}] as the station column.", stacklevel=2)
+        warnings.warn(f"Auto detection: using column [{station_column}] as the [{station_key}] column.", stacklevel=2)
     
     if isinstance(longitude_column, int):
         longitude_column = station_df.columns[longitude_column]
@@ -924,10 +916,11 @@ def load_time_sensitive_gauges_from_csv(
         if longitude_column not in station_df.columns:
             raise ValueError(f"Column [{longitude_column}] not found in the DataFrame.")
     elif isinstance(longitude_column, type(None)):
-        longitude_column = type_to_column.get('longitude')
+        longitude_key = 'longitude'
+        longitude_column = type_to_column.get(longitude_key)
         if longitude_column is None:
             raise ValueError("Longitude column not detected and no manual specification provided.")
-        warnings.warn(f"Auto detection: using column [{longitude_column}] as the longitude column.", stacklevel=2)
+        warnings.warn(f"Auto detection: using column [{longitude_column}] as the [{longitude_key}] column.", stacklevel=2)
     
     if isinstance(latitude_column, int):
         latitude_column = station_df.columns[latitude_column]
@@ -935,10 +928,11 @@ def load_time_sensitive_gauges_from_csv(
         if latitude_column not in station_df.columns:
             raise ValueError(f"Column [{latitude_column}] not found in the DataFrame.")
     elif isinstance(latitude_column, type(None)):
-        latitude_column = type_to_column.get('latitude')
+        latitude_key = 'latitude'
+        latitude_column = type_to_column.get(latitude_key)
         if latitude_column is None:
             raise ValueError("Latitude column not detected and no manual specification provided.")
-        warnings.warn(f"Auto detection: using column [{latitude_column}] as the latitude column.", stacklevel=2)
+        warnings.warn(f"Auto detection: using column [{latitude_column}] as the [{latitude_key}] column.", stacklevel=2)
     
     if isinstance(altitude_column, int):
         altitude_column = station_df.columns[altitude_column]
@@ -946,10 +940,11 @@ def load_time_sensitive_gauges_from_csv(
         if altitude_column not in station_df.columns:
             raise ValueError(f"Column [{altitude_column}] not found in the DataFrame.")
     elif isinstance(altitude_column, type(None)):
-        altitude_column = type_to_column.get('altitude')
+        altitude_key = 'altitude'
+        altitude_column = type_to_column.get(altitude_key)
         if altitude_column is None:
             raise ValueError("Altitude column not detected and no manual specification provided.")
-        warnings.warn(f"Auto detection: using column [{altitude_column}] as the altitude column.", stacklevel=2)
+        warnings.warn(f"Auto detection: using column [{altitude_column}] as the [{altitude_key}] column.", stacklevel=2)
 
     selected_columns = list(dict.fromkeys([station_column, longitude_column, latitude_column, altitude_column])) # Remove duplicates while preserving order
     if len(selected_columns) != 4:
@@ -961,21 +956,79 @@ def load_time_sensitive_gauges_from_csv(
     return station_df
 
 # %% === Method to merge and align time-sensitive data and gauges table
-def merge_time_sensitive_data_with_gauges(
-        time_sensitive_data: list[pd.DataFrame],
-        time_sensitive_gauges: list[str],
+def merge_time_sensitive_data_and_gauges(
+        data_dict: dict[str, pd.DataFrame],
         gauges_table: pd.DataFrame
     ) -> dict[str, pd.DataFrame]:
     """
     Merge and align time-sensitive data with gauges table.
 
     Args:
-        time_sensitive_data (list[pd.DataFrame]): A list of DataFrames containing the time-sensitive data.
-        time_sensitive_gauges (list[str]): A list of gauge names.
+        data_dict (dict[str, pd.DataFrame]): A dictionary mapping gauge names to DataFrames data.
         gauges_table (pd.DataFrame): A DataFrame containing the gauges table.
 
     Returns:
-        dict[str, pd.DataFrame]: A dictionary mapping gauge names to aligned DataFrames data.
+        dict[str, pd.DataFrame]: A dictionary containing structured, merged, and aligned data.
     """
+    if not(isinstance(data_dict, dict)):
+        raise TypeError("data_dict must be a dictionary.")
+    if not(isinstance(gauges_table, pd.DataFrame)):
+        raise TypeError("gauges_table must be a pandas DataFrame.")
+    
+    data_dict = data_dict.copy()
+    gauges_table = gauges_table.copy()
 
-    # TODO: implement
+    gauges_table = gauges_table[gauges_table["station"].isin(list(data_dict.keys()))]
+
+    station_names = gauges_table["station"].to_list()
+    for data_label in data_dict:
+        if data_label not in station_names:
+            raise ValueError(f"Data label [{data_label}] of input data_dict not found in the gauges_table.")
+    
+    start_dates, end_dates = [], []
+    for data in data_dict.values():
+        start_dates.append(data['start_date'].iloc[0])
+        end_dates.append(data['end_date'].iloc[-1])
+
+    shared_start_date = max(start_dates)
+    shared_end_date = min(end_dates)
+
+    numeric_columns_names = []
+    for data_label, data_df in data_dict.items():
+        mask_dates = (data_df['start_date'] >= shared_start_date) & (data_df['end_date'] <= shared_end_date)
+        if not mask_dates.all():
+            if not mask_dates.any():
+                raise ValueError(f"All data for gauge [{data_label}] is outside of the shared time period.")
+            warnings.warn(f"Some data for gauge [{data_label}] is outside of the shared time period -> ignoring those data.", stacklevel=2)
+        filtered_data_df = data_df[mask_dates].reset_index(drop=True)
+        filtered_columns_names = filtered_data_df.columns[(filtered_data_df.columns != 'start_date') & (filtered_data_df.columns != 'end_date')].to_list()
+        for filt_col_name in filtered_columns_names:
+            if filt_col_name not in numeric_columns_names:
+                numeric_columns_names.append(filt_col_name)
+        data_dict[data_label] = filtered_data_df
+    
+    time_sensitive_vars = {'gauges':gauges_table, 'dates': None}
+    for col_name in numeric_columns_names:
+        time_sensitive_vars[col_name] = None
+    for sta in station_names:
+        curr_datetimes = data_dict[sta].loc[:, ['start_date', 'end_date']]
+        if time_sensitive_vars['dates'] is None:
+            time_sensitive_vars['dates'] = curr_datetimes
+        else:
+            start_diff = (time_sensitive_vars['dates']['start_date'] - curr_datetimes['start_date']).abs()
+            end_diff = (time_sensitive_vars['dates']['end_date'] - curr_datetimes['end_date']).abs()
+            if (start_diff > pd.Timedelta(seconds=1)).any():
+                raise ValueError(f"Data for gauge [{sta}] has different start dates at indices : {start_diff[start_diff > pd.Timedelta(seconds=1)].index}, differing by {start_diff[start_diff > pd.Timedelta(seconds=1)]}.")
+            if (end_diff > pd.Timedelta(seconds=1)).any():
+                raise ValueError(f"Data for gauge [{sta}] has different end dates at indices : {end_diff[end_diff > pd.Timedelta(seconds=1)].index}, differing by {end_diff[end_diff > pd.Timedelta(seconds=1)]}.")
+        for col_name in numeric_columns_names:
+            if col_name in data_dict[sta].columns:
+                curr_numeric = data_dict[sta].loc[:, [col_name]]
+                curr_numeric.columns = [sta]
+                if time_sensitive_vars[col_name] is None:
+                    time_sensitive_vars[col_name] = curr_numeric
+                else:
+                    time_sensitive_vars[col_name] = pd.concat([time_sensitive_vars[col_name], curr_numeric], axis=1)
+    return time_sensitive_vars
+
+# %%
