@@ -51,7 +51,7 @@ def _regularize_elevation(
     out_elevation = elevation.copy() # Create a copy to avoid modifying the original data
     if out_elevation.ndim == 3:
         out_elevation = out_elevation[0] # Only use the first layer
-        warnings.warn('elevation is a 3D array, only the first layer will be used')
+        warnings.warn('elevation is a 3D array, only the first layer will be used', stacklevel=2)
     elif out_elevation.ndim == 1 and x_grid is not None and y_grid is not None:
         out_elevation = out_elevation.reshape(x_grid.shape)
     
@@ -109,7 +109,7 @@ def _regularize_zxy(
     """
     elevation = _regularize_elevation(elevation, x_grid, y_grid)
     if x_grid is None or y_grid is None:
-        warnings.warn('x_grid and/or y_grid are not provided, creating a fake base grid...')
+        warnings.warn('x_grid and/or y_grid are not provided, creating a fake base grid...', stacklevel=2)
         x_grid, y_grid = _create_fake_base_grid(elevation)
     else:
         if projected:

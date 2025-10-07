@@ -279,7 +279,7 @@ def select_from_list_prompt(
     selected_indices = _parse_selection_string(obj_list, user_raw_input)
     
     if not allow_multiple and len(selected_indices) > 1:
-        warnings.warn("Multiple selections are not allowed when allow_multiple is False, first element will be used", UserWarning)
+        warnings.warn("Multiple selections are not allowed when allow_multiple is False, first element will be used", stacklevel=2)
         selected_indices = [selected_indices[0]]
     
     selected_objs = sorted(set(

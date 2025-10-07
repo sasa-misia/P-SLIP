@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
+from .coordinates import convert_grids_and_profile_to_prj, are_coords_geographic, get_xy_grids_from_profile
 from .manage_raster import get_2d_mask_from_1d_idx
 from psliptools.utilities.pandas_utils import get_list_of_values_from_dataframe
 
@@ -176,5 +177,175 @@ def generate_grids_from_indices(
             mask = get_2d_mask_from_1d_idx(inds_1d, rasters[i].shape)
             rasters[i][mask] = value
     return rasters
+
+# %% Method to create slope and aspect rasters from dtm, longitude, and latitude grids
+def generate_slope_and_aspect_rasters(
+        dtm: np.ndarray,
+        lon: np.ndarray,
+        lat: np.ndarray,
+        profile: dict=None,
+        out_type: str='float32',
+        no_data: float | int | str=0
+    ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Generate slope and aspect rasters from DTM, longitude, and latitude grids.
+    
+    Args:
+        dtm (np.ndarray): Array of DTM values (it must be in meters and 2D).
+        lon (np.ndarray): Array of longitude values (it must be in degrees and 2D).
+        lat (np.ndarray): Array of latitude values (it must be in degrees and 2D).
+        profile (dict, optional): Raster profile for coordinate conversion (default: None).
+        out_type (str, optional): The data type of the output rasters (default: 'float32').
+        no_data (float | int | str, optional): The no_data value of the input and output rasters (default: 0).
+    
+    Returns:
+        tuple(np.ndarray, np.ndarray): Tuple containing the slope and aspect rasters.
+    """
+    # TODO: Check and validate the entire function (optional: find a faster alternative)
+
+    if not isinstance(dtm, np.ndarray) or not isinstance(lon, np.ndarray) or not isinstance(lat, np.ndarray):
+        raise ValueError("DTM, longitude, and latitude must be numpy arrays.")
+    
+    # Validate input arrays
+    if dtm.ndim != 2:
+        raise ValueError("DTM must be a 2D array")
+    if lon.ndim != 2 or lat.ndim != 2:
+        raise ValueError("Longitude and latitude must be 2D arrays")
+    if dtm.shape != lon.shape or dtm.shape != lat.shape:
+        raise ValueError("DTM, longitude, and latitude arrays must have the same shape")
+    
+    if profile:
+        if lon or lat:
+            raise ValueError('If profile is provided, lon and lat must not be provided')
+        lon, lat = get_xy_grids_from_profile(profile)
+    
+    # Check if coordinates are geographic and convert to projected CRS if needed
+    if are_coords_geographic(lon, lat):
+        # Convert to projected coordinates (meters)
+        x_proj, y_proj, _ = convert_grids_and_profile_to_prj(lon, lat)
+    else:
+        # Already in projected coordinates
+        x_proj, y_proj = lon, lat
+    
+    # Calculate pixel sizes in x and y directions
+    dx = np.abs(np.mean(x_proj[:, 1:] - x_proj[:, :-1]))
+    dy = np.abs(np.mean(y_proj[1:, :] - y_proj[:-1, :]))
+    
+    # Calculate gradients using numpy gradient
+    dz_dx, dz_dy = np.gradient(dtm, dx, dy)
+    
+    # Calculate slope (in degrees)
+    slope_rad = np.arctan(np.sqrt(dz_dx**2 + dz_dy**2))
+    slope_deg = np.degrees(slope_rad)
+    
+    # Calculate aspect (in degrees from north, clockwise)
+    aspect_rad = np.arctan2(-dz_dy, dz_dx)
+    aspect_deg = np.degrees(aspect_rad)
+    
+    # Adjust aspect to be between 0-360 degrees
+    aspect_deg = (aspect_deg + 360) % 360
+    
+    # Handle no_data values
+    if no_data is not None:
+        dtm_mask = (dtm == no_data)
+        slope_deg[dtm_mask] = no_data
+        aspect_deg[dtm_mask] = no_data
+    
+    # Convert to specified output type
+    slope_deg = slope_deg.astype(out_type)
+    aspect_deg = aspect_deg.astype(out_type)
+    
+    return slope_deg, aspect_deg
+
+# %% Method to create curvature rasters from dtm
+def generate_curvature_rasters(
+        dtm: np.ndarray,
+        lon: np.ndarray,
+        lat: np.ndarray,
+        profile: dict=None,
+        out_type: str='float32',
+        no_data: float | int | str=0
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Generate profile, planform, and twisting curvature rasters from DTM, longitude, and latitude grids.
+    
+    Args:
+        dtm (np.ndarray): Array of DTM values (it must be in meters and 2D).
+        lon (np.ndarray): Array of longitude values (it must be in degrees and 2D).
+        lat (np.ndarray): Array of latitude values (it must be in degrees and 2D).
+        profile (dict, optional): Raster profile for coordinate conversion (default: None).
+        out_type (str, optional): The data type of the output rasters (default: 'float32').
+        no_data (float | int | str, optional): The no_data value of the input and output rasters (default: 0).
+    
+    Returns:
+        tuple(np.ndarray, np.ndarray, np.ndarray): Tuple containing profile, planform, and twisting curvature rasters.
+    """
+    # TODO: Check and validate the entire function (optional: find a faster alternative)
+
+    if not isinstance(dtm, np.ndarray) or not isinstance(lon, np.ndarray) or not isinstance(lat, np.ndarray):
+        raise ValueError("DTM, longitude, and latitude must be numpy arrays.")
+    
+    # Validate input arrays
+    if dtm.ndim != 2:
+        raise ValueError("DTM must be a 2D array")
+    if lon.ndim != 2 or lat.ndim != 2:
+        raise ValueError("Longitude and latitude must be 2D arrays")
+    if dtm.shape != lon.shape or dtm.shape != lat.shape:
+        raise ValueError("DTM, longitude, and latitude arrays must have the same shape")
+    
+    if profile:
+        if lon or lat:
+            raise ValueError('If profile is provided, lon and lat must not be provided')
+        lon, lat = get_xy_grids_from_profile(profile)
+    
+    # Check if coordinates are geographic and convert to projected CRS if needed
+    if are_coords_geographic(lon, lat):
+        # Convert to projected coordinates (meters)
+        x_proj, y_proj, _ = convert_grids_and_profile_to_prj(lon, lat)
+    else:
+        # Already in projected coordinates
+        x_proj, y_proj = lon, lat
+    
+    # Calculate pixel sizes in x and y directions
+    dx = np.abs(np.mean(x_proj[:, 1:] - x_proj[:, :-1]))
+    dy = np.abs(np.mean(y_proj[1:, :] - y_proj[:-1, :]))
+    
+    # Calculate first derivatives (slope components)
+    dz_dx, dz_dy = np.gradient(dtm, dx, dy)
+    
+    # Calculate second derivatives
+    dz_dx2 = np.gradient(dz_dx, dx, axis=1)
+    dz_dy2 = np.gradient(dz_dy, dy, axis=0)
+    dz_dxdy = np.gradient(dz_dx, dy, axis=0)
+    
+    # Calculate slope magnitude
+    slope_magnitude = np.sqrt(dz_dx**2 + dz_dy**2)
+    
+    # Calculate curvature components
+    # Profile curvature (curvature in the direction of maximum slope)
+    profile_curvature = (dz_dx2 * dz_dx**2 + 2 * dz_dxdy * dz_dx * dz_dy + dz_dy2 * dz_dy**2) / \
+                        (slope_magnitude**2 + 1e-10)  # Add small value to avoid division by zero
+    
+    # Planform curvature (curvature perpendicular to the direction of maximum slope)
+    planform_curvature = (dz_dx2 * dz_dy**2 - 2 * dz_dxdy * dz_dx * dz_dy + dz_dy2 * dz_dx**2) / \
+                         (slope_magnitude**2 + 1e-10)  # Add small value to avoid division by zero
+    
+    # Twisting curvature (torsional curvature)
+    twisting_curvature = (dz_dx2 * dz_dx * dz_dy + dz_dxdy * (dz_dx**2 - dz_dy**2) - dz_dy2 * dz_dx * dz_dy) / \
+                        (slope_magnitude**2 + 1e-10)  # Add small value to avoid division by zero
+    
+    # Handle no_data values
+    if no_data is not None:
+        dtm_mask = (dtm == no_data)
+        profile_curvature[dtm_mask] = no_data
+        planform_curvature[dtm_mask] = no_data
+        twisting_curvature[dtm_mask] = no_data
+    
+    # Convert to specified output type
+    profile_curvature = profile_curvature.astype(out_type)
+    planform_curvature = planform_curvature.astype(out_type)
+    twisting_curvature = twisting_curvature.astype(out_type)
+    
+    return profile_curvature, planform_curvature, twisting_curvature
 
 # %%

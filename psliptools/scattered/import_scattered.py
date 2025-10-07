@@ -860,7 +860,7 @@ def load_time_sensitive_data_from_csv(
     return data_df
 
 # %% === Method to load gauges table in csv format
-def load_time_sensitive_gauges_from_csv(
+def load_time_sensitive_stations_from_csv(
         file_path: str,
         station_column: str | int=None,
         longitude_column: str | int=None,
@@ -956,34 +956,34 @@ def load_time_sensitive_gauges_from_csv(
     return station_df
 
 # %% === Method to merge and align time-sensitive data and gauges table
-def merge_time_sensitive_data_and_gauges(
+def merge_time_sensitive_data_and_stations(
         data_dict: dict[str, pd.DataFrame],
-        gauges_table: pd.DataFrame
+        stations_table: pd.DataFrame
     ) -> dict[str, pd.DataFrame]:
     """
     Merge and align time-sensitive data with gauges table.
 
     Args:
         data_dict (dict[str, pd.DataFrame]): A dictionary mapping gauge names to DataFrames data.
-        gauges_table (pd.DataFrame): A DataFrame containing the gauges table.
+        stations_table (pd.DataFrame): A DataFrame containing the gauges table.
 
     Returns:
         dict[str, pd.DataFrame]: A dictionary containing structured, merged, and aligned data.
     """
     if not(isinstance(data_dict, dict)):
         raise TypeError("data_dict must be a dictionary.")
-    if not(isinstance(gauges_table, pd.DataFrame)):
-        raise TypeError("gauges_table must be a pandas DataFrame.")
+    if not(isinstance(stations_table, pd.DataFrame)):
+        raise TypeError("stations_table must be a pandas DataFrame.")
     
     data_dict = data_dict.copy()
-    gauges_table = gauges_table.copy()
+    stations_table = stations_table.copy()
 
-    gauges_table = gauges_table[gauges_table["station"].isin(list(data_dict.keys()))]
+    stations_table = stations_table[stations_table["station"].isin(list(data_dict.keys()))]
 
-    station_names = gauges_table["station"].to_list()
+    station_names = stations_table["station"].to_list()
     for data_label in data_dict:
         if data_label not in station_names:
-            raise ValueError(f"Data label [{data_label}] of input data_dict not found in the gauges_table.")
+            raise ValueError(f"Data label [{data_label}] of input data_dict not found in the stations_table.")
     
     start_dates, end_dates = [], []
     for data in data_dict.values():
@@ -1007,7 +1007,7 @@ def merge_time_sensitive_data_and_gauges(
                 numeric_columns_names.append(filt_col_name)
         data_dict[data_label] = filtered_data_df
     
-    time_sensitive_vars = {'gauges':gauges_table, 'dates': None}
+    time_sensitive_vars = {'stations':stations_table, 'dates': None}
     for col_name in numeric_columns_names:
         time_sensitive_vars[col_name] = None
     for sta in station_names:

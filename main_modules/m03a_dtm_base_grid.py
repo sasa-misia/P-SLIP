@@ -53,11 +53,15 @@ def import_dtm_files(
             filepath=dtm_path,
             set_dtype='float32', 
             convert_to_geo=False, 
-            poly_mask=poly_mask
+            poly_mask=poly_mask,
+            squeeze=True # To remove the dimension with length 1
         )
 
         if raster_data is None: # No pixels inside poly_load_mask_geo
             continue
+
+        if raster_data.ndim != 2:
+            raise ValueError(f"Raster data has {raster_data.ndim} dimensions, but expected 2.")
 
         _, curr_cust_id = env.add_input_file(file_path=dtm_path, file_type=file_type, file_subtype=f'dtm{idx+1}')
         if resample_size:
@@ -81,7 +85,7 @@ def import_dtm_files(
             raster_data = mask_raster_with_1d_idx(raster_data, mask_idx_1d, profile=raster_profile)
 
         dtm_data.append({
-            'path': dtm_path,
+            'file_id': curr_cust_id,
             'raster_data': raster_data,
             'raster_profile': raster_profile,
         })

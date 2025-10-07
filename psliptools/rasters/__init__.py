@@ -49,7 +49,9 @@ from .import_raster import (
 )
 
 from .generate_raster import (
-    generate_grids_from_indices
+    generate_grids_from_indices,
+    generate_slope_and_aspect_rasters,
+    generate_curvature_rasters
 )
 
 __all__ = [
@@ -82,5 +84,7 @@ __all__ = [
     "plot_elevation_2d",
     "plot_elevation_isometric",
     "plot_elevation_3d",
-    "generate_grids_from_indices"
+    "generate_grids_from_indices",
+    "generate_slope_and_aspect_rasters",
+    "generate_curvature_rasters"
 ]

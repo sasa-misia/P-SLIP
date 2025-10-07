@@ -9,14 +9,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    AnalysisEnvironment,
     KNOWN_DYNAMIC_INPUT_TYPES,
     DYNAMIC_SUBFOLDERS
 )
-
-# Importing necessary modules from psliptools
-# from psliptools.rasters import (
-# )
 
 from psliptools.utilities import (
     select_dir_prompt,
@@ -29,8 +24,8 @@ from psliptools.utilities import (
 
 from psliptools.scattered import (
     load_time_sensitive_data_from_csv,
-    load_time_sensitive_gauges_from_csv,
-    merge_time_sensitive_data_and_gauges
+    load_time_sensitive_stations_from_csv,
+    merge_time_sensitive_data_and_stations
 )
 
 # Importing necessary modules from main_modules
@@ -40,6 +35,86 @@ logger.info("=== Importing time-sensitive data ===")
 
 # %% === Methods to import time sensitive data as rainfall and temperature
 SOURCE_MODES = ['station', 'satellite']
+AGGREGATION_METHODS = ['mean', 'sum', 'min', 'max']
+
+def get_fill_and_aggregation_methods(
+        source_type: str,
+        aggregation_method: list[str] | None
+    ) -> tuple[str, list[str]]:
+    """Utility function to get the fill method and aggregation method based on the source type."""
+    if source_type == 'rain':
+        fill_method = 'zero'
+        if aggregation_method is None:
+            aggregation_method = ['sum']
+    elif source_type == 'temperature':
+        fill_method = 'linear'
+        if aggregation_method is None:
+            aggregation_method = ['mean']
+    else:
+        fill_method = None
+        if aggregation_method is None:
+            aggregation_method = ['sum']
+    return fill_method, aggregation_method
+
+def rename_csv_data_headers(
+        csv_paths: list[str],
+        gui_mode: bool
+    ) -> None:
+    """Utility function to rename the data files columns."""
+    for csv_pth in csv_paths:
+        old_datetime_and_numeric_col_names = get_csv_column_names(csv_path=csv_pth, data_type=['datetime', 'number'])
+        if gui_mode:
+            raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        else:
+            print("\n=== Renaming of data files columns ===")
+            new_datetime_and_numeric_col_names = label_list_elements_prompt(
+                obj_list=old_datetime_and_numeric_col_names,
+                usr_prompt=f"Enter the new labels for the datetim and numeric columns in {csv_pth} (comma separated, press enter for default, which is the same names): "
+            )
+        
+        rename_csv_header(
+            csv_path=csv_pth,
+            new_header=new_datetime_and_numeric_col_names,
+            data_type=['datetime', 'number']
+        )
+
+def associate_csv_files_with_gauges(
+        csv_paths: list[str],
+        station_names: dict[str, str],
+        gui_mode: bool
+    ) -> pd.DataFrame:
+    """Utility function to associate the csv files with the gauges."""
+    csv_associated_stations = []
+    for data_pth in csv_paths:
+        station_matches = [x for x in station_names if x in os.path.basename(data_pth).lower()]
+        if len(station_matches) != 1:
+            warnings.warn(f"No single data-station association found for {data_pth}", stacklevel=2)
+            csv_associated_stations.append(None)
+        else:
+            new_association = station_names[station_matches[0]]
+            if new_association in csv_associated_stations:
+                warnings.warn(f"Duplicate data-station association found for {data_pth}", stacklevel=2)
+                csv_associated_stations.append(None)
+            else:
+                csv_associated_stations.append(new_association)
+    
+    if any(x is None for x in csv_associated_stations):
+        if gui_mode:
+            raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        else:
+            print("\n=== Association of data files with gauges ===")
+            csv_associated_stations = label_list_elements_prompt(
+                obj_list=[os.path.basename(x) for x in csv_paths],
+                usr_prompt=f"Enter the names of the stations (possible values: {'; '.join(station_names.values())}) for each file (comma separated, same order): "
+            )
+
+        if len(set(csv_associated_stations)) != len(csv_associated_stations):
+            raise ValueError("Duplicate data-station association found. Please check your association names.")
+        
+        for sta in csv_associated_stations:
+            if sta not in station_names.values():
+                raise ValueError(f"Invalid data-station association found. Must be one of: {'; '.join(station_names.values())}")
+    return csv_associated_stations
 
 # %% === Main function
 def main(
@@ -60,9 +135,9 @@ def main(
     if not source_type in KNOWN_DYNAMIC_INPUT_TYPES:
         raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES))
     if not source_subtype in DYNAMIC_SUBFOLDERS:
-        raise ValueError("Invalid source subtype. Must be one of: " + ", ".join(DYNAMIC_SUBFOLDERS[source_type]))
-    if aggregation_method is not None and not aggregation_method in ['mean', 'sum', 'min', 'max']:
-        raise ValueError("Invalid aggregation method. Must be one of: 'mean', 'sum', 'min', 'max'")
+        raise ValueError("Invalid source subtype. Must be one of: " + ", ".join(DYNAMIC_SUBFOLDERS))
+    if aggregation_method is not None and not aggregation_method in AGGREGATION_METHODS:
+        raise ValueError("Invalid aggregation method. Must be one of:" + ", ".join(AGGREGATION_METHODS))
     if isinstance(last_date, str):
         last_date = pd.to_datetime(last_date)
     if last_date is not None and not isinstance(last_date, pd.Timestamp):
@@ -105,75 +180,27 @@ def main(
                 src_ext=allowed_extensions
             )
 
-    if source_type == 'rain':
-        fill_method = 'zero'
-        if aggregation_method is None:
-            aggregation_method = ['sum']
-    elif source_type == 'temperature':
-        fill_method = 'linear'
-        if aggregation_method is None:
-            aggregation_method = ['mean']
-    else:
-        fill_method = None
-        if aggregation_method is None:
-            aggregation_method = ['sum']
+    fill_method, aggregation_method = get_fill_and_aggregation_methods(source_type, aggregation_method)
     
     if source_mode == 'station':
         if gauge_info_path in data_paths:
             data_paths.remove(gauge_info_path)
         
         if rename_csv_data_columns:
-            for data_pth in data_paths:
-                old_datetime_and_numeric_col_names = get_csv_column_names(csv_path=data_pth, data_type=['datetime', 'number'])
-                if gui_mode:
-                    raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
-                else:
-                    print("\n=== Renaming of data files columns ===")
-                    new_datetime_and_numeric_col_names = label_list_elements_prompt(
-                        obj_list=old_datetime_and_numeric_col_names,
-                        usr_prompt=f"Enter the new labels for the datetim and numeric columns in {data_pth} (comma separated, press enter for default, which is the same names): "
-                    )
-                
-                rename_csv_header(
-                    csv_path=data_pth,
-                    new_header=new_datetime_and_numeric_col_names,
-                    data_type=['datetime', 'number']
-                )
+            logger.info("Renaming csv data files columns...")
+            rename_csv_data_headers(csv_paths=data_paths, gui_mode=gui_mode)
         
-        station_df = load_time_sensitive_gauges_from_csv(file_path=gauge_info_path)
+        logger.info("Loading gauge info file...")
+        station_df = load_time_sensitive_stations_from_csv(file_path=gauge_info_path)
         station_names ={x.lower(): x for x in station_df['station'].to_list()}
 
-        _, cust_id = env.add_input_file(file_path=gauge_info_path, file_type=source_type, file_subtype=f"gauges")
+        cust_ids = []
+        _, cust_id = env.add_input_file(file_path=gauge_info_path, file_type=source_type, file_subtype=f"sta")
+        cust_ids.append(cust_id)
 
-        data_stations = []
-        for data_pth in data_paths:
-            station_matches = [x for x in station_names if x in os.path.basename(data_pth).lower()]
-            if len(station_matches) != 1:
-                warnings.warn(f"No single data-station association found for {data_pth}", stacklevel=2)
-                data_stations.append(None)
-            else:
-                new_association = station_names[station_matches[0]]
-                if new_association in data_stations:
-                    warnings.warn(f"Duplicate data-station association found for {data_pth}", stacklevel=2)
-                    data_stations.append(None)
-                else:
-                    data_stations.append(new_association)
-        
-        if any(x is None for x in data_stations):
-            data_stations = label_list_elements_prompt(
-                obj_list=[os.path.basename(x) for x in data_paths],
-                usr_prompt=f"Enter the names of the stations (possible values: {'; '.join(station_names.values())}) for each file (comma separated, same order): "
-            )
-
-            if len(set(data_stations)) != len(data_stations):
-                raise ValueError("Duplicate data-station association found. Please check your association names.")
-            
-            for sta in data_stations:
-                if sta not in station_names.values():
-                    raise ValueError(f"Invalid data-station association found. Must be one of: {'; '.join(station_names.values())}")
+        data_stations = associate_csv_files_with_gauges(csv_paths=data_paths, station_names=station_names, gui_mode=gui_mode)
 
         data_dict = {}
-        cust_ids = []
         for idx, (data_pth, data_sta) in enumerate(zip(data_paths, data_stations)):
             data_dict[data_sta] = load_time_sensitive_data_from_csv(
                 file_path=data_pth,
@@ -187,11 +214,13 @@ def main(
             )
 
             _, cust_id = env.add_input_file(file_path=data_pth, file_type=source_type, file_subtype=f"rec{idx+1}")
+            station_df.loc[station_df['station'] == data_sta, 'file_id'] = cust_id
             cust_ids.append(cust_id)
 
-        time_sensitive_vars = merge_time_sensitive_data_and_gauges(
+        logger.info("Merging time-sensitive data files with gauges info...")
+        time_sensitive_vars = merge_time_sensitive_data_and_stations(
             data_dict=data_dict,
-            gauges_table=station_df
+            stations_table=station_df
         )
 
     else:
@@ -199,6 +228,7 @@ def main(
     
     common_start_date = time_sensitive_vars['dates']['start_date'].iloc[0].strftime("%Y-%b-%d %H:%M:%S")
     common_end_date = time_sensitive_vars['dates']['end_date'].iloc[-1].strftime("%Y-%b-%d %H:%M:%S")
+
     env.config['inputs'][source_type][idx_config]['settings'] = {
         'source_mode': source_mode,
         'source_subtype': source_subtype,
@@ -208,6 +238,7 @@ def main(
         'common_end_date': common_end_date
     }
     env.config['inputs'][source_type][idx_config]['custom_id'] = cust_ids
+
     env.collect_input_files(file_type=[source_type], multi_extension=True)
 
     env.save_variable(variable_to_save=time_sensitive_vars, variable_filename=f"{rel_filename}_vars.pkl")
@@ -240,3 +271,5 @@ if __name__ == "__main__":
         last_date=args.last_date,
         round_datetimes_to_nearest_minute=args.round_datetimes_to_nearest_minute
     )
+
+# %%

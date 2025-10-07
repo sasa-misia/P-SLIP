@@ -95,7 +95,7 @@ def resample_raster(
     if new_size[0] < old_size[0] or new_size[1] < old_size[1]:
         warnings.warn(
             f'new_size ({new_size[0]} x {new_size[1]}) is smaller than the old size of the raster '
-            f'({old_size[0]} x {old_size[1]}). The resampled raster will be more detailed!'
+            f'({old_size[0]} x {old_size[1]}). The resampled raster will be more detailed!', stacklevel=2
         )
     
     out_pixel_res_width = round(abs(bbox_utm[2] - bbox_utm[0]) / new_size[0])

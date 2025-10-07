@@ -213,7 +213,7 @@ def intersect_polygons(
         intersected_poly = [p for p in intersected_poly if p]
 
     if not intersected_poly:
-        warnings.warn("The intersection of the polygons with the mask is empty.")
+        warnings.warn("The intersection of the polygons with the mask is empty.", stacklevel=2)
 
     return intersected_poly
 
@@ -310,7 +310,7 @@ def create_polygon_from_coord_lists(
         x_exterior, y_exterior = _remove_consecutive_duplicates(x_exterior, y_exterior, keep_last_point=False)
     
     if len(x_exterior) < 3: # Always after removing duplicates
-        warnings.warn("Polygon has less than 3 points, it will be an empty Polygon.", UserWarning)
+        warnings.warn("Polygon has less than 3 points, it will be an empty Polygon.", stacklevel=2)
         return geom.Polygon()
     
     exterior = [(x, y) for x, y in zip(x_exterior, y_exterior)]
@@ -326,7 +326,7 @@ def create_polygon_from_coord_lists(
                 x_points, y_points = _remove_consecutive_duplicates(x_points, y_points, keep_last_point=False)
 
             if len(x_points) < 3: # Always after removing duplicates
-                warnings.warn(f"Polygon with index {idx} has less than 3 points, ignoring.", UserWarning)
+                warnings.warn(f"Polygon with index {idx} has less than 3 points, ignoring.", stacklevel=2)
                 continue
             
             interiors.append([(x, y) for x, y in zip(x_points, y_points)])
@@ -838,7 +838,7 @@ def resolve_polygons_intersections(
     
     polygons_alignment = check_and_report_polygons_alignment(processed_polygons, tolerance=tolerance)
     if not polygons_alignment['aligned']:
-        warnings.warn("After removing intersections, polygons are not aligned. Trying to remove a buffer to align polygons.")
+        warnings.warn("After removing intersections, polygons are not aligned. Trying to remove a buffer to align polygons.", stacklevel=2)
         processed_polygons = align_polygons(processed_polygons, tolerance=tolerance, method='buffer')
         polygons_alignment = check_and_report_polygons_alignment(processed_polygons, tolerance=tolerance)
         

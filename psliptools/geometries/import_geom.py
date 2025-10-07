@@ -26,7 +26,7 @@ def _check_and_fix_gpd_geometries(shape_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFra
     n_invalid = invalid_mask.sum()
     if n_invalid > 0:
         out_shape_gdf.loc[invalid_mask, 'geometry'] = out_shape_gdf.loc[invalid_mask, 'geometry'].buffer(0)
-        warnings.warn(f"{n_invalid} invalid geometries found and fixed using buffer(0).", UserWarning)
+        warnings.warn(f"{n_invalid} invalid geometries found and fixed using buffer(0).", stacklevel=2)
     return out_shape_gdf
 
 # %% === Function to validate geometry in a GeoDataFrame row
@@ -45,20 +45,20 @@ def _valid_geom_row(row: pd.Series, points_lim: int = 80000) -> bool:
     row_geom = row.geometry
     idx = row.name
     if row_geom.is_empty:
-        warnings.warn(f"Row {idx} geometry is empty.", UserWarning)
+        warnings.warn(f"Row {idx} geometry is empty.", stacklevel=2)
         return False
     elif isinstance(row_geom, geom.MultiPolygon):
         points_tot = sum(len(list(poly.exterior.coords)) for poly in row_geom.geoms)
         if points_tot > points_lim:
-            warnings.warn(f"Row {idx} Polygon exceeds points limit ({points_tot} > {points_lim})", UserWarning)
+            warnings.warn(f"Row {idx} Polygon exceeds points limit ({points_tot} > {points_lim})", stacklevel=2)
             return False
     elif isinstance(row_geom, geom.Polygon):
         points_tot = len(list(row_geom.exterior.coords))
         if points_tot > points_lim:
-            warnings.warn(f"Row {idx} Polygon exceeds points limit ({points_tot} > {points_lim})", UserWarning)
+            warnings.warn(f"Row {idx} Polygon exceeds points limit ({points_tot} > {points_lim})", stacklevel=2)
             return False
     else:
-        warnings.warn(f"Row {idx} geometry is not a valid Polygon or MultiPolygon.", UserWarning)
+        warnings.warn(f"Row {idx} geometry is not a valid Polygon or MultiPolygon.", stacklevel=2)
         return False
     return True
 
@@ -259,7 +259,7 @@ def load_shapefile_polygons(
                 masked_polys.append(poly_intersected[0])
                 masked_names.append(name)
             else:
-                warnings.warn(f"No intersection with poly_bound for class {name}.")
+                warnings.warn(f"No intersection with poly_bound for class {name}.", stacklevel=2)
 
         sel_polys = masked_polys
         sel_names = masked_names

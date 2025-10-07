@@ -13,7 +13,7 @@ def get_rectangle_parameters(n_rectangles: int) -> list:
     """
     if isinstance(n_rectangles, float):
         n_rectangles = int(n_rectangles)
-        warnings.warn("Number of rectangles was provided as a float. Converted to integer.")
+        warnings.warn("Number of rectangles was provided as a float. Converted to integer.", stacklevel=2)
 
     if not isinstance(n_rectangles, int):
         raise TypeError("Number of rectangles must be an integer.")

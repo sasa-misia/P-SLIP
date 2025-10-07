@@ -56,7 +56,7 @@ def plot_polygons(
     
     for i, polygon in enumerate(polygons):
         if polygon is None:
-            warnings.warn(f"Polygon at index {i} is None, skipping...")
+            warnings.warn(f"Polygon at index {i} is None, skipping...", stacklevel=2)
             continue
             
         if colors:
@@ -79,7 +79,7 @@ def plot_polygons(
                 x_int, y_int = interior.xy
                 axs.fill(x_int, y_int, color='white', alpha=1.0)
         else:
-            warnings.warn(f"Polygon at index {i} is not a valid Shapely Polygon or MultiPolygon, skipping...")
+            warnings.warn(f"Polygon at index {i} is not a valid Shapely Polygon or MultiPolygon, skipping...", stacklevel=2)
     
     if show:
         plt.show()

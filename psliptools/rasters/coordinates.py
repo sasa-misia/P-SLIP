@@ -33,7 +33,7 @@ def _get_crs(
         f.close()
         crs_obj = rasterio.crs.CRS.from_string(raster_crs_file_content)
     else:
-        warnings.warn(f"CRS not found for raster file: {raster_path}! The set CRS (EPSG {set_crs}) will be used.")
+        warnings.warn(f"CRS not found for raster file: {raster_path}! The set CRS (EPSG {set_crs}) will be used.", stacklevel=2)
         if set_crs is None:
             raise ValueError(f"Unable to read crs of raster file: {raster_path}. Please specify a code as the set_crs argument.")
         crs_obj = rasterio.crs.CRS.from_epsg(set_crs)
@@ -192,7 +192,7 @@ def get_projected_epsg_code_from_bbox(
         raise ValueError(f"Unable to find a suitable UTM CRS for the bounding box: {geo_bbox}")
     
     if len(utm_crs_list) > 1:
-        warnings.warn(f"Multiple UTM CRS found for the bounding box: {geo_bbox}. Using the first one: {utm_crs_list[0].code}")
+        warnings.warn(f"Multiple UTM CRS found for the bounding box: {geo_bbox}. Using the first one: {utm_crs_list[0].code}", stacklevel=2)
 
     utm_epsg_code = utm_crs_list[0].code
     if isinstance(utm_epsg_code, str):

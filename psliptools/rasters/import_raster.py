@@ -14,7 +14,8 @@ def load_georaster(
         set_nodata: int=None, 
         set_dtype: str=None,
         convert_to_geo: bool=False,
-        poly_mask: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None
+        poly_mask: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None,
+        squeeze: bool=False
     ) -> tuple[np.ndarray, dict, np.ndarray, np.ndarray]:
     """
     Load a GeoTIFF raster as a rasterio.DatasetReader object.
@@ -41,12 +42,15 @@ def load_georaster(
             raster_profile=raster_profile,
         )
         if not is_within_polygon:
-            warnings.warn(f"The raster {filepath} is not within the provided polygon. It will not be loaded and processed.")
+            warnings.warn(f"The raster {filepath} is not within the provided polygon. It will not be loaded and processed.", stacklevel=2)
             return None, None, None, None, None
     
     with rasterio.open(filepath, 'r') as src:
         raster_data = src.read()
     src.close()
+
+    if squeeze:
+        raster_data = raster_data.squeeze()
 
     if convert_to_geo:
         ref_grid_x, ref_grid_y, raster_profile = convert_grids_and_profile_to_geo(
@@ -61,9 +65,9 @@ def load_georaster(
         else:
             if raster_data.min() < 0:
                 raster_profile['nodata'] = raster_data.min()
-                warnings.warn(f"Unable to read nodata value of raster file: {filepath}. The set nodata value ({raster_profile['nodata']}) will be used.")
+                warnings.warn(f"Unable to read nodata value of raster file: {filepath}. The set nodata value ({raster_profile['nodata']}) will be used.", stacklevel=2)
             else:
-                warnings.warn(f"Unable to read nodata value of raster file: {filepath}. Consider to specify a value as the set_nodata argument.")
+                warnings.warn(f"Unable to read nodata value of raster file: {filepath}. Consider to specify a value as the set_nodata argument.", stacklevel=2)
 
     if raster_profile.get('dtype', None) is None:
         if set_dtype is not None and isinstance(set_dtype, str):
@@ -73,7 +77,7 @@ def load_georaster(
             raster_profile['dtype'] = set_dtype
             raster_data = raster_data.astype(set_dtype)
         else:
-            warnings.warn(f"Unable to read dtype value of raster file: {filepath}. Consider to specify a value as the set_dtype argument.")
+            warnings.warn(f"Unable to read dtype value of raster file: {filepath}. Consider to specify a value as the set_dtype argument.", stacklevel=2)
     return raster_data, raster_profile, ref_grid_x, ref_grid_y, mask_matrix
 
 # %% ===
