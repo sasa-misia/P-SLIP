@@ -623,10 +623,10 @@ def get_closest_pixel_idx(
     Get the 1d index of the pixel that is closest to a given coordinate.
 
     Args:
-        x (float | np.ndarray): The longitude(s) of the coordinate(s).
-        y (float | np.ndarray): The latitude(s) of the coordinate(s).
-        x_grid (np.ndarray, optional): The x grid of the raster. If not provided, it will be obtained from the raster profile.
-        y_grid (np.ndarray, optional): The y grid of the raster. If not provided, it will be obtained from the raster profile.
+        x (float | np.ndarray): The longitude(s) or projected x(s) of the coordinate(s).
+        y (float | np.ndarray): The latitude(s) or projected y(s) of the coordinate(s).
+        x_grid (np.ndarray, optional): The longitude or projected x grid of the raster. If not provided, it will be obtained from the raster profile.
+        y_grid (np.ndarray, optional): The latitude or projected y grid of the raster. If not provided, it will be obtained from the raster profile.
         raster_profile (dict, optional): The raster profile dictionary. If not provided, x_grid and y_grid must be provided.
         replace_out_idx (bool, optional): Whether to replace the index with a fill value if it is outside of the raster (default is True).
         fill_value (float, optional): The value to fill instead of the index if it is outside of the raster (default is np.nan).
@@ -645,8 +645,11 @@ def get_closest_pixel_idx(
 
     x, y = _check_and_convert_coords(x, y)
     
-    if not are_coords_geographic(x, y):
-        raise ValueError("The provided coordinate is not in geographic coordinates. Please convert it to geographic coordinates before using it.")
+    if not (
+        (are_coords_geographic(x, y) and are_coords_geographic(ref_grid_x, ref_grid_y)) or \
+        (not are_coords_geographic(x, y) and not are_coords_geographic(ref_grid_x, ref_grid_y))
+        ):
+        raise ValueError("The provided grids are not in the same coordinate system. Please convert them to the same coordinate system before using them.")
     
     if x.ndim > 1 or y.ndim > 1:
         raise ValueError('x and y must be 1d arrays!')

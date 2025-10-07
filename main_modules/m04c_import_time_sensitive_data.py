@@ -260,7 +260,7 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    main(
+    time_sensitive_vars = main(
         gui_mode=args.gui_mode, 
         base_dir=args.base_dir,
         source_mode=args.source_mode,

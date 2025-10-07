@@ -31,17 +31,17 @@ def get_angles_and_curvatures(
     curvatures_dict = []
     for (_, abg_row), (_, dtm_row) in zip(abg_df.iterrows(), dtm_df.iterrows()):
         curr_slope, curr_aspect = generate_slope_and_aspect_rasters(
-            dtm=dtm_row['raster_data'], 
-            lon=abg_row['raster_lon'], 
-            lat=abg_row['raster_lat'],
+            dtm=dtm_row['elevation'], 
+            lon=abg_row['longitude'], 
+            lat=abg_row['latitude'],
             out_type='float32',
             no_data=dtm_row['raster_profile']['nodata']
         )
 
         curr_prof, curr_plan, curr_twist = generate_curvature_rasters(
-            dtm=dtm_row['raster_data'], 
-            lon=abg_row['raster_lon'], 
-            lat=abg_row['raster_lat'],
+            dtm=dtm_row['elevation'], 
+            lon=abg_row['longitude'], 
+            lat=abg_row['latitude'],
             out_type='float32',
             no_data=dtm_row['raster_profile']['nodata']
         )

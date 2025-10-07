@@ -86,13 +86,13 @@ def import_dtm_files(
 
         dtm_data.append({
             'file_id': curr_cust_id,
-            'raster_data': raster_data,
-            'raster_profile': raster_profile,
+            'elevation': raster_data,
+            'profile': raster_profile,
         })
 
         abg_data.append({
-            'raster_lon': raster_lon,
-            'raster_lat': raster_lat,
+            'longitude': raster_lon,
+            'latitude': raster_lat,
             'mask_idx_1d': mask_idx_1d
         })
 
@@ -153,7 +153,7 @@ def main(
 
     # Check-plot
     if check_plot:
-        plot_elevation_3d(dtm_df['raster_data'], abg_df['raster_lon'], abg_df['raster_lat'], mask_idx_1d=abg_df['mask_idx_1d'], projected=True)
+        plot_elevation_3d(dtm_df['elevation'], abg_df['longitude'], abg_df['latitude'], mask_idx_1d=abg_df['mask_idx_1d'], projected=True)
     
     return dtm_abg_vars
 

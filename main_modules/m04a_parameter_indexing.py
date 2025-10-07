@@ -141,8 +141,8 @@ def align_and_index_associated_df(
         abg_idx_1d.append([np.array([], dtype=np.uint32) for _ in range(len(abg_df))])
         curr_poly = row_poly['geometry']
         for c, (_, row_grid) in enumerate(abg_df.iterrows()):
-            lon_grid = row_grid['raster_lon']
-            lat_grid = row_grid['raster_lat']
+            lon_grid = row_grid['longitude']
+            lat_grid = row_grid['latitude']
             
             is_in_poly, curr_mask = raster_within_polygon(curr_poly, x_grid=lon_grid, y_grid=lat_grid)
             if is_in_poly:
