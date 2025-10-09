@@ -228,8 +228,8 @@ def _parse_time_sensitive_dataframe(
     datetime_df = data_df.select_dtypes(include=['datetime64[ns]'])
     numeric_df = data_df.select_dtypes(include=['float64', 'int64'])
 
-    if len(datetime_df.columns) != 2:
-        raise ValueError("Expected two datetime columns in the dataframe (start and end date)")
+    if len(datetime_df.columns) != 1 and len(datetime_df.columns) != 2:
+        raise ValueError("Expected one or two datetime columns in the dataframe (just start, or end, or start + end dates)")
 
     if len(numeric_df.columns) == 0:
         raise ValueError("No numeric columns found in the dataframe")
@@ -398,19 +398,6 @@ def _advanced_column_detection(
     """
     name_lower = series.name.lower()
     sample_data = series.to_list()
-    results = {
-        'station': 0.0,
-        'latitude': 0.0,
-        'longitude': 0.0,
-        'altitude': 0.0,
-        'start_date': 0.0,
-        'end_date': 0.0,
-        'cumulative_rain': 0.0,
-        'peak_rain': 0.0,
-        'average_temperature': 0.0,
-        'maximum_temperature': 0.0,
-        'minimum_temperature': 0.0
-    }
     
     # Enhanced pattern matching with expected data types
     patterns = {
@@ -446,6 +433,16 @@ def _advanced_column_detection(
             'expected_type': 'numeric',
             'range': (0, 1000)  # Reasonable rain values
         },
+        'min_cumulative_rain': {
+            'patterns': ['min', 'mín', 'niedrigst', 'cum', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia'],
+            'expected_type': 'numeric',
+            'range': (0, 1000)  # Reasonable rain values
+        },
+        'max_cumulative_rain': {
+            'patterns': ['max', 'mín', 'niedrigst', 'mas', 'máx', 'höchst', 'cum', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia'],
+            'expected_type': 'numeric',
+            'range': (0, 1000)  # Reasonable rain values
+        },
         'peak_rain': {
             'patterns': ['pk', 'peak', 'max', 'mas', 'máx', 'höchst', 'picco', 'rain', 'pioggia', 'regen', 'lluvia'],
             'expected_type': 'numeric',
@@ -467,6 +464,8 @@ def _advanced_column_detection(
             'range': (-50, 50)  # Reasonable temperature range
         }
     }
+
+    results = {x: 0.0 for x in patterns.keys()}
     
     LOAD_BUFFER_SIZE = 50
     BASE_PATTERN_MATCH_SCORE = 0.3
@@ -790,7 +789,7 @@ def load_time_sensitive_data_from_csv(
         aggregation_method (list[str], optional): A list of aggregation methods for aggregating data (default: ['sum']).
         last_date (pd.Timestamp, optional): The last date to include in the aggregation. 
             All dates greater than this will be filtered out. If None, use the last available date.
-        datetime_columns_names (list[str], optional): A list of datetime column names (default: None).
+        datetime_columns_names (list[str], optional): A list of datetime column names, which can be start_date or end_date, or both, in a list (default: None).
         numeric_columns_names (list[str], optional): A list of numeric column names (default: None).
 
     Returns:
@@ -813,12 +812,17 @@ def load_time_sensitive_data_from_csv(
 
     _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(raw_data_df, fill_method=fill_method, round_datetime=round_datetime)
 
-    if len(datetime_df.columns) != 2:
-        raise ValueError(f"Time-sensitive part of the csv has {len(datetime_df.columns)} columns. Expected 2 columns: start_date, end_date")
+    if len(datetime_df.columns) == 1:
+        warnings.warn("Datetime part of the csv has only one column. Assuming it is start_date or end_date depending on the column name.", stacklevel=2)
+
+    if len(datetime_df.columns) != 1 and len(datetime_df.columns) != 2:
+        raise ValueError(f"Datetime part of the csv has {len(datetime_df.columns)} columns. Expected 1 or 2 columns: start_date, end_date, or both")
 
     if datetime_columns_names:
         if len(datetime_columns_names) != len(datetime_df.columns):
-            raise ValueError(f"Time-sensitive part of the csv has {len(datetime_df.columns)} columns. Current datetime_columns_names list has {len(datetime_columns_names)} elements!")
+            raise ValueError(f"Datetime part of the csv has {len(datetime_df.columns)} columns. Current datetime_columns_names list has {len(datetime_columns_names)} elements!")
+        if not all([x in ['start_date', 'end_date'] for x in datetime_columns_names]):
+            raise ValueError("datetime_columns_names must be 'start_date' or 'end_date'!")
         datetime_df.columns = datetime_columns_names
     else:
         auto_datetime_col_detection, _ = _smart_columns_detection(datetime_df)
@@ -826,11 +830,19 @@ def load_time_sensitive_data_from_csv(
             raise ValueError("Unable to detect datetime columns. Please provide datetime_columns_names manually.")
         datetime_df.columns = [x for _, x in auto_datetime_col_detection.items()]
         warnings.warn(f"Auto detection: using columns {[x for x in auto_datetime_col_detection.keys()]} as {[x for x in auto_datetime_col_detection.values()]} columns.", stacklevel=2)
+    
+    if len(datetime_df.columns) == 1:
+        if datetime_df.columns[0] == 'start_date':
+            datetime_df['end_date'] = datetime_df['start_date'] + datetime_df['start_date'].diff().mean(skipna=True)
+        elif datetime_df.columns[0] == 'end_date':
+            datetime_df['start_date'] = datetime_df['end_date'] - datetime_df['end_date'].diff().mean(skipna=True)
+        else:
+            raise ValueError("Datetime part of the csv has only one column and it is not start_date or end_date! Please use two columns or assign names to datetime_columns_names manually.")
 
-    if datetime_df.iloc[0,1] < datetime_df.iloc[0,0]:
-        raise ValueError("Start date of the time-sensitive data is greater than end date.")
+    if datetime_df.iloc[0,'end_date'] < datetime_df.iloc[0,'start_date']:
+        raise ValueError("Start date is greater than end date.")
 
-    diff_end_start = datetime_df.iloc[:,1] - datetime_df.iloc[:,0]
+    diff_end_start = datetime_df.iloc[:,'end_date'] - datetime_df.iloc[:,'start_date']
     not_uniform_row_ids = diff_end_start[diff_end_start != diff_end_start.iloc[1]].index.to_list()
     if not_uniform_row_ids:
         raise ValueError("Duration of the time-sensitive data (end-start) is not uniform. Non-uniform rows: " + str(not_uniform_row_ids))

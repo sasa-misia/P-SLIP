@@ -32,11 +32,22 @@ logger.info("=== Module ===")
 
 # %% === Main function
 def main(
-        gui_mode: bool=False, 
-        base_dir: str=None
+        base_dir: str=None,
+        gui_mode: bool=False
     ) -> None:
     """Main function to ..."""
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
 
 # %% === Command line interface
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="**********Summary of the module**********")
+    parser.add_argument("--base_dir", type=str, help="Base directory for analysis")
+    parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode")
+    
+    args = parser.parse_args()
+    
+    time_sensitive_vars = main(
+        base_dir=args.base_dir,
+        gui_mode=args.gui_mode
+    )

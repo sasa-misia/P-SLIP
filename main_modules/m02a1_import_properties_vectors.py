@@ -32,8 +32,8 @@ logger.info("=== Import polygons with main properties ===")
 
 # %% === Main function
 def main(
-        gui_mode: bool=False, 
         base_dir: str=None,
+        gui_mode: bool=False,
         source_type: str="land_use", 
         source_subtype: str=None
     ) -> Dict[str, Any]:
@@ -106,15 +106,15 @@ def main(
 # %% === Command line interface
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Import shapefiles with main properties")
-    parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
     parser.add_argument("--base_dir", type=str, default=None, help="Base directory for the analysis")
+    parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
     parser.add_argument("--source_type", type=str, default="land_use", help="Source type (e.g., " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES) + ")")
     parser.add_argument("--source_subtype", type=str, default=None, help="Source subtype (optional)")
     args = parser.parse_args()
 
     prop_vars = main(
-        gui_mode=args.gui_mode, 
         base_dir=args.base_dir,
+        gui_mode=args.gui_mode,
         source_type=args.source_type, 
         source_subtype=args.source_subtype
     )

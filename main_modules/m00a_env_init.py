@@ -26,11 +26,11 @@ def setup_logger():
 # %% === Main function to initialize or load the analysis environment
 # This function is responsible for creating or loading the analysis environment based on user input.
 def get_or_create_analysis_environment(
+        base_dir=None,
+        gui_mode=False,
         case_name=None,
-        base_dir=None, 
         allow_creation=True,
-        env_filename=None,
-        gui_mode=False
+        env_filename=None
     ) -> AnalysisEnvironment:
     """
     Main function for initializing or loading the analysis environment.
@@ -131,18 +131,20 @@ def obtain_config_idx_and_rel_filename(
 # This block allows the script to be run from the command line with parameters.
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create or load the folder structure for the analysis.")
-    parser.add_argument("--case_name", type=str, default=None, help="Case study name")
     parser.add_argument("--base_dir", type=str, default=None, help="Base directory for the analysis")
+    parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode (not implemented yet)")
+    parser.add_argument("--case_name", type=str, default=None, help="Case study name")
     parser.add_argument("--allow_creation", action="store_true", help="Allow creation of the environment if it doesn't exist")
     parser.add_argument("--env_filename", type=str, default=None, help="Environment filename")
-    parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode (not implemented yet)")
     args = parser.parse_args()
 
     # Call the main function with the provided arguments
     curr_env = get_or_create_analysis_environment(
-        case_name=args.case_name, 
         base_dir=args.base_dir,
+        gui_mode=args.gui_mode,
+        case_name=args.case_name,
         allow_creation=args.allow_creation,
-        env_filename=args.env_filename,
-        gui_mode=args.gui_mode
+        env_filename=args.env_filename
     )
+
+# %%

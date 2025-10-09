@@ -66,8 +66,8 @@ def get_angles_and_curvatures(
 
 # %% === Main function
 def main(
-        gui_mode: bool=False, 
-        base_dir: str=None
+        base_dir: str=None,
+        gui_mode: bool=False
     ) -> None:
     """Main function to create morphological grids"""
     # Get the analysis environment

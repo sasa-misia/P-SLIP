@@ -31,7 +31,7 @@ from psliptools.scattered import (
 # Importing necessary modules from main_modules
 from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename, setup_logger
 logger = setup_logger()
-logger.info("=== Importing time-sensitive data ===")
+logger.info("=== Importing time-sensitive data ===") # This script must be putted after m03, because with satellite you need dtm and abg grids
 
 # %% === Methods to import time sensitive data as rainfall and temperature
 SOURCE_MODES = ['station', 'satellite']
@@ -118,8 +118,8 @@ def associate_csv_files_with_gauges(
 
 # %% === Main function
 def main(
-        gui_mode: bool=False,
         base_dir: str=None,
+        gui_mode: bool=False,
         source_mode: str="station",
         source_type: str="rain",
         source_subtype: str="recordings",
@@ -261,8 +261,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     time_sensitive_vars = main(
-        gui_mode=args.gui_mode, 
         base_dir=args.base_dir,
+        gui_mode=args.gui_mode,
         source_mode=args.source_mode,
         source_type=args.source_type,
         source_subtype=args.source_subtype,

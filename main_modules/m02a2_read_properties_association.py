@@ -54,12 +54,12 @@ def class_association(
 
 # %% === Main function
 def main(
+        base_dir: str=None,
+        gui_mode: bool=False,
         source_type: str="land_use", 
         source_subtype: str=None, 
         standard_classes_filepath: str=None, 
-        parameter_classes_filepath: str=None,
-        gui_mode: bool=False, 
-        base_dir: str=None
+        parameter_classes_filepath: str=None
     ) -> Dict[str, Any]: 
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
         raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
@@ -129,19 +129,19 @@ def main(
 # %% === Command line interface
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Associate main properties with parameters.")
+    parser.add_argument("--base_dir", type=str, default=None, help="Base directory for the analysis")
+    parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
     parser.add_argument("--source_type", type=str, default="land_use", help="Source type (e.g., " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES) + ")")
     parser.add_argument("--source_subtype", type=str, default=None, help="Source subtype (e.g., top, sub) (optional)")
     parser.add_argument("--standard_classes_filepath", type=str, default=None, help="Path to the standard classes association file")
     parser.add_argument("--parameter_classes_filepath", type=str, default=None, help="Path to the parameter classes association file")
-    parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
-    parser.add_argument("--base_dir", type=str, default=None, help="Base directory for the analysis")
     args = parser.parse_args()
 
     prop_vars = main(
+        base_dir=args.base_dir,
+        gui_mode=args.gui_mode,
         source_type=args.source_type, 
         source_subtype=args.source_subtype,
         standard_classes_filepath=args.standard_classes_filepath,
-        parameter_classes_filepath=args.parameter_classes_filepath,
-        gui_mode=args.gui_mode, 
-        base_dir=args.base_dir
+        parameter_classes_filepath=args.parameter_classes_filepath
     )

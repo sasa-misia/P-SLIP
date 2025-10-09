@@ -71,10 +71,10 @@ def subtract_polygons_from_study_area(
 
 # %% === Main function
 def main(
+        base_dir: str=None,
+        gui_mode: bool=False,
         source_type: str="land_use", 
-        source_subtype: str=None, 
-        gui_mode: bool=False, 
-        base_dir: str=None
+        source_subtype: str=None
     ) -> Dict[str, Any]:
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
         raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
@@ -128,17 +128,17 @@ def main(
 # %% === Command line interface
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Define the study area for the analysis.")
-    parser.add_argument('--source_type', type=str, default="land_use", help="Type of the source shapefile (e.g., land_use, soil).")
-    parser.add_argument('--source_subtype', type=str, default=None, help="Subtype of the source shapefile (e.g., top, sub).")
     parser.add_argument('--base_dir', type=str, default=None, help="Base directory for the analysis.")
     parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
+    parser.add_argument('--source_type', type=str, default="land_use", help="Type of the source shapefile (e.g., land_use, soil).")
+    parser.add_argument('--source_subtype', type=str, default=None, help="Subtype of the source shapefile (e.g., top, sub).")
     args = parser.parse_args()
 
     study_area_vars = main(
-        source_type=args.source_type,
-        source_subtype=args.source_subtype,
         base_dir=args.base_dir,
-        gui_mode=args.gui_mode
+        gui_mode=args.gui_mode,
+        source_type=args.source_type,
+        source_subtype=args.source_subtype
     )
 
 # %%

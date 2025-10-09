@@ -262,8 +262,8 @@ def update_reference_points_csv(
 
 # %% === Main function
 def main(
-        gui_mode: bool=False, 
         base_dir: str=None,
+        gui_mode: bool=False,
         ref_points_csv_path: str=None,
         morphology: list[str]=MORPHOLOGY_NAMES,
         parameters: list[str]=PARAMETER_NAMES,

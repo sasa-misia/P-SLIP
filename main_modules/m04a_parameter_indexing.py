@@ -154,8 +154,8 @@ def align_and_index_associated_df(
 
 # %% === Main function
 def main(
-        gui_mode: bool=False, 
-        base_dir: str=None
+        base_dir: str=None,
+        gui_mode: bool=False
     ) -> Dict[str, Any]:
     """Main function to create soil and vegetation grids."""
     # Get the analysis environment
