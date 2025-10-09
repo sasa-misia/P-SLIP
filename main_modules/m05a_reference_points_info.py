@@ -28,6 +28,10 @@ from psliptools.utilities import (
     select_file_prompt
 )
 
+from psliptools.scattered import (
+    get_closest_point_id
+)
+
 # Importing necessary modules from main_modules
 from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
 logger = setup_logger()
@@ -36,6 +40,7 @@ logger.info(f"=== Obtain reference points info ===")
 # %% === Methods to extract reference points info
 MORPHOLOGY_NAMES = ['elevation', 'slope', 'aspect', 'profile_curvature', 'planform_curvature', 'twisting_curvature']
 PARAMETER_NAMES = ['GS', 'gd', 'c', 'cr', 'phi', 'kt', 'beta', 'A', 'lambda', 'n', 'E', 'ni']
+TIME_SENSITIVE_NAMES = ['nearest_rain_station']
 
 def get_paths_and_shapes(
         env: AnalysisEnvironment, 
@@ -60,7 +65,7 @@ def get_paths_and_shapes(
     
     abg_shapes = []
     for _, row in abg_df.iterrows():
-        abg_shapes.append(row['raster_lon'].shape)
+        abg_shapes.append(row['longitude'].shape)
 
     return parameters_csv_path, abg_shapes
 
@@ -97,7 +102,7 @@ def get_morphology_grids(
 
 def get_parameters_grids(
         association_df: pd.DataFrame,
-        parameters: list[str],
+        selectd_parameters: list[str],
         shapes: list[tuple[int, int]],
         parameters_csv_paths: str | list[str], 
         clases_column: str='class_id',
@@ -105,7 +110,10 @@ def get_parameters_grids(
         no_data: float | int | str=0
     ) -> dict[str, list[np.ndarray]]:
     """Helper function to get parameters grids"""
-    par_grids = {par: [] for par in parameters}
+    if not all([x in PARAMETER_NAMES for x in selectd_parameters]):
+        raise ValueError(f"Please select one or more of the following parameters: {PARAMETER_NAMES}")
+    
+    par_grids = {par: [] for par in selectd_parameters}
     for par in par_grids.keys():
         par_grids[par] = generate_grids_from_indices(
             indices=association_df['abg_idx_1d'],
@@ -120,9 +128,28 @@ def get_parameters_grids(
 
     return par_grids
 
+def get_time_sensitive_stations(
+        env: AnalysisEnvironment,
+        selected_time_sensitive: list[str]
+    ) -> dict[str, pd.DataFrame]:
+    """Helper function to get time sensitive data"""
+    if not all([x in TIME_SENSITIVE_NAMES for x in selected_time_sensitive]):
+        raise ValueError(f"Please select one or more of the following time sensitive options: {TIME_SENSITIVE_NAMES}")
+    
+    ts_stations = {ts: [] for ts in selected_time_sensitive}
+    for ts in selected_time_sensitive:
+        if ts == 'nearest_rain_station':
+            sta_df = env.load_variable(variable_filename='rain_recordings_vars.pkl')['stations']
+            ts_stations[ts] = sta_df
+        else:
+            raise ValueError(f"{ts} not recognized as a valid time sensitive option during extracion of sations.")
+    
+    return ts_stations
+
 def convert_abg_and_ref_points_to_prj(
         abg_df: pd.DataFrame,
-        ref_points_df: pd.DataFrame
+        ref_points_df: pd.DataFrame,
+        ts_stations: dict[str, pd.DataFrame]=None
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Helper function to convert reference points to projected"""
     # Find projected epsg
@@ -154,20 +181,40 @@ def convert_abg_and_ref_points_to_prj(
     ref_points_prj_df['prj_x'] = ref_points_prj_x
     ref_points_prj_df['prj_y'] = ref_points_prj_y
 
-    return abg_prj_df, ref_points_prj_df
+    ts_stations_prj = None
+    if ts_stations:
+        ts_stations_prj = ts_stations.copy()
+        for key, ts_df in ts_stations_prj.items():
+            ts_df = ts_df.rename(columns={'longitude': 'prj_x', 'latitude': 'prj_y'})
+            ts_prj_x, ts_prj_y = convert_coords(
+                crs_in=4326,
+                crs_out=prj_epsg,
+                in_coords_x=ts_stations[key]['longitude'],
+                in_coords_y=ts_stations[key]['latitude']
+            )
+            ts_df['prj_x'] = ts_prj_x
+            ts_df['prj_y'] = ts_prj_y
+            ts_stations_prj[key] = ts_df
+
+    return abg_prj_df, ref_points_prj_df, ts_stations_prj
 
 def update_reference_points_csv(
         abg_df: pd.DataFrame,
         ref_points_csv_path: str,
         morph_grids: dict[str, list[np.ndarray]]=None,
         par_grids: dict[str, list[np.ndarray]]=None,
+        ts_stations: dict[str, pd.DataFrame]=None
     ) -> pd.DataFrame:
     """Helper function to update reference points csv"""
     ref_points_df = pd.read_csv(ref_points_csv_path)
     if ref_points_df.empty:
         raise ValueError(f"Reference points CSV ({ref_points_csv_path}) is empty. Please check the file.")
     
-    abg_prj_df, ref_points_prj_df = convert_abg_and_ref_points_to_prj(abg_df=abg_df, ref_points_df=ref_points_df)
+    abg_prj_df, ref_points_prj_df, ts_stations_prj = convert_abg_and_ref_points_to_prj(
+        abg_df=abg_df, 
+        ref_points_df=ref_points_df,
+        ts_stations=ts_stations
+    )
 
     for i, row_ref_prj_pnt in ref_points_prj_df.iterrows():
         point_idxs, points_dists = np.zeros(abg_df.shape[0]), np.zeros(abg_df.shape[0])
@@ -196,7 +243,19 @@ def update_reference_points_csv(
         if par_grids is not None:
             for par in par_grids.keys():
                 ref_points_df.loc[i, par] = pick_point_from_1d_idx(par_grids[par][curr_sel_dtm], point_idxs[curr_sel_dtm], order='C')
-    
+        
+        if ts_stations_prj is not None:
+            for ts_par in ts_stations_prj.keys():
+                nearest_sta_idx, nearest_sta_dist = get_closest_point_id(
+                    x=row_ref_prj_pnt['prj_x'], 
+                    y=row_ref_prj_pnt['prj_y'], 
+                    x_ref=ts_stations_prj[ts_par]['prj_x'], 
+                    y_ref=ts_stations_prj[ts_par]['prj_y']
+                )
+
+                ref_points_df.loc[i, ts_par] = ts_stations_prj[ts_par].loc[nearest_sta_idx.item(), 'station']
+                ref_points_df.loc[i, f"dist_{ts_par}"] = nearest_sta_dist
+
     ref_points_df.to_csv(ref_points_csv_path, index=False)
 
     return ref_points_df
@@ -208,6 +267,7 @@ def main(
         ref_points_csv_path: str=None,
         morphology: list[str]=MORPHOLOGY_NAMES,
         parameters: list[str]=PARAMETER_NAMES,
+        time_sensitive: list[str]=TIME_SENSITIVE_NAMES,
         out_type: str='float32',
         no_parameter_data: float | int | str=0
     ) -> pd.DataFrame:
@@ -247,12 +307,20 @@ def main(
     else:
         par_grids = get_parameters_grids(
             association_df=association_df,
-            parameters=parameters,
+            selectd_parameters=parameters,
             shapes=abg_shapes,
             parameters_csv_paths=parameters_csv_path,
             clases_column='class_id',
             out_type=out_type,
             no_data=no_parameter_data
+        )
+
+    if time_sensitive is None:
+        ts_stations = None
+    else:
+        ts_stations = get_time_sensitive_stations(
+            env=env,
+            selected_time_sensitive=time_sensitive
         )
     
     logger.info("Updating reference points csv...")
@@ -260,7 +328,8 @@ def main(
         abg_df=abg_df,
         ref_points_csv_path=ref_points_csv_path,
         morph_grids=morph_grids,
-        par_grids=par_grids
+        par_grids=par_grids,
+        ts_stations=ts_stations
     )
 
     return ref_points_df
@@ -273,6 +342,7 @@ if __name__ == '__main__':
     parser.add_argument('--ref_points_csv_path', type=str, default=None, help="Path to the reference points csv file.")
     parser.add_argument('--morphology', type=list, default=MORPHOLOGY_NAMES, help="List of morphologies to be processed.")
     parser.add_argument('--parameters', type=list, default=PARAMETER_NAMES, help="List of parameters to be processed.")
+    parser.add_argument('--time_sensitive', type=list, default=TIME_SENSITIVE_NAMES, help="List of time-sensitive parameters to be processed.")
     parser.add_argument('--out_type', type=str, default='float32', help="Output type for the parameters.")
     parser.add_argument('--no_parameter_data', type=float, default=0, help="No data value for the parameters.")
     args = parser.parse_args()
@@ -283,6 +353,7 @@ if __name__ == '__main__':
         ref_points_csv_path=args.ref_points_csv_path,
         morphology=args.morphology,
         parameters=args.parameters,
+        time_sensitive=args.time_sensitive,
         out_type=args.out_type,
         no_parameter_data=args.no_parameter_data
     )

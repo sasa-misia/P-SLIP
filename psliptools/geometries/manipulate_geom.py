@@ -6,7 +6,7 @@ import shapely.ops as ops
 import warnings
 from scipy.spatial import KDTree
 
-from psliptools.rasters.coordinates import convert_coords_from_list, are_coords_geographic, get_projected_epsg_code_from_bbox
+from ..rasters.coordinates import convert_coords_from_list, are_coords_geographic, get_projected_epsg_code_from_bbox
 
 # %% === Helper function to process both Polygon and MultiPolygon geometries with parameters
 def _process_polygon_geometries(

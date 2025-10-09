@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from .coordinates import convert_grids_and_profile_to_prj, are_coords_geographic, get_xy_grids_from_profile
 from .manage_raster import get_2d_mask_from_1d_idx
-from psliptools.utilities.pandas_utils import get_list_of_values_from_dataframe
+from ..utilities.pandas_utils import get_list_of_values_from_dataframe
 
 # %% === Pydantic model for parameter validation
 class GridGenerationParams(BaseModel):
