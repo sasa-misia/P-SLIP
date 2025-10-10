@@ -1,7 +1,179 @@
 # %% === Import necessary modules
 import warnings
 import pandas as pd
+import numpy as np
 import os
+from dateutil import parser
+import re
+
+# %% === Helper method to infer date format
+def _infer_date_format(
+        series: pd.Series, 
+        allow_multiple_formats: bool = False,
+        samples_to_test: int = 50
+    ) -> str:
+    """
+    Infer the date format of a pandas Series.
+    
+    Args:
+        series (pd.Series): The pandas Series to infer the date format from.
+        allow_multiple_formats (bool, optional): Whether to allow multiple date formats (default: False).
+        
+    Returns:
+        str: The inferred date format.
+    """
+    date_format_not_found_string = "Unable to infer date format"
+    try:
+        if allow_multiple_formats:
+            # Try to parse dates using dateutil parser
+            try:
+                series.head(samples_to_test).apply(lambda x: parser.parse(x))
+                return 'dateutil'
+            except ValueError:
+                raise ValueError(date_format_not_found_string)
+        else:
+            formats = set()
+            date_sep_chars = r'[-/.]' # Possible characters to separate date are [-], [/], or [.]
+            time_sep_chars = r'[:.]' # Possible characters to separate time are [:], or [.]
+
+            date_pattern = re.compile(rf'(\d{{4}}{date_sep_chars}\d{{1,2}}{date_sep_chars}\d{{1,2}}|\d{{1,2}}{date_sep_chars}\d{{1,2}}{date_sep_chars}\d{{4}}|\d{{8}})')
+            time_pattern = re.compile(rf'(\d{{1,2}}{time_sep_chars}\d{{1,2}}{time_sep_chars}\d{{1,2}}|\d{{1,2}}{time_sep_chars}\d{{1,2}})')
+            
+            for full_date_str in series.head(samples_to_test):
+                if len(full_date_str) not in [8, 10, 16, 19]: # YYYYMMDD, YYYY-MM-DD, YYYY-MM-DD HH:MM, YYYY-MM-DD HH:MM:SS
+                    raise ValueError(date_format_not_found_string)
+                
+                date_match = date_pattern.search(full_date_str)
+                time_match = time_pattern.search(full_date_str)
+                
+                if date_match:
+                    date_str = date_match.group()
+                    date_sep = [x for x in date_str if not x.isdigit()]
+                    if len(date_sep) == 0 and len(date_str) == 8: # No separators
+                        if int(date_str[:4]) > 1900 and 1 <= int(date_str[4:6]) <= 31 and 1 <= int(date_str[6:]) <= 31: # Probably starts with year
+                            if date_str[4:6] > '12': # Day is in the middle
+                                date_format = ['%Y%d%m']
+                            elif date_str[6:] > '12': # Day is at the end
+                                date_format = ['%Y%m%d']
+                            else: # Not sure if day is in the middle or at the end, include both
+                                date_format = [
+                                    '%Y%d%m',
+                                    '%Y%m%d'
+                                ]
+                        elif int(date_str[4:]) > 1900 and 1 <= int(date_str[0:2]) <= 31 and 1 <= int(date_str[2:4]) <= 31: # probably ends with year
+                            if date_str[0:2] > '12': # Day is at the beginning
+                                date_format = ['%d%m%Y']
+                            elif date_str[2:4] > '12': # Day is in the middle
+                                date_format = ['%m%d%Y']
+                            else: # Not sure if day is at the beginning or in the middle, include both
+                                date_format = [
+                                    '%d%m%Y',
+                                    '%m%d%Y'
+                                ]
+                        else:
+                            raise ValueError(f"{date_format_not_found_string}. Date string with 8 characters: {date_str}")
+                    
+                    elif len(date_sep) == 2 and len(date_str) == 10: # Separators (which can be different, in case of user inconsistency)
+                        date_splitted = date_str.replace(date_sep[1], date_sep[0]).split(date_sep[0])
+                        if len(date_splitted[0]) == 4: # Starts with year
+                            if int(date_splitted[1]) > 12: # Day is in the middle
+                                date_format = [f'%Y{date_sep[0]}%d{date_sep[1]}%m']
+                            elif int(date_splitted[2]) > 12: # Day is at the end
+                                date_format = [f'%Y{date_sep[0]}%m{date_sep[1]}%d']
+                            else: # Not sure if day is in the middle or at the end, include both
+                                date_format = [
+                                    f'%Y{date_sep[0]}%d{date_sep[1]}%m',
+                                    f'%Y{date_sep[0]}%m{date_sep[1]}%d'
+                                ]
+                        elif len(date_splitted[2]) == 4: # Ends with year
+                            if int(date_splitted[0]) > 12: # Day is at the beginning
+                                date_format = [f'%d{date_sep[0]}%m{date_sep[1]}%Y']
+                            elif int(date_splitted[1]) > 12: # Day is in the middle
+                                date_format = [f'%m{date_sep[0]}%d{date_sep[1]}%Y']
+                            else: # Not sure if day is at the beginning or in the middle, include both
+                                date_format = [
+                                    f'%d{date_sep[0]}%m{date_sep[1]}%Y',
+                                    f'%m{date_sep[0]}%d{date_sep[1]}%Y'
+                                ]
+                        else:
+                            raise ValueError(f"{date_format_not_found_string}. Date string with 10 characters: {date_str}")
+                        
+                    else:
+                        raise ValueError(f"{date_format_not_found_string}. Date string has not 8 or 10 characters: {full_date_str}")
+                    
+                    if time_match:
+                        time_str = time_match.group()
+                        time_sep = [x for x in time_str if not x.isdigit()]
+                        if len(time_sep) == 1: # Found just hour and minute
+                            time_format = f'%H{time_sep[0]}%M'
+                        elif len(time_sep) == 2: # Found hour, minute and second
+                            time_format = f'%H{time_sep[0]}%M{time_sep[1]}%S'
+                        else:
+                            raise ValueError(f"{date_format_not_found_string}. Time string with 0 or more than 2 separators: {time_str}")
+                        
+                        for curr_dt_format in date_format:
+                            if date_match.start() < time_match.start():
+                                date_time_separator = full_date_str[date_match.end():time_match.start()]
+                                formats.add(f'{curr_dt_format}{date_time_separator}{time_format}')
+                            else:
+                                date_time_separator = full_date_str[time_match.end():date_match.start()]
+                                formats.add(f'{time_format}{date_time_separator}{curr_dt_format}')
+                    else:
+                        for curr_dt_format in date_format:
+                            formats.add(curr_dt_format)
+                else:
+                    raise ValueError(f"{date_format_not_found_string}. No date match found: {full_date_str}")
+            
+            if len(formats) == 1:
+                return list(formats)[0]
+            else:
+                # Create compatibility matrix
+                compatibility_matrix = np.zeros((len(series.head(samples_to_test)), len(formats)), dtype='bool')
+                formats_list = list(formats)
+                
+                for i, full_date_str in enumerate(series.head(samples_to_test)):
+                    for j, date_format in enumerate(formats_list):
+                        try:
+                            pd.to_datetime(full_date_str, format=date_format)
+                            compatibility_matrix[i, j] = True
+                        except ValueError:
+                            pass
+                
+                compatible_formats = np.all(compatibility_matrix, axis=0)
+                compatible_formats_count = np.sum(compatible_formats)
+                
+                if compatible_formats_count == 1:
+                    return formats_list[np.argmax(compatible_formats)]
+                elif compatible_formats_count > 1:
+                    compatible_formats_list = [formats_list[i] for i, x in enumerate(compatible_formats) if x]
+                    raise ValueError(f"Multiple compatible date formats detected: {compatible_formats_list}")
+                else:
+                    raise ValueError("No compatible date format found")
+    
+    except Exception as e:
+        raise ValueError(f"Error inferring date format: {str(e)}")
+
+# %% === Helper method to parse date with inferred format
+def _parse_date_with_inferred_format(
+        date_str: str, 
+        date_format: str, 
+        fuzzy: bool = False
+    ) -> pd.Timestamp:
+    """
+    Parse a date string using the inferred date format.
+    
+    Args:
+        date_str (str): The date string to parse.
+        date_format (str): The inferred date format.
+        fuzzy (bool, optional): Whether to use fuzzy parsing (default: False).
+        
+    Returns:
+        pd.Timestamp: The parsed date.
+    """
+    if date_format == 'dateutil':
+        return parser.parse(date_str, fuzzy=fuzzy)
+    else:
+        return pd.to_datetime(date_str, format=date_format)
 
 # %% === Method to fill gaps in a series with the mean between the first and last non-empty values
 def _fill_missing_values_with_mean(
@@ -133,7 +305,8 @@ def _fill_missing_values_of_numeric_series(
 def _parse_time_sensitive_dataframe(
         data_df: pd.DataFrame,
         fill_method: str | int | float=None,
-        round_datetime: bool=True
+        round_datetime: bool=True,
+        allow_multiple_date_formats: bool=False
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Parse and validate a time-sensitive dataframe.
@@ -152,6 +325,7 @@ def _parse_time_sensitive_dataframe(
                 7. 'quadratic' - Fill missing values with the quadratic interpolation between the first and last non-empty values.
                 8. 'cubic' - Fill missing values with the cubic interpolation between the first and last non-empty values.
         round_datetime (bool, optional): If True, round datetime columns to the nearest minute (default: True).
+        allow_multiple_date_formats (bool, optional): If True, allow multiple date formats in the same column (default: False).
 
     Returns:
         tuple(pd.DataFrame, pd.DataFrame, pd.DataFrame): A tuple containing the parsed dataframe, the datetime columns, and the numeric columns.
@@ -172,7 +346,9 @@ def _parse_time_sensitive_dataframe(
         if col_type == 'object':
             # Check if it might be a date column
             try:
-                data_df[col] = pd.to_datetime(data_df[col], errors='raise')
+                # Infer the date format
+                date_format = _infer_date_format(data_df[col], allow_multiple_date_formats)
+                data_df[col] = data_df[col].apply(lambda x: _parse_date_with_inferred_format(x, date_format, fuzzy=True))
             except:
                 pass
         elif pd.api.types.is_numeric_dtype(col_type):
@@ -207,7 +383,7 @@ def _parse_time_sensitive_dataframe(
                 data_df[col] = data_df[col].interpolate(method='linear')
 
                 warnings.warn(
-                    f"Missing values in column [{col}] at rows {[x + 2 for x in missing_row_ids]} have been filled with linear interpolation", # + 2 because the csv first row is for header and should start from 1, not 0!
+                    f"Missing values in column [{col}] at rows {missing_row_ids} (+2 if you are looking into csv) have been filled with linear interpolation", # + 2 because the csv first row is for header and should start from 1, not 0!
                     stacklevel=2
                 )
             
@@ -216,8 +392,9 @@ def _parse_time_sensitive_dataframe(
 
             delta_time_hours = data_df[col].diff().dt.total_seconds() / 3600
             non_uniform_rows = delta_time_hours[delta_time_hours != delta_time_hours.iloc[1]].index.to_list()
-            if len(non_uniform_rows) > 1: # > 1 because the first row is always missing
-                raise ValueError(f"Time column [{col}] is not uniform. Non-uniform rows: {non_uniform_rows}")
+            non_uniform_rows.remove(0) # Remove index 0 because it is the first row and it is always missing
+            if len(non_uniform_rows) >= 1: # > 1 because the first row is always missing
+                raise ValueError(f"Time column [{col}] is not uniform. Non-uniform rows (+2 if you are looking into csv): {non_uniform_rows}")
 
             # Handle timezone-aware datetime conversion
             if data_df[col].dt.tz is not None:
@@ -808,28 +985,31 @@ def load_time_sensitive_data_from_csv(
     if not isinstance(delta_time_hours, (float, int, type(None))):
         raise TypeError("delta_time_hours must be a float, integer or None.")
     
-    raw_data_df = pd.read_csv(file_path)
+    raw_data_df = pd.read_csv(file_path, sep=None, engine='python') # Sometimes separators are not just commas (,) but maybe semicolons (;) or something else
 
-    _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(raw_data_df, fill_method=fill_method, round_datetime=round_datetime)
+    try:
+        _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(data_df=raw_data_df, fill_method=fill_method, round_datetime=round_datetime)
+    except Exception as e:
+        raise ValueError(f"Error parsing the csv file [{file_path}]: {e}")
 
     if len(datetime_df.columns) == 1:
-        warnings.warn("Datetime part of the csv has only one column. Assuming it is start_date or end_date depending on the column name.", stacklevel=2)
+        warnings.warn(f"Datetime part of the csv has only one column. Assuming it is start_date or end_date depending on the column name. File: {file_path}", stacklevel=2)
 
     if len(datetime_df.columns) != 1 and len(datetime_df.columns) != 2:
-        raise ValueError(f"Datetime part of the csv has {len(datetime_df.columns)} columns. Expected 1 or 2 columns: start_date, end_date, or both")
+        raise ValueError(f"Datetime part of the csv has {len(datetime_df.columns)} columns. Expected 1 or 2 columns: start_date, end_date, or both. File: {file_path}")
 
     if datetime_columns_names:
         if len(datetime_columns_names) != len(datetime_df.columns):
-            raise ValueError(f"Datetime part of the csv has {len(datetime_df.columns)} columns. Current datetime_columns_names list has {len(datetime_columns_names)} elements!")
+            raise ValueError(f"Datetime part of the csv has {len(datetime_df.columns)} columns. Current datetime_columns_names list has {len(datetime_columns_names)} elements! File: {file_path}")
         if not all([x in ['start_date', 'end_date'] for x in datetime_columns_names]):
-            raise ValueError("datetime_columns_names must be 'start_date' or 'end_date'!")
+            raise ValueError(f"datetime_columns_names must be 'start_date' or 'end_date'! File: {file_path}")
         datetime_df.columns = datetime_columns_names
     else:
         auto_datetime_col_detection, _ = _smart_columns_detection(datetime_df)
         if any([x is None for _, x in auto_datetime_col_detection.items()]):
-            raise ValueError("Unable to detect datetime columns. Please provide datetime_columns_names manually.")
+            raise ValueError(f"Unable to detect datetime columns. Please provide datetime_columns_names manually. File: {file_path}")
         datetime_df.columns = [x for _, x in auto_datetime_col_detection.items()]
-        warnings.warn(f"Auto detection: using columns {[x for x in auto_datetime_col_detection.keys()]} as {[x for x in auto_datetime_col_detection.values()]} columns.", stacklevel=2)
+        warnings.warn(f"Auto detection: using columns {[x for x in auto_datetime_col_detection.keys()]} as {[x for x in auto_datetime_col_detection.values()]} columns. File: {file_path}", stacklevel=2)
     
     if len(datetime_df.columns) == 1:
         if datetime_df.columns[0] == 'start_date':
@@ -837,35 +1017,38 @@ def load_time_sensitive_data_from_csv(
         elif datetime_df.columns[0] == 'end_date':
             datetime_df['start_date'] = datetime_df['end_date'] - datetime_df['end_date'].diff().mean(skipna=True)
         else:
-            raise ValueError("Datetime part of the csv has only one column and it is not start_date or end_date! Please use two columns or assign names to datetime_columns_names manually.")
+            raise ValueError(f"Datetime part of the csv has only one column and it is not start_date or end_date! Please use two columns or assign names to datetime_columns_names manually. File: {file_path}")
 
     if datetime_df.iloc[0,'end_date'] < datetime_df.iloc[0,'start_date']:
-        raise ValueError("Start date is greater than end date.")
+        raise ValueError(f"Start date is greater than end date. File: {file_path}")
 
     diff_end_start = datetime_df.iloc[:,'end_date'] - datetime_df.iloc[:,'start_date']
     not_uniform_row_ids = diff_end_start[diff_end_start != diff_end_start.iloc[1]].index.to_list()
     if not_uniform_row_ids:
-        raise ValueError("Duration of the time-sensitive data (end-start) is not uniform. Non-uniform rows: " + str(not_uniform_row_ids))
+        raise ValueError("Duration of the time-sensitive data (end-start) is not uniform. Non-uniform rows: " + str(not_uniform_row_ids) + f". File: {file_path}")
 
     if numeric_columns_names:
         if len(numeric_columns_names) != len(numeric_df.columns):
-            raise ValueError(f"Numeric part of the csv has {len(numeric_df.columns)} columns. Current numeric_columns_names list has {len(numeric_columns_names)} elements!")
+            raise ValueError(f"Numeric part of the csv has {len(numeric_df.columns)} columns. Current numeric_columns_names list has {len(numeric_columns_names)} elements! File: {file_path}")
         numeric_df.columns = numeric_columns_names
     else:
         auto_numeric_col_detection, _ = _smart_columns_detection(numeric_df)
         if any([x is None for _, x in auto_numeric_col_detection.items()]):
-            raise ValueError("Unable to detect numeric columns. Please provide numeric_columns_names manually.")
+            raise ValueError(f"Unable to detect numeric columns. Please provide numeric_columns_names manually. File: {file_path}")
         numeric_df.columns = [x for _, x in auto_numeric_col_detection.items()]
-        warnings.warn(f"Auto detection: using columns {[x for x in auto_numeric_col_detection.keys()]} as {[x for x in auto_numeric_col_detection.values()]} columns.", stacklevel=2)
+        warnings.warn(f"Auto detection: using columns {[x for x in auto_numeric_col_detection.keys()]} as {[x for x in auto_numeric_col_detection.values()]} columns. File: {file_path}", stacklevel=2)
 
     if delta_time_hours:
-        datetime_df, numeric_df = _change_time_sensitive_dataframe_resolution(
-            numeric_df=numeric_df,
-            datetime_df=datetime_df,
-            delta_time=pd.Timedelta(hours=delta_time_hours),
-            aggregation_method=aggregation_method,
-            last_date=last_date
-        )
+        try:
+            datetime_df, numeric_df = _change_time_sensitive_dataframe_resolution(
+                numeric_df=numeric_df,
+                datetime_df=datetime_df,
+                delta_time=pd.Timedelta(hours=delta_time_hours),
+                aggregation_method=aggregation_method,
+                last_date=last_date
+            )
+        except Exception as e:
+            raise ValueError(f"Error changing the time resolution of the csv file [{file_path}]: {e}")
     
     data_df = pd.concat([datetime_df, numeric_df], axis=1)
     
@@ -903,7 +1086,7 @@ def load_time_sensitive_stations_from_csv(
     if not isinstance(altitude_column, (str, int, type(None))):
         raise TypeError("altitude_column must be a string, integer or None.")
     
-    station_df = pd.read_csv(file_path)
+    station_df = pd.read_csv(file_path, sep=None, engine='python') # Sometimes the delimiter is not comma (,)
 
     auto_col_detection, _ = _smart_columns_detection(station_df, ['station', 'longitude', 'latitude', 'altitude'])
     
@@ -914,53 +1097,53 @@ def load_time_sensitive_stations_from_csv(
         station_column = station_df.columns[station_column]
     elif isinstance(station_column, str):
         if station_column not in station_df.columns:
-            raise ValueError(f"Column [{station_column}] not found in the DataFrame.")
+            raise ValueError(f"Column [{station_column}] not found in the DataFrame. File: {file_path}")
     elif isinstance(station_column, type(None)):
         station_key = 'station'
         station_column = type_to_column.get(station_key)
         if station_column is None:
-            raise ValueError("Station column not detected and no manual specification provided.")
-        warnings.warn(f"Auto detection: using column [{station_column}] as the [{station_key}] column.", stacklevel=2)
+            raise ValueError(f"Station column not detected and no manual specification provided. File: {file_path}")
+        warnings.warn(f"Auto detection: using column [{station_column}] as the [{station_key}] column. File: {file_path}", stacklevel=2)
     
     if isinstance(longitude_column, int):
         longitude_column = station_df.columns[longitude_column]
     elif isinstance(longitude_column, str):
         if longitude_column not in station_df.columns:
-            raise ValueError(f"Column [{longitude_column}] not found in the DataFrame.")
+            raise ValueError(f"Column [{longitude_column}] not found in the DataFrame. File: {file_path}")
     elif isinstance(longitude_column, type(None)):
         longitude_key = 'longitude'
         longitude_column = type_to_column.get(longitude_key)
         if longitude_column is None:
-            raise ValueError("Longitude column not detected and no manual specification provided.")
+            raise ValueError(f"Longitude column not detected and no manual specification provided. File: {file_path}")
         warnings.warn(f"Auto detection: using column [{longitude_column}] as the [{longitude_key}] column.", stacklevel=2)
     
     if isinstance(latitude_column, int):
         latitude_column = station_df.columns[latitude_column]
     elif isinstance(latitude_column, str):
         if latitude_column not in station_df.columns:
-            raise ValueError(f"Column [{latitude_column}] not found in the DataFrame.")
+            raise ValueError(f"Column [{latitude_column}] not found in the DataFrame. File: {file_path}")
     elif isinstance(latitude_column, type(None)):
         latitude_key = 'latitude'
         latitude_column = type_to_column.get(latitude_key)
         if latitude_column is None:
-            raise ValueError("Latitude column not detected and no manual specification provided.")
-        warnings.warn(f"Auto detection: using column [{latitude_column}] as the [{latitude_key}] column.", stacklevel=2)
+            raise ValueError(f"Latitude column not detected and no manual specification provided. File: {file_path}")
+        warnings.warn(f"Auto detection: using column [{latitude_column}] as the [{latitude_key}] column. File: {file_path}", stacklevel=2)
     
     if isinstance(altitude_column, int):
         altitude_column = station_df.columns[altitude_column]
     elif isinstance(altitude_column, str):
         if altitude_column not in station_df.columns:
-            raise ValueError(f"Column [{altitude_column}] not found in the DataFrame.")
+            raise ValueError(f"Column [{altitude_column}] not found in the DataFrame. File: {file_path}")
     elif isinstance(altitude_column, type(None)):
         altitude_key = 'altitude'
         altitude_column = type_to_column.get(altitude_key)
         if altitude_column is None:
-            raise ValueError("Altitude column not detected and no manual specification provided.")
-        warnings.warn(f"Auto detection: using column [{altitude_column}] as the [{altitude_key}] column.", stacklevel=2)
+            raise ValueError(f"Altitude column not detected and no manual specification provided. File: {file_path}")
+        warnings.warn(f"Auto detection: using column [{altitude_column}] as the [{altitude_key}] column. File: {file_path}", stacklevel=2)
 
     selected_columns = list(dict.fromkeys([station_column, longitude_column, latitude_column, altitude_column])) # Remove duplicates while preserving order
     if len(selected_columns) != 4:
-        raise ValueError("The gauges table must have 4 columns: station, longitude, latitude and altitude.")
+        raise ValueError(f"The gauges table must have 4 columns: station, longitude, latitude and altitude. File: {file_path}")
 
     station_df = station_df[selected_columns]
     station_df.columns = ["station", "longitude", "latitude", "altitude"]
