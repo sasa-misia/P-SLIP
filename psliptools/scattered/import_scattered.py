@@ -306,7 +306,8 @@ def _parse_time_sensitive_dataframe(
         data_df: pd.DataFrame,
         fill_method: str | int | float=None,
         round_datetime: bool=True,
-        allow_multiple_date_formats: bool=False
+        allow_multiple_date_formats: bool=False,
+        force_datetime_consistency: bool=False
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Parse and validate a time-sensitive dataframe.
@@ -352,15 +353,16 @@ def _parse_time_sensitive_dataframe(
             except:
                 pass
         elif pd.api.types.is_numeric_dtype(col_type):
-            pass
-        else:
             try:
-                data_df[col] = pd.to_numeric(data_df[col], errors='raise')
+                data_df[col] = pd.to_numeric(data_df[col], errors='coerce', downcast='infer')
             except:
                 pass
+        else:
+            pass
 
     for col in data_df.columns:
         if pd.api.types.is_numeric_dtype(data_df[col].dtype):
+            pre_data_type = data_df[col].dtype
             missing_row_ids = data_df[data_df[col].isnull()].index.to_list()
             if len(missing_row_ids) > 0 and fill_method is not None:
                 data_df[col] = _fill_missing_values_of_numeric_series(
@@ -373,7 +375,7 @@ def _parse_time_sensitive_dataframe(
                     stacklevel=2
                 )
             
-            data_df[col] = data_df[col].astype('float64')
+            data_df[col] = data_df[col].astype(pre_data_type)
 
         if pd.api.types.is_datetime64_any_dtype(data_df[col]):
             missing_row_ids = data_df[data_df[col].isnull()].index.to_list()
@@ -390,11 +392,39 @@ def _parse_time_sensitive_dataframe(
             if round_datetime:
                 data_df[col] = data_df[col].dt.round('1min') # Round to nearest minute
 
-            delta_time_hours = data_df[col].diff().dt.total_seconds() / 3600
-            non_uniform_rows = delta_time_hours[delta_time_hours != delta_time_hours.iloc[1]].index.to_list()
+            delta_time_hours_num = data_df[col].diff().dt.total_seconds() / 3600
+            non_uniform_rows = delta_time_hours_num[delta_time_hours_num != delta_time_hours_num.iloc[1]].index.to_list()
             non_uniform_rows.remove(0) # Remove index 0 because it is the first row and it is always missing
             if len(non_uniform_rows) >= 1: # > 1 because the first row is always missing
-                raise ValueError(f"Time column [{col}] is not uniform. Non-uniform rows (+2 if you are looking into csv): {non_uniform_rows}")
+                warn_main_msg = f"Time column [{col}] is not uniform. Non-uniform rows (+2 if you are looking into csv): {non_uniform_rows}."
+                warn_add_msg = "Since force_datetime_consistency is True, the missing rows will be tried to be added and the method will be run again."
+                if force_datetime_consistency:
+                    warnings.warn(f"{warn_main_msg} {warn_add_msg}", stacklevel=2)
+
+                    min_delta_time_hours_num = delta_time_hours_num.min()
+                    min_delta_time = pd.Timedelta(hours=min_delta_time_hours_num)
+                    new_data_df = pd.DataFrame(columns=data_df.columns).astype(data_df.dtypes.to_dict())
+                    new_data_df = new_data_df.astype({col: 'Int64' for col in new_data_df.select_dtypes(include=['int64']).columns}) # To maintain int64 type with missing values
+                    min_datetime = data_df[col].min()
+                    max_datetime = data_df[col].max()
+                    new_datetime_series = pd.date_range(start=min_datetime, end=max_datetime, freq=min_delta_time)
+                    new_data_df[col] = new_datetime_series
+
+                    for new_idx in range(len(new_datetime_series)):
+                        closest_idx = np.where( (data_df[col] - new_data_df[col].iloc[new_idx]).abs() < min_delta_time/2 )[0]
+                        if len(closest_idx) == 1:
+                            new_data_df.iloc[new_idx] = data_df.iloc[closest_idx.item()]
+                    
+                    return _parse_time_sensitive_dataframe(
+                        data_df=new_data_df,
+                        fill_method=fill_method,
+                        round_datetime=round_datetime,
+                        allow_multiple_date_formats=allow_multiple_date_formats,
+                        force_datetime_consistency=False
+                    )
+
+                else:
+                    raise ValueError(f"{warn_main_msg}")
 
             # Handle timezone-aware datetime conversion
             if data_df[col].dt.tz is not None:
@@ -573,6 +603,7 @@ def _advanced_column_detection(
     Returns:
         dict: A dictionary containing confidence scores for different column types.
     """
+    series = series.copy()
     name_lower = series.name.lower()
     sample_data = series.to_list()
     
@@ -581,6 +612,10 @@ def _advanced_column_detection(
         'station': {
             'patterns': ['stat', 'staz', 'gauge', 'id', 'poste'],
             'expected_type': 'string'
+        },
+        'numeric_station_id': {
+            'patterns': ['stat', 'staz', 'gauge', 'id', 'poste'],
+            'expected_type': 'numeric'
         },
         'latitude': {
             'patterns': ['lat', 'latit', 'breite'],
@@ -595,14 +630,14 @@ def _advanced_column_detection(
         'altitude': {
             'patterns': ['alt', 'elev', 'height', 'quota', 'höhe'],
             'expected_type': 'numeric',
-            'range': (0, None)  # Positive values
+            'range': (0, 3000)  # Positive values
         },
         'start_date': {
-            'patterns': ['start', 'inizio', 'begin', 'debut', 'anfang', 'inicio', 'from'],
+            'patterns': ['start', 'inizio', 'begin', 'debut', 'anfang', 'inicio', 'from', 'dat'],
             'expected_type': 'datetime'
         },
         'end_date': {
-            'patterns': ['end', 'fin', 'to'],
+            'patterns': ['end', 'fin', 'to', 'dat'],
             'expected_type': 'datetime'
         },
         'cumulative_rain': {
@@ -847,6 +882,7 @@ def _smart_columns_detection(
     Returns:
         tuple(dict, dict): A tuple containing the detected columns and their confidence scores.
     """
+    df = df.copy()
     detected = {}  # Keys: column names, Values: detected type or None
     scores = {}  # Keys: column names, Values: confidence score for detected type
     all_scores = {}  # Store scores for all columns to allow re-evaluation
@@ -858,7 +894,7 @@ def _smart_columns_detection(
     
     # First pass: collect scores for all columns
     for col in df.columns:
-        scores_results = _advanced_column_detection(df[col])
+        scores_results = _advanced_column_detection(series=df[col])
         all_scores[col] = scores_results
         
         # Find the best type for this column
@@ -943,7 +979,8 @@ def load_time_sensitive_data_from_csv(
         aggregation_method: list[str]=['sum'],
         last_date: pd.Timestamp=None,
         datetime_columns_names: list[str]=None,
-        numeric_columns_names: list[str]=None
+        numeric_columns_names: list[str]=None,
+        force_datetime_consistency: bool=False
     ) -> pd.DataFrame:
     """
     Load time-sensitive data from a CSV file.
@@ -968,6 +1005,8 @@ def load_time_sensitive_data_from_csv(
             All dates greater than this will be filtered out. If None, use the last available date.
         datetime_columns_names (list[str], optional): A list of datetime column names, which can be start_date or end_date, or both, in a list (default: None).
         numeric_columns_names (list[str], optional): A list of numeric column names (default: None).
+        force_datetime_consistency (bool, optional): If True, force consistency of time series, which means that if datetime row is missing, 
+            then it will be added to have consistency of deltatime and numeric columns will be filled with the fill_method (default: False).
 
     Returns:
         pd.DataFrame: A DataFrame containing the loaded data.
@@ -984,11 +1023,18 @@ def load_time_sensitive_data_from_csv(
         raise TypeError("round_datetime must be a boolean.")
     if not isinstance(delta_time_hours, (float, int, type(None))):
         raise TypeError("delta_time_hours must be a float, integer or None.")
+    if not isinstance(force_datetime_consistency, bool):
+        raise TypeError("force_datetime_consistency must be a boolean.")
     
     raw_data_df = pd.read_csv(file_path, sep=None, engine='python') # Sometimes separators are not just commas (,) but maybe semicolons (;) or something else
 
     try:
-        _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(data_df=raw_data_df, fill_method=fill_method, round_datetime=round_datetime)
+        _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(
+            data_df=raw_data_df,
+            fill_method=fill_method, 
+            round_datetime=round_datetime,
+            force_datetime_consistency=force_datetime_consistency
+        )
     except Exception as e:
         raise ValueError(f"Error parsing the csv file [{file_path}]: {e}")
 
@@ -1005,7 +1051,7 @@ def load_time_sensitive_data_from_csv(
             raise ValueError(f"datetime_columns_names must be 'start_date' or 'end_date'! File: {file_path}")
         datetime_df.columns = datetime_columns_names
     else:
-        auto_datetime_col_detection, _ = _smart_columns_detection(datetime_df)
+        auto_datetime_col_detection, _ = _smart_columns_detection(df=datetime_df)
         if any([x is None for _, x in auto_datetime_col_detection.items()]):
             raise ValueError(f"Unable to detect datetime columns. Please provide datetime_columns_names manually. File: {file_path}")
         datetime_df.columns = [x for _, x in auto_datetime_col_detection.items()]
@@ -1019,10 +1065,10 @@ def load_time_sensitive_data_from_csv(
         else:
             raise ValueError(f"Datetime part of the csv has only one column and it is not start_date or end_date! Please use two columns or assign names to datetime_columns_names manually. File: {file_path}")
 
-    if datetime_df.iloc[0,'end_date'] < datetime_df.iloc[0,'start_date']:
+    if datetime_df.loc[0,'end_date'] < datetime_df.loc[0,'start_date']:
         raise ValueError(f"Start date is greater than end date. File: {file_path}")
 
-    diff_end_start = datetime_df.iloc[:,'end_date'] - datetime_df.iloc[:,'start_date']
+    diff_end_start = datetime_df.loc[:,'end_date'] - datetime_df.loc[:,'start_date']
     not_uniform_row_ids = diff_end_start[diff_end_start != diff_end_start.iloc[1]].index.to_list()
     if not_uniform_row_ids:
         raise ValueError("Duration of the time-sensitive data (end-start) is not uniform. Non-uniform rows: " + str(not_uniform_row_ids) + f". File: {file_path}")
@@ -1032,7 +1078,7 @@ def load_time_sensitive_data_from_csv(
             raise ValueError(f"Numeric part of the csv has {len(numeric_df.columns)} columns. Current numeric_columns_names list has {len(numeric_columns_names)} elements! File: {file_path}")
         numeric_df.columns = numeric_columns_names
     else:
-        auto_numeric_col_detection, _ = _smart_columns_detection(numeric_df)
+        auto_numeric_col_detection, _ = _smart_columns_detection(df=numeric_df)
         if any([x is None for _, x in auto_numeric_col_detection.items()]):
             raise ValueError(f"Unable to detect numeric columns. Please provide numeric_columns_names manually. File: {file_path}")
         numeric_df.columns = [x for _, x in auto_numeric_col_detection.items()]
@@ -1073,7 +1119,7 @@ def load_time_sensitive_stations_from_csv(
         altitude_column (str | int, optional): The name or index of the altitude column (default: None).
 
     Returns:
-        pd.DataFrame: A DataFrame containing the loaded gauges table.
+        pd.DataFrame: A DataFrame containing the table of gauges.
     """
     if not isinstance(file_path, str) or not os.path.exists(file_path):
         raise TypeError("file_path must be a string and the file must exist.")
@@ -1088,7 +1134,7 @@ def load_time_sensitive_stations_from_csv(
     
     station_df = pd.read_csv(file_path, sep=None, engine='python') # Sometimes the delimiter is not comma (,)
 
-    auto_col_detection, _ = _smart_columns_detection(station_df, ['station', 'longitude', 'latitude', 'altitude'])
+    auto_col_detection, _ = _smart_columns_detection(df=station_df, target_columns=['station', 'longitude', 'latitude', 'altitude'])
     
     # Create reverse mapping for easier access (only assigned columns)
     type_to_column = {col_type: col for col, col_type in auto_col_detection.items() if col_type is not None}

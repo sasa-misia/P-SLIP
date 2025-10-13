@@ -124,10 +124,11 @@ def main(
         source_type: str="rain",
         source_subtype: str="recordings",
         round_datetimes_to_nearest_minute: bool=True,
-        delta_time_hours: float=1,
+        delta_time_hours: float=None,
         aggregation_method: str=None,
         last_date: pd.Timestamp | str=None,
-        rename_csv_data_columns: bool=False
+        rename_csv_data_columns: bool=False,
+        force_consistency: bool=True
     ) -> dict[str, pd.DataFrame]:
     """Main function to import time sensitive data"""
     if not source_mode in SOURCE_MODES:
@@ -210,7 +211,8 @@ def main(
                 aggregation_method=aggregation_method,
                 last_date=last_date,
                 datetime_columns_names=None, # Auto-detect
-                numeric_columns_names=None # Auto-detect
+                numeric_columns_names=None, # Auto-detect
+                force_datetime_consistency=force_consistency
             )
 
             _, cust_id = env.add_input_file(file_path=data_pth, file_type=source_type, file_subtype=f"rec{idx+1}")
@@ -253,10 +255,12 @@ if __name__ == "__main__":
     parser.add_argument("--source_mode", type=str, default="station", help="Source mode (station, satellite)")
     parser.add_argument("--source_type", type=str, default="rain", help="Source type (rain, temperature)")
     parser.add_argument("--source_subtype", type=str, default="recordings", help="Source subtype (recordings, forecast)")
+    parser.add_argument("--round_datetimes_to_nearest_minute", action="store_true", help="Round datetimes to the nearest minute")
     parser.add_argument("--delta_time_hours", type=int, default=1, help="Delta time in hours")
     parser.add_argument("--aggregation_method", type=list[str], default=None, help="Aggregation method (mean, sum, min, max)")
     parser.add_argument("--last_date", type=str, default=None, help="Last date (YYYY-MM-DD HH:mm)")
-    parser.add_argument("--round_datetimes_to_nearest_minute", action="store_true", help="Round datetimes to the nearest minute")
+    parser.add_argument("--rename_csv_data_columns", action="store_true", help="Rename csv data files columns")
+    parser.add_argument("--force_consistency", action="store_true", help="Force datetime consistency")
     
     args = parser.parse_args()
     
@@ -266,10 +270,12 @@ if __name__ == "__main__":
         source_mode=args.source_mode,
         source_type=args.source_type,
         source_subtype=args.source_subtype,
+        round_datetimes_to_nearest_minute=args.round_datetimes_to_nearest_minute,
         delta_time_hours=args.delta_time_hours,
         aggregation_method=args.aggregation_method,
         last_date=args.last_date,
-        round_datetimes_to_nearest_minute=args.round_datetimes_to_nearest_minute
+        rename_csv_data_columns=args.rename_csv_data_columns,
+        force_consistency=args.force_consistency
     )
 
 # %%

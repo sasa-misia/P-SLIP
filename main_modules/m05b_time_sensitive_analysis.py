@@ -4,13 +4,14 @@ import sys
 import argparse
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    AnalysisEnvironment
+    AnalysisEnvironment,
+    KNOWN_DYNAMIC_INPUT_TYPES,
+    DYNAMIC_SUBFOLDERS
 )
 
 # # Importing necessary modules from psliptools
@@ -27,14 +28,46 @@ from config import (
 # )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, obtain_config_idx_and_rel_filename
 logger = setup_logger()
 logger.info("=== Analyzing time-sensitive data patterns ===")
 
 # %% === Methods to analyze time-sensitive data
-def analyze_rainfall_noise(
-        env: AnalysisEnvironment
-    ) -> None: # TODO: Check and refine this implementation (from MATLAB code)
+def obtain_percentiles_and_noise(
+        ts_vars: dict,
+        percentiles: list[float]=[.75, .90],
+        ts_possible_range: list[float]=[None, None]
+    ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]: # TODO: Check and refine this implementation (from MATLAB code)
+    """
+    Obtain percentiles and noise of time-sensitive data.
+
+    Args:
+        ts_vars (dict): Dictionary containing time-sensitive data variables.
+        percentiles (list[float], optional): List of percentiles to calculate (default: [0.75]).
+        ts_possible_range (list[float], optional): Possible range of time-sensitive data (default: [None, None]).
+
+    Returns:
+        tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]: Tuple containing percentiles and noise dictionaries per each numeric variable.
+    """
+    pecentiles_dict = {}
+    noise_dict = {}
+    for ts_label, ts_data in ts_vars.items():
+        if ts_label in ['stations', 'dates']:
+            continue
+        ts_data = ts_data.copy()
+        rows_inside_range = (ts_data > ts_possible_range[0]).any(axis=1) & (ts_data < ts_possible_range[1]).any(axis=1)
+        pecentiles_dict[ts_label] = ts_data[rows_inside_range].quantile(percentiles, axis=0)
+
+        noise_dict[ts_label] = pecentiles_dict[ts_label].copy()
+        for idx, perc_row in pecentiles_dict[ts_label].iterrows():
+            rows_for_noise = (ts_data > ts_possible_range[0]).any(axis=1) & (ts_data < perc_row).any(axis=1)
+            noise_dict[ts_label].loc[idx] = ts_data[rows_for_noise].mean(axis=0)
+    
+    return pecentiles_dict, noise_dict
+        
+def old_fun(env):
+    import matplotlib.pyplot as plt
+    # OLD CODE
     # Iterate over each station file
     for file in env.station_files:
         # Read the CSV file
@@ -131,14 +164,43 @@ def analyze_rainfall_noise(
 # %% === Main function
 def main(
         base_dir: str=None,
-        gui_mode: bool=False
+        gui_mode: bool=False,
+        source_type: str="rain",
+        source_subtype: str="recordings",
+        percentiles: list[float]=[.75, .90]
     ) -> None:
     """Main function to obtain statistical information of time-sensitive data."""
+    if not source_type in KNOWN_DYNAMIC_INPUT_TYPES:
+        raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES))
+    if not source_subtype in DYNAMIC_SUBFOLDERS:
+        raise ValueError("Invalid source subtype. Must be one of: " + ", ".join(DYNAMIC_SUBFOLDERS))
+    
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
 
+    env, idx_config, rel_filename = obtain_config_idx_and_rel_filename(env, source_type, source_subtype)
+
+    source_mode = env.config['inputs'][source_type][idx_config]['settings']['source_mode']
+    if not source_mode == 'station':
+        raise ValueError("Invalid source mode. Must be 'station'")
+    
+    ts_vars = env.load_variable(variable_filename=f"{rel_filename}_vars.pkl")
+
+    delta_time = ts_vars['dates']['start_date'].diff().mean()
+    if delta_time > pd.Timedelta(days=31):
+        raise ValueError("Invalid delta time. Must be less than 31 days")
+
+    ts_possible_range = [None, None] # Extremes are not icluded!
+    if source_type == 'rain':
+        rain_possible_hourly_range = [0, 50] # 0 mm/h is excluded (no rain -> no contribute to statistics)
+        ts_possible_range = [rain_possible_hourly_range[0], rain_possible_hourly_range[1] * delta_time.total_seconds() / 3600] # It is unrealistic to have more than 50 mm/h and especially 50 mm/h for many hours, but it is just to filter unvalid data
+    elif source_type == 'temperature':
+        ts_possible_range = [-50, 50]
+    else:
+        raise ValueError(f"Invalid source type [{source_type}]. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES))
+
     # Analyze rainfall noise
-    analyze_rainfall_noise(env)
+    percntiles_dict, noise_dict = obtain_percentiles_and_noise(ts_vars, percentiles, ts_possible_range)
 
 # %% === Command line interface
 if __name__ == "__main__":
