@@ -1,8 +1,8 @@
 # %% === Import necessary modules
+import os
 import warnings
 import pandas as pd
 import numpy as np
-import os
 import scipy.spatial
 
 from ..rasters.coordinates import _check_and_convert_coords, are_coords_geographic

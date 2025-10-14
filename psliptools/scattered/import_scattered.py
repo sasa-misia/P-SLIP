@@ -6,11 +6,213 @@ import os
 from dateutil import parser
 import re
 
+# %% === Helper function to search datetime patters in a string
+def _initialize_datetime_patterns_searchers(
+    ) -> tuple[re.Pattern, re.Pattern]:
+    """
+    Initialize datetime patterns searchers.
+    
+    Returns:
+        tuple[re.Pattern, re.Pattern]: Tuple containing date and time patterns searchers.
+    """
+    date_sep_chars = r'[-/.]' # Possible characters to separate date are [-], [/], or [.]
+    time_sep_chars = r'[:.]' # Possible characters to separate time are [:], or [.]
+
+    date_pattern = re.compile(rf'(\d{{4}}{date_sep_chars}\d{{1,2}}{date_sep_chars}\d{{1,2}}|\d{{1,2}}{date_sep_chars}\d{{1,2}}{date_sep_chars}\d{{4}}|\d{{8}})')
+    time_pattern = re.compile(rf'(\d{{1,2}}{time_sep_chars}\d{{1,2}}{time_sep_chars}\d{{1,2}}|\d{{1,2}}{time_sep_chars}\d{{1,2}})')
+    
+    return date_pattern, time_pattern
+
+# %% === Helper method to clean strings, based on a datetime pattern (just the pattern will be extracted)
+def _clean_date_string(
+        date_str: str,
+        date_time_separator: str=None
+    ) -> str:
+    """
+    Clean a date string based on a datetime pattern.
+    
+    Args:
+        date_str (str): The date string to clean.
+        date_time_separator (str, optional): The separator between date and time (default: None, which means that the existing one will be used)
+        
+    Returns:
+        str: The cleaned date string.
+    """
+    date_pattern, time_pattern = _initialize_datetime_patterns_searchers()
+    date_match = date_pattern.search(date_str)
+    time_match = time_pattern.search(date_str)
+
+    if date_match:
+        date_start_idx = date_match.start()
+        date_end_idx = date_match.end()
+    else:
+        raise ValueError(f'No date found in {date_str}')
+    
+    if time_match:
+        time_start_idx = time_match.start()
+        time_end_idx = time_match.end()
+        
+        if date_start_idx < time_start_idx:
+            first_part = date_str[date_start_idx:date_end_idx]
+            second_part = date_str[time_start_idx:time_end_idx]
+            if date_time_separator is None:
+                date_time_separator = date_str[date_end_idx:time_start_idx]
+        else:
+            first_part = date_str[time_start_idx:time_end_idx]
+            second_part = date_str[date_start_idx:date_end_idx]
+            if date_time_separator is None:
+                date_time_separator = date_str[time_end_idx:date_start_idx]
+        
+        date_str_clean = first_part + date_time_separator + second_part
+    else:
+        date_str_clean = date_str[date_start_idx:date_end_idx]
+        
+    return date_str_clean
+
+# %% === Helper method to parse date with inferred format
+def _parse_date_with_inferred_format(
+        date_str: str, 
+        date_format: str, 
+        fuzzy: bool=False,
+        date_time_separator: str=None
+    ) -> pd.Timestamp:
+    """
+    Parse a date string using the inferred date format.
+    
+    Args:
+        date_str (str): The date string to parse.
+        date_format (str): The inferred date format.
+        fuzzy (bool, optional): Whether to use fuzzy parsing (default: False).
+        date_time_separator (str, optional): The separator between date and time (default: None). It has no effect if fuzzy is False or date_format is 'dateutil'.
+        
+    Returns:
+        pd.Timestamp: The parsed date.
+    """
+    if date_format == 'dateutil':
+        return parser.parse(date_str, fuzzy=fuzzy)
+    else:
+        if fuzzy:
+            date_str_clean = _clean_date_string(date_str, date_time_separator)
+            return pd.to_datetime(date_str_clean, format=date_format)
+        else:
+            return pd.to_datetime(date_str, format=date_format)
+        
+# %% === Helper method to infer possible datetime formats from a series
+def _infer_possible_date_formats(
+        series: pd.Series,
+        date_time_separator: str=None
+    ) -> set[str]:
+    """
+    Infer possible datetime formats from a pandas Series.
+    
+    Args:
+        series (pd.Series): The pandas Series to infer datetime formats from.
+        date_time_separator (str, optional): The separator between date and time to use (default: None, which means that the existing one will be used).
+        
+    Returns:
+        set[str]: A set of possible datetime formats.
+    """
+    date_format_not_found_string = "Unable to infer date format"
+    date_pattern, time_pattern = _initialize_datetime_patterns_searchers()
+
+    series = series.copy()
+    formats = set()
+    for full_date_str in series:
+        # if len(full_date_str) not in [8, 10, 16, 19]: # YYYYMMDD, YYYY-MM-DD, YYYY-MM-DD HH:MM, YYYY-MM-DD HH:MM:SS
+        #     raise ValueError(date_format_not_found_string)
+        
+        date_match = date_pattern.search(full_date_str)
+        time_match = time_pattern.search(full_date_str)
+        
+        if date_match:
+            date_str = date_match.group()
+            date_sep = [x for x in date_str if not x.isdigit()]
+            if len(date_sep) == 0 and len(date_str) == 8: # No separators
+                if int(date_str[:4]) > 1900 and 1 <= int(date_str[4:6]) <= 31 and 1 <= int(date_str[6:]) <= 31: # Probably starts with year
+                    if date_str[4:6] > '12': # Day is in the middle
+                        date_format = ['%Y%d%m']
+                    elif date_str[6:] > '12': # Day is at the end
+                        date_format = ['%Y%m%d']
+                    else: # Not sure if day is in the middle or at the end, include both
+                        date_format = [
+                            '%Y%d%m',
+                            '%Y%m%d'
+                        ]
+                elif int(date_str[4:]) > 1900 and 1 <= int(date_str[0:2]) <= 31 and 1 <= int(date_str[2:4]) <= 31: # probably ends with year
+                    if date_str[0:2] > '12': # Day is at the beginning
+                        date_format = ['%d%m%Y']
+                    elif date_str[2:4] > '12': # Day is in the middle
+                        date_format = ['%m%d%Y']
+                    else: # Not sure if day is at the beginning or in the middle, include both
+                        date_format = [
+                            '%d%m%Y',
+                            '%m%d%Y'
+                        ]
+                else:
+                    raise ValueError(f"{date_format_not_found_string}. Date string with 8 characters: {date_str}")
+            
+            elif len(date_sep) == 2 and len(date_str) == 10: # Separators (which can be different, in case of user inconsistency)
+                date_splitted = date_str.replace(date_sep[1], date_sep[0]).split(date_sep[0])
+                if len(date_splitted[0]) == 4: # Starts with year
+                    if int(date_splitted[1]) > 12: # Day is in the middle
+                        date_format = [f'%Y{date_sep[0]}%d{date_sep[1]}%m']
+                    elif int(date_splitted[2]) > 12: # Day is at the end
+                        date_format = [f'%Y{date_sep[0]}%m{date_sep[1]}%d']
+                    else: # Not sure if day is in the middle or at the end, include both
+                        date_format = [
+                            f'%Y{date_sep[0]}%d{date_sep[1]}%m',
+                            f'%Y{date_sep[0]}%m{date_sep[1]}%d'
+                        ]
+                elif len(date_splitted[2]) == 4: # Ends with year
+                    if int(date_splitted[0]) > 12: # Day is at the beginning
+                        date_format = [f'%d{date_sep[0]}%m{date_sep[1]}%Y']
+                    elif int(date_splitted[1]) > 12: # Day is in the middle
+                        date_format = [f'%m{date_sep[0]}%d{date_sep[1]}%Y']
+                    else: # Not sure if day is at the beginning or in the middle, include both
+                        date_format = [
+                            f'%d{date_sep[0]}%m{date_sep[1]}%Y',
+                            f'%m{date_sep[0]}%d{date_sep[1]}%Y'
+                        ]
+                else:
+                    raise ValueError(f"{date_format_not_found_string}. Date string with 10 characters: {date_str}")
+                
+            else:
+                raise ValueError(f"{date_format_not_found_string}. Date string has not 8 or 10 characters: {full_date_str}")
+            
+            if time_match:
+                time_str = time_match.group()
+                time_sep = [x for x in time_str if not x.isdigit()]
+                if len(time_sep) == 1: # Found just hour and minute
+                    time_format = f'%H{time_sep[0]}%M'
+                elif len(time_sep) == 2: # Found hour, minute and second
+                    time_format = f'%H{time_sep[0]}%M{time_sep[1]}%S'
+                else:
+                    raise ValueError(f"{date_format_not_found_string}. Time string with 0 or more than 2 separators: {time_str}")
+                
+                for curr_dt_format in date_format:
+                    if date_match.start() < time_match.start():
+                        if date_time_separator is None:
+                            date_time_separator = full_date_str[date_match.end():time_match.start()]
+                        formats.add(f'{curr_dt_format}{date_time_separator}{time_format}')
+                    else:
+                        if date_time_separator is None:
+                            date_time_separator = full_date_str[time_match.end():date_match.start()]
+                        formats.add(f'{time_format}{date_time_separator}{curr_dt_format}')
+            else:
+                for curr_dt_format in date_format:
+                    formats.add(curr_dt_format)
+        else:
+            raise ValueError(f"{date_format_not_found_string}. No date match found: {full_date_str}")
+
+    return formats
+
 # %% === Helper method to infer date format
 def _infer_date_format(
         series: pd.Series, 
-        allow_multiple_formats: bool = False,
-        samples_to_test: int = 50
+        allow_multiple_formats: bool=False,
+        samples_to_test: int=50,
+        fuzzy: bool=False,
+        date_time_separator: str=None
     ) -> str:
     """
     Infer the date format of a pandas Series.
@@ -18,6 +220,9 @@ def _infer_date_format(
     Args:
         series (pd.Series): The pandas Series to infer the date format from.
         allow_multiple_formats (bool, optional): Whether to allow multiple date formats (default: False).
+        samples_to_test (int, optional): The number of samples to test (default: 50).
+        fuzzy (bool, optional): Whether to use fuzzy parsing (default: False).
+        date_time_separator (str, optional): The separator between date and time to use internally (default: None).
         
     Returns:
         str: The inferred date format.
@@ -32,97 +237,10 @@ def _infer_date_format(
             except ValueError:
                 raise ValueError(date_format_not_found_string)
         else:
-            formats = set()
-            date_sep_chars = r'[-/.]' # Possible characters to separate date are [-], [/], or [.]
-            time_sep_chars = r'[:.]' # Possible characters to separate time are [:], or [.]
-
-            date_pattern = re.compile(rf'(\d{{4}}{date_sep_chars}\d{{1,2}}{date_sep_chars}\d{{1,2}}|\d{{1,2}}{date_sep_chars}\d{{1,2}}{date_sep_chars}\d{{4}}|\d{{8}})')
-            time_pattern = re.compile(rf'(\d{{1,2}}{time_sep_chars}\d{{1,2}}{time_sep_chars}\d{{1,2}}|\d{{1,2}}{time_sep_chars}\d{{1,2}})')
-            
-            for full_date_str in series.head(samples_to_test):
-                if len(full_date_str) not in [8, 10, 16, 19]: # YYYYMMDD, YYYY-MM-DD, YYYY-MM-DD HH:MM, YYYY-MM-DD HH:MM:SS
-                    raise ValueError(date_format_not_found_string)
-                
-                date_match = date_pattern.search(full_date_str)
-                time_match = time_pattern.search(full_date_str)
-                
-                if date_match:
-                    date_str = date_match.group()
-                    date_sep = [x for x in date_str if not x.isdigit()]
-                    if len(date_sep) == 0 and len(date_str) == 8: # No separators
-                        if int(date_str[:4]) > 1900 and 1 <= int(date_str[4:6]) <= 31 and 1 <= int(date_str[6:]) <= 31: # Probably starts with year
-                            if date_str[4:6] > '12': # Day is in the middle
-                                date_format = ['%Y%d%m']
-                            elif date_str[6:] > '12': # Day is at the end
-                                date_format = ['%Y%m%d']
-                            else: # Not sure if day is in the middle or at the end, include both
-                                date_format = [
-                                    '%Y%d%m',
-                                    '%Y%m%d'
-                                ]
-                        elif int(date_str[4:]) > 1900 and 1 <= int(date_str[0:2]) <= 31 and 1 <= int(date_str[2:4]) <= 31: # probably ends with year
-                            if date_str[0:2] > '12': # Day is at the beginning
-                                date_format = ['%d%m%Y']
-                            elif date_str[2:4] > '12': # Day is in the middle
-                                date_format = ['%m%d%Y']
-                            else: # Not sure if day is at the beginning or in the middle, include both
-                                date_format = [
-                                    '%d%m%Y',
-                                    '%m%d%Y'
-                                ]
-                        else:
-                            raise ValueError(f"{date_format_not_found_string}. Date string with 8 characters: {date_str}")
-                    
-                    elif len(date_sep) == 2 and len(date_str) == 10: # Separators (which can be different, in case of user inconsistency)
-                        date_splitted = date_str.replace(date_sep[1], date_sep[0]).split(date_sep[0])
-                        if len(date_splitted[0]) == 4: # Starts with year
-                            if int(date_splitted[1]) > 12: # Day is in the middle
-                                date_format = [f'%Y{date_sep[0]}%d{date_sep[1]}%m']
-                            elif int(date_splitted[2]) > 12: # Day is at the end
-                                date_format = [f'%Y{date_sep[0]}%m{date_sep[1]}%d']
-                            else: # Not sure if day is in the middle or at the end, include both
-                                date_format = [
-                                    f'%Y{date_sep[0]}%d{date_sep[1]}%m',
-                                    f'%Y{date_sep[0]}%m{date_sep[1]}%d'
-                                ]
-                        elif len(date_splitted[2]) == 4: # Ends with year
-                            if int(date_splitted[0]) > 12: # Day is at the beginning
-                                date_format = [f'%d{date_sep[0]}%m{date_sep[1]}%Y']
-                            elif int(date_splitted[1]) > 12: # Day is in the middle
-                                date_format = [f'%m{date_sep[0]}%d{date_sep[1]}%Y']
-                            else: # Not sure if day is at the beginning or in the middle, include both
-                                date_format = [
-                                    f'%d{date_sep[0]}%m{date_sep[1]}%Y',
-                                    f'%m{date_sep[0]}%d{date_sep[1]}%Y'
-                                ]
-                        else:
-                            raise ValueError(f"{date_format_not_found_string}. Date string with 10 characters: {date_str}")
-                        
-                    else:
-                        raise ValueError(f"{date_format_not_found_string}. Date string has not 8 or 10 characters: {full_date_str}")
-                    
-                    if time_match:
-                        time_str = time_match.group()
-                        time_sep = [x for x in time_str if not x.isdigit()]
-                        if len(time_sep) == 1: # Found just hour and minute
-                            time_format = f'%H{time_sep[0]}%M'
-                        elif len(time_sep) == 2: # Found hour, minute and second
-                            time_format = f'%H{time_sep[0]}%M{time_sep[1]}%S'
-                        else:
-                            raise ValueError(f"{date_format_not_found_string}. Time string with 0 or more than 2 separators: {time_str}")
-                        
-                        for curr_dt_format in date_format:
-                            if date_match.start() < time_match.start():
-                                date_time_separator = full_date_str[date_match.end():time_match.start()]
-                                formats.add(f'{curr_dt_format}{date_time_separator}{time_format}')
-                            else:
-                                date_time_separator = full_date_str[time_match.end():date_match.start()]
-                                formats.add(f'{time_format}{date_time_separator}{curr_dt_format}')
-                    else:
-                        for curr_dt_format in date_format:
-                            formats.add(curr_dt_format)
-                else:
-                    raise ValueError(f"{date_format_not_found_string}. No date match found: {full_date_str}")
+            formats = _infer_possible_date_formats(
+                series=series.head(samples_to_test), 
+                date_time_separator=date_time_separator
+            )
             
             if len(formats) == 1:
                 return list(formats)[0]
@@ -134,7 +252,12 @@ def _infer_date_format(
                 for i, full_date_str in enumerate(series.head(samples_to_test)):
                     for j, date_format in enumerate(formats_list):
                         try:
-                            pd.to_datetime(full_date_str, format=date_format)
+                            _parse_date_with_inferred_format(
+                                date_str=full_date_str,
+                                date_format=date_format,
+                                fuzzy=fuzzy,
+                                date_time_separator=date_time_separator
+                            )
                             compatibility_matrix[i, j] = True
                         except ValueError:
                             pass
@@ -152,28 +275,43 @@ def _infer_date_format(
     
     except Exception as e:
         raise ValueError(f"Error inferring date format: {str(e)}")
-
-# %% === Helper method to parse date with inferred format
-def _parse_date_with_inferred_format(
-        date_str: str, 
-        date_format: str, 
-        fuzzy: bool = False
-    ) -> pd.Timestamp:
-    """
-    Parse a date string using the inferred date format.
     
-    Args:
-        date_str (str): The date string to parse.
-        date_format (str): The inferred date format.
-        fuzzy (bool, optional): Whether to use fuzzy parsing (default: False).
-        
-    Returns:
-        pd.Timestamp: The parsed date.
+# %% === Method to filter numeric data by numeric range
+def _filter_numeric_series(
+    series: pd.Series,
+    min_value: float=None,
+    max_value: float=None,
+    include_extremes: bool=True,
+    filler_value: float=np.nan
+    ) -> pd.Series:
     """
-    if date_format == 'dateutil':
-        return parser.parse(date_str, fuzzy=fuzzy)
-    else:
-        return pd.to_datetime(date_str, format=date_format)
+    Filter a numeric pandas Series by a numeric range.
+
+    Args:
+        series (pd.Series): The numeric pandas Series to filter.
+        min_value (float, optional): The minimum value to include in the range (default: None).
+        max_value (float, optional): The maximum value to include in the range (default: None).
+        include_extremes (bool, optional): Whether to include the minimum and maximum values in the range (default: False).
+        filler_value (float, optional): The value to fill the filtered values with (default: np.nan).
+
+    Returns:
+        pd.Series: The filtered numeric pandas Series, where values outside the range are filled with the specified value.
+    """
+    series = series.copy()
+    lower_filter = np.ones((series.shape[0],), dtype=bool) if min_value is None else (series > min_value)
+    upper_filter = np.ones((series.shape[0],), dtype=bool) if max_value is None else (series < max_value)
+    if include_extremes:
+        if min_value:
+            lower_filter = lower_filter | (series == min_value)
+        if max_value:
+            upper_filter = upper_filter | (series == max_value)
+    rows_with_valid_data = lower_filter & upper_filter
+    series.loc[~rows_with_valid_data] = filler_value
+
+    if (~rows_with_valid_data).any():
+        warnings.warn(f"Some data values were filtered out using range [{min_value} - {max_value}].", stacklevel=2)
+
+    return series
 
 # %% === Method to fill gaps in a series with the mean between the first and last non-empty values
 def _fill_missing_values_with_mean(
@@ -307,7 +445,10 @@ def _parse_time_sensitive_dataframe(
         fill_method: str | int | float=None,
         round_datetime: bool=True,
         allow_multiple_date_formats: bool=False,
-        force_datetime_consistency: bool=False
+        force_datetime_consistency: bool=False,
+        numeric_range_filter: list[float] | tuple[float, float]=[None, None],
+        fuzzy_datetime_match: bool=False,
+        date_time_separator: str=None
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Parse and validate a time-sensitive dataframe.
@@ -348,8 +489,22 @@ def _parse_time_sensitive_dataframe(
             # Check if it might be a date column
             try:
                 # Infer the date format
-                date_format = _infer_date_format(data_df[col], allow_multiple_date_formats)
-                data_df[col] = data_df[col].apply(lambda x: _parse_date_with_inferred_format(x, date_format, fuzzy=True))
+                date_format = _infer_date_format(
+                    series=data_df[col], 
+                    allow_multiple_formats=allow_multiple_date_formats, 
+                    samples_to_test=300, # Try to increase it, in case of column not detected.
+                    fuzzy=fuzzy_datetime_match,
+                    date_time_separator=date_time_separator
+                )
+
+                data_df[col] = data_df[col].apply(
+                    lambda x: _parse_date_with_inferred_format(
+                        date_str=x, 
+                        date_format=date_format, 
+                        fuzzy=fuzzy_datetime_match,
+                        date_time_separator=date_time_separator
+                    )
+                )
             except:
                 pass
         elif pd.api.types.is_numeric_dtype(col_type):
@@ -363,6 +518,15 @@ def _parse_time_sensitive_dataframe(
     for col in data_df.columns:
         if pd.api.types.is_numeric_dtype(data_df[col].dtype):
             pre_data_type = data_df[col].dtype
+
+            data_df[col] = _filter_numeric_series(
+                series=data_df[col],
+                min_value=numeric_range_filter[0],
+                max_value=numeric_range_filter[1],
+                include_extremes=True,
+                filler_value=np.nan
+            ) # np.nan is the equivalent of missing, then it will be filled later with _fill_missing_values_of_numeric_series
+
             missing_row_ids = data_df[data_df[col].isnull()].index.to_list()
             if len(missing_row_ids) > 0 and fill_method is not None:
                 data_df[col] = _fill_missing_values_of_numeric_series(
@@ -377,7 +541,7 @@ def _parse_time_sensitive_dataframe(
             
             data_df[col] = data_df[col].astype(pre_data_type)
 
-        if pd.api.types.is_datetime64_any_dtype(data_df[col]):
+        elif pd.api.types.is_datetime64_any_dtype(data_df[col]):
             missing_row_ids = data_df[data_df[col].isnull()].index.to_list()
             if len(missing_row_ids) > 0:
                 if data_df[col].dtype == 'object':
@@ -420,7 +584,10 @@ def _parse_time_sensitive_dataframe(
                         fill_method=fill_method,
                         round_datetime=round_datetime,
                         allow_multiple_date_formats=allow_multiple_date_formats,
-                        force_datetime_consistency=False
+                        force_datetime_consistency=False, # It must be false for the second attempt!
+                        numeric_range_filter=numeric_range_filter,
+                        fuzzy_datetime_match=fuzzy_datetime_match,
+                        date_time_separator=date_time_separator
                     )
 
                 else:
@@ -431,15 +598,15 @@ def _parse_time_sensitive_dataframe(
                 data_df[col] = data_df[col].dt.tz_localize(None)
             
             data_df[col] = data_df[col].astype('datetime64[ns]')
+        
+        else:
+            warnings.warn(f"Column [{col}] is not numeric or datetime, the type is {data_df[col].dtype}", stacklevel=2)
     
     datetime_df = data_df.select_dtypes(include=['datetime64[ns]'])
     numeric_df = data_df.select_dtypes(include=['float64', 'int64'])
 
     if len(datetime_df.columns) != 1 and len(datetime_df.columns) != 2:
-        raise ValueError("Expected one or two datetime columns in the dataframe (just start, or end, or start + end dates)")
-
-    if len(numeric_df.columns) == 0:
-        raise ValueError("No numeric columns found in the dataframe")
+        raise ValueError(f"Expected one or two datetime columns in the dataframe (just start, or end, or start + end dates), got: {len(datetime_df.columns)} columns: {list(datetime_df.columns)}")
 
     return data_df, datetime_df, numeric_df
 
@@ -641,17 +808,17 @@ def _advanced_column_detection(
             'expected_type': 'datetime'
         },
         'cumulative_rain': {
-            'patterns': ['cum', 'tot', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia'],
+            'patterns': ['cum', 'cumul', 'tot', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia'],
             'expected_type': 'numeric',
             'range': (0, 1000)  # Reasonable rain values
         },
         'min_cumulative_rain': {
-            'patterns': ['min', 'mín', 'niedrigst', 'cum', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia'],
+            'patterns': ['min', 'mín', 'niedrigst', 'cum', 'cumul', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia'],
             'expected_type': 'numeric',
             'range': (0, 1000)  # Reasonable rain values
         },
         'max_cumulative_rain': {
-            'patterns': ['max', 'mín', 'niedrigst', 'mas', 'máx', 'höchst', 'cum', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia'],
+            'patterns': ['max', 'mín', 'niedrigst', 'mas', 'máx', 'höchst', 'cum', 'cumul', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia'],
             'expected_type': 'numeric',
             'range': (0, 1000)  # Reasonable rain values
         },
@@ -980,7 +1147,9 @@ def load_time_sensitive_data_from_csv(
         last_date: pd.Timestamp=None,
         datetime_columns_names: list[str]=None,
         numeric_columns_names: list[str]=None,
-        force_datetime_consistency: bool=False
+        force_datetime_consistency: bool=False,
+        numeric_range_filter: list[float] | tuple[float, float]=[None, None],
+        fuzzy_datetime_match: bool=False
     ) -> pd.DataFrame:
     """
     Load time-sensitive data from a CSV file.
@@ -1007,6 +1176,8 @@ def load_time_sensitive_data_from_csv(
         numeric_columns_names (list[str], optional): A list of numeric column names (default: None).
         force_datetime_consistency (bool, optional): If True, force consistency of time series, which means that if datetime row is missing, 
             then it will be added to have consistency of deltatime and numeric columns will be filled with the fill_method (default: False).
+        numeric_range_filter (list[float] | tuple[float, float], optional): A list or tuple of two floats, specifying the range of numeric values to filter out (default: [None, None]).
+        fuzzy_datetime_match (bool, optional): If True, allow fuzzy matching of datetime columns (default: False).
 
     Returns:
         pd.DataFrame: A DataFrame containing the loaded data.
@@ -1025,6 +1196,12 @@ def load_time_sensitive_data_from_csv(
         raise TypeError("delta_time_hours must be a float, integer or None.")
     if not isinstance(force_datetime_consistency, bool):
         raise TypeError("force_datetime_consistency must be a boolean.")
+    if not isinstance(numeric_range_filter, (list, tuple, type(None))):
+        raise TypeError("numeric_range_filter must be a list, tuple or None.")
+    if isinstance(numeric_range_filter, type(None)):
+        numeric_range_filter = [None, None]
+    if len(numeric_range_filter) != 2:
+        raise ValueError("numeric_range_filter must be a list or tuple with 2 elements.")
     
     raw_data_df = pd.read_csv(file_path, sep=None, engine='python') # Sometimes separators are not just commas (,) but maybe semicolons (;) or something else
 
@@ -1033,7 +1210,11 @@ def load_time_sensitive_data_from_csv(
             data_df=raw_data_df,
             fill_method=fill_method, 
             round_datetime=round_datetime,
-            force_datetime_consistency=force_datetime_consistency
+            allow_multiple_date_formats=False,
+            force_datetime_consistency=force_datetime_consistency,
+            numeric_range_filter=numeric_range_filter,
+            fuzzy_datetime_match=fuzzy_datetime_match,
+            date_time_separator=' '
         )
     except Exception as e:
         raise ValueError(f"Error parsing the csv file [{file_path}]: {e}")
@@ -1219,17 +1400,22 @@ def merge_time_sensitive_data_and_stations(
     data_dict = data_dict.copy()
     stations_table = stations_table.copy()
 
-    stations_table = stations_table[stations_table["station"].isin(list(data_dict.keys()))]
+    stations_table = stations_table.loc[stations_table["station"].isin(list(data_dict.keys()))].reset_index(drop=True)
 
     station_names = stations_table["station"].to_list()
     for data_label in data_dict:
         if data_label not in station_names:
             raise ValueError(f"Data label [{data_label}] of input data_dict not found in the stations_table.")
     
-    start_dates, end_dates = [], []
+    start_dates, end_dates, delta_times = [], [], []
     for data in data_dict.values():
         start_dates.append(data['start_date'].iloc[0])
         end_dates.append(data['end_date'].iloc[-1])
+        delta_times.append(data['start_date'].diff().mean())
+    
+    delta_time_disequality = [delta_time != delta_times[0] for delta_time in delta_times]
+    if any(delta_time_disequality):
+        raise ValueError(f"All data must have the same delta time. Found: {delta_times} for stations: {list(data_dict.keys())}. Please force delta time to be the same for all data.")
 
     shared_start_date = max(start_dates)
     shared_end_date = min(end_dates)
@@ -1248,16 +1434,17 @@ def merge_time_sensitive_data_and_stations(
                 numeric_columns_names.append(filt_col_name)
         data_dict[data_label] = filtered_data_df
     
-    time_sensitive_vars = {'stations':stations_table, 'dates': None}
+    time_sensitive_vars = {'stations':stations_table, 'datetimes': None, 'data': {}}
     for col_name in numeric_columns_names:
-        time_sensitive_vars[col_name] = None
+        time_sensitive_vars['data'][col_name] = None
+    
     for sta in station_names:
         curr_datetimes = data_dict[sta].loc[:, ['start_date', 'end_date']]
-        if time_sensitive_vars['dates'] is None:
-            time_sensitive_vars['dates'] = curr_datetimes
+        if time_sensitive_vars['datetimes'] is None:
+            time_sensitive_vars['datetimes'] = curr_datetimes
         else:
-            start_diff = (time_sensitive_vars['dates']['start_date'] - curr_datetimes['start_date']).abs()
-            end_diff = (time_sensitive_vars['dates']['end_date'] - curr_datetimes['end_date']).abs()
+            start_diff = (time_sensitive_vars['datetimes']['start_date'] - curr_datetimes['start_date']).abs()
+            end_diff = (time_sensitive_vars['datetimes']['end_date'] - curr_datetimes['end_date']).abs()
             if (start_diff > pd.Timedelta(seconds=1)).any():
                 raise ValueError(f"Data for gauge [{sta}] has different start dates at indices : {start_diff[start_diff > pd.Timedelta(seconds=1)].index}, differing by {start_diff[start_diff > pd.Timedelta(seconds=1)]}.")
             if (end_diff > pd.Timedelta(seconds=1)).any():
@@ -1266,10 +1453,10 @@ def merge_time_sensitive_data_and_stations(
             if col_name in data_dict[sta].columns:
                 curr_numeric = data_dict[sta].loc[:, [col_name]]
                 curr_numeric.columns = [sta]
-                if time_sensitive_vars[col_name] is None:
-                    time_sensitive_vars[col_name] = curr_numeric
+                if time_sensitive_vars['data'][col_name] is None:
+                    time_sensitive_vars['data'][col_name] = curr_numeric
                 else:
-                    time_sensitive_vars[col_name] = pd.concat([time_sensitive_vars[col_name], curr_numeric], axis=1)
+                    time_sensitive_vars['data'][col_name] = pd.concat([time_sensitive_vars['data'][col_name], curr_numeric], axis=1)
     return time_sensitive_vars
 
 # %%

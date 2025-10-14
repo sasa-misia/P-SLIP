@@ -37,6 +37,19 @@ logger.info("=== Importing time-sensitive data ===") # This script must be putte
 SOURCE_MODES = ['station', 'satellite']
 AGGREGATION_METHODS = ['mean', 'sum', 'min', 'max']
 
+def get_numeric_data_ranges(
+        source_type: str
+    ) -> tuple[float, float]:
+    """Utility function to get the numeric data ranges based on the source type."""
+    ts_possible_range = (None, None)
+    if source_type == 'rain':
+        ts_possible_range = (0, None)
+    elif source_type == 'temperature':
+        ts_possible_range = (-50, 50)
+    else:
+        raise ValueError(f"Invalid source type [{source_type}]. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES))
+    return ts_possible_range
+
 def get_fill_and_aggregation_methods(
         source_type: str,
         aggregation_method: list[str] | None
@@ -181,6 +194,7 @@ def main(
                 src_ext=allowed_extensions
             )
 
+    ts_numeric_data_range = get_numeric_data_ranges(source_type)
     fill_method, aggregation_method = get_fill_and_aggregation_methods(source_type, aggregation_method)
     
     if source_mode == 'station':
@@ -212,7 +226,9 @@ def main(
                 last_date=last_date,
                 datetime_columns_names=None, # Auto-detect
                 numeric_columns_names=None, # Auto-detect
-                force_datetime_consistency=force_consistency
+                force_datetime_consistency=force_consistency,
+                numeric_range_filter=ts_numeric_data_range,
+                fuzzy_datetime_match=True
             )
 
             _, cust_id = env.add_input_file(file_path=data_pth, file_type=source_type, file_subtype=f"rec{idx+1}")
@@ -228,8 +244,8 @@ def main(
     else:
         raise NotImplementedError("Satellite mode is not supported in this script yet. Please contact the developer.")
     
-    common_start_date = time_sensitive_vars['dates']['start_date'].iloc[0].strftime("%Y-%b-%d %H:%M:%S")
-    common_end_date = time_sensitive_vars['dates']['end_date'].iloc[-1].strftime("%Y-%b-%d %H:%M:%S")
+    common_start_date = time_sensitive_vars['datetimes']['start_date'].iloc[0].strftime("%Y-%b-%d %H:%M:%S")
+    common_end_date = time_sensitive_vars['datetimes']['end_date'].iloc[-1].strftime("%Y-%b-%d %H:%M:%S")
 
     env.config['inputs'][source_type][idx_config]['settings'] = {
         'source_mode': source_mode,
