@@ -30,7 +30,7 @@ from psliptools.utilities import (
 
 # Importing necessary modules from main_modules
 from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
-logger = setup_logger()
+logger = setup_logger(__name__)
 logger.info("=== Import DTM ===")
 
 # %% === DEM and Analysis Base Grid (ABG) methods

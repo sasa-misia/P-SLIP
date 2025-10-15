@@ -14,13 +14,27 @@ from config.default_params import LOG_CONFIG, ENVIRONMENT_FILENAME, DEFAULT_CASE
 
 # %% === Logger
 # This will log messages to the console and when the AnalysisEnvironment is created or loaded, it will log to a file
-def setup_logger():
+def setup_logger(
+        module_name=None
+    ):
+    """
+    Set up the logger for the analysis environment.
+
+    Args:
+        module_name: Name of the module (use __name__). If None, the module where this method is called is used.
+
+    Returns:
+        logging.Logger: The logger object.
+    """
     logging.basicConfig(
         level=logging.INFO,
         format=LOG_CONFIG['format'], 
         datefmt=LOG_CONFIG['date_format']
     )
-    logger = logging.getLogger(__name__)
+    if module_name:
+        logger = logging.getLogger(module_name)
+    else:
+        logger = logging.getLogger(__name__)
     return logger
 
 # %% === Main function to initialize or load the analysis environment

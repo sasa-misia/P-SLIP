@@ -34,7 +34,7 @@ from psliptools.scattered import (
 
 # Importing necessary modules from main_modules
 from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
-logger = setup_logger()
+logger = setup_logger(__name__)
 logger.info(f"=== Obtain reference points info ===")
 
 # %% === Methods to extract reference points info

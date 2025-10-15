@@ -24,7 +24,7 @@ from psliptools.utilities import (
 
 # Importing necessary modules from main_modules
 from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename, setup_logger
-logger = setup_logger()
+logger = setup_logger(__name__)
 logger.info("=== Import polygons with main properties ===")
 
 # %% === Methods to import shapefiles with main properties
