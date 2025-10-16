@@ -14,7 +14,10 @@ from .csv_file_utils import (
 from .pandas_utils import (
     compare_dataframes,
     compare_dataframes_columns,
-    get_list_of_values_from_dataframe
+    get_list_of_values_from_dataframe,
+    get_mask_in_range,
+    filter_numeric_series,
+    fill_missing_values_of_numeric_series
 )
 
 from .user_prompts import (
@@ -36,6 +39,11 @@ from .web_sources import (
     download_wms_raster
 )
 
+from .datetimes import (
+    parse_datetime,
+    infer_datetime_format
+)
+
 __all__ = [
     "check_raw_path",
     "get_raw_fold",
@@ -48,6 +56,9 @@ __all__ = [
     "compare_dataframes",
     "compare_dataframes_columns",
     "get_list_of_values_from_dataframe",
+    "get_mask_in_range",
+    "filter_numeric_series",
+    "fill_missing_values_of_numeric_series",
     "download_wms_raster",
     "print_enumerated_list",
     "reorder_list_prompt",
@@ -55,5 +66,7 @@ __all__ = [
     "select_from_list_prompt",
     "select_files_in_folder_prompt",
     "select_dir_prompt",
-    "select_file_prompt"
+    "select_file_prompt",
+    "parse_datetime",
+    "infer_datetime_format"
 ]

@@ -5,6 +5,7 @@ import warnings
 import argparse
 import pandas as pd
 import numpy as np
+import datetime as dt
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -12,6 +13,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import (
     KNOWN_DYNAMIC_INPUT_TYPES,
     DYNAMIC_SUBFOLDERS
+)
+
+from psliptools.utilities import (
+    get_mask_in_range
 )
 
 # Importing necessary modules from main_modules
@@ -60,13 +65,12 @@ def get_time_sensitive_statistics(
         for col in ts_data.columns:
             curr_col = ts_data[col].copy()
 
-            lower_range_filter = (curr_col > numeric_data_range[0]) if numeric_data_range[0] is not None else np.ones((curr_col.shape[0],), dtype=bool)
-            upper_range_filter = (curr_col < numeric_data_range[1]) if numeric_data_range[1] is not None else np.ones((curr_col.shape[0],), dtype=bool)
-            if include_range_extremes:
-                lower_range_filter = lower_range_filter | (curr_col == numeric_data_range[0]) if numeric_data_range[0] is not None else lower_range_filter
-                upper_range_filter = upper_range_filter | (curr_col == numeric_data_range[1]) if numeric_data_range[1] is not None else upper_range_filter
-
-            rows_inside_range = lower_range_filter & upper_range_filter
+            rows_inside_range = get_mask_in_range(
+                series=curr_col,
+                min_value=numeric_data_range[0],
+                max_value=numeric_data_range[1],
+                include_min_max=include_range_extremes
+            )
             num_obs_range = rows_inside_range.sum()
 
             ts_stats['count'][ts_label].loc[['basic', 'quantiles'], col] = [num_obs_range, num_obs_range]
@@ -75,10 +79,12 @@ def get_time_sensitive_statistics(
             ts_stats['quantiles'][ts_label][col] = curr_col[rows_inside_range].quantile(quantiles)
 
             for qnt_idx, qnt_val in ts_stats['quantiles'][ts_label][col].items():
-                lower_noise_filter = lower_range_filter
-                upper_noise_filter = (curr_col < qnt_val) # Filtering out values greater than selected quantiles, because they represent high-importance events
-
-                rows_for_noise = lower_noise_filter & upper_noise_filter
+                rows_for_noise = get_mask_in_range(
+                    series=curr_col,
+                    min_value=numeric_data_range[0],
+                    max_value=qnt_val,
+                    include_min_max=include_range_extremes
+                )
                 num_obs_noise = rows_for_noise.sum()
 
                 ts_stats['count'][ts_label].loc['noise-'+str(qnt_idx), col] = num_obs_noise
@@ -89,7 +95,7 @@ def get_time_sensitive_statistics(
 
 def get_mobile_averages(
         time_sensitive_vars: dict,
-        moving_average_window: pd.Timedelta=pd.Timedelta(days=31),
+        moving_average_window: dt.timedelta | pd.Timedelta=pd.Timedelta(days=31),
         numeric_data_range: list[float]=[None, None],
         include_range_extremes: bool=False,
         weights: list[float] | np.ndarray | pd.Series=None
@@ -99,7 +105,7 @@ def get_mobile_averages(
 
     Args:
         time_sensitive_vars (dict): Dictionary containing time-sensitive data.
-        moving_average_window (pd.Timedelta, optional): Moving average window duration. Defaults to pd.Timedelta(days=31).
+        moving_average_window (dt.timedelta | pd.Timedelta, optional): Moving average window duration. Defaults to pd.Timedelta(days=31).
         numeric_data_range (list[float], optional): Numeric data range. Defaults to [None, None].
         include_range_extremes (bool, optional): Whether to include range extremes. Defaults to False.
         weights (list[float] | np.ndarray | pd.Series, optional): Weights for weighted moving average. Defaults to None.
@@ -107,6 +113,43 @@ def get_mobile_averages(
     Returns:
         dict: Dictionary containing different types of moving averages.
     """
+    def _simple_ma(x):
+        valid_rows = rows_inside_range.iloc[x.index]
+        valid_x = x[valid_rows]
+        if len(valid_x) == 0:
+            return np.nan
+        return valid_x.mean()
+    
+    def _cumulative_ma(x):
+        valid_rows = rows_inside_range.iloc[:x.index[-1]+1]  # Adjust index to match expanding
+        valid_x = x[valid_rows]
+        if len(valid_x) < rows_window:
+            return np.nan
+        return valid_x.mean()
+    
+    def _weighted_ma(x):
+        valid_rows = rows_inside_range.iloc[x.index]
+        valid_w = weights_arr[x.index] * valid_rows
+        valid_x = x[valid_rows]
+        if np.sum(valid_w) == 0:
+            return np.nan
+        return np.sum(valid_x * valid_w) / np.sum(valid_w)
+    
+    def _hull_wma(x):
+        valid_rows = rows_inside_range.iloc[x.index]
+        valid_w = np.arange(1, len(x) + 1) * valid_rows
+        valid_x = x[valid_rows]
+        if np.sum(valid_w) == 0:
+            return np.nan
+        return np.sum(valid_x * valid_w) / np.sum(valid_w)
+    
+    def _volatility_ma(x):
+        valid_rows = rows_inside_range.iloc[x.index]
+        valid_x = x[valid_rows]
+        if len(valid_x) == 0:
+            return np.nan
+        return valid_x.sum()
+    
     delta_time = time_sensitive_vars['datetimes']['start_date'].diff().mean()
     if delta_time > moving_average_window:
         raise ValueError(f"Invalid moving_average_window [{moving_average_window}]. Must be greater than data delta_time: [{delta_time}]")
@@ -137,69 +180,66 @@ def get_mobile_averages(
         for col in ts_data.columns:
             curr_col = ts_data[col].copy()
 
-            # TODO: Add support for numeric ranges (values outside ranges must not be included in moving average calculations, and count of observations used must be written in ts_mobile_averages['count'][ts_label])
-            # lower_range_filter = (curr_col > numeric_data_range[0]) if numeric_data_range[0] is not None else np.ones((curr_col.shape[0],), dtype=bool)
-            # upper_range_filter = (curr_col < numeric_data_range[1]) if numeric_data_range[1] is not None else np.ones((curr_col.shape[0],), dtype=bool)
-            # if include_range_extremes:
-            #     lower_range_filter = lower_range_filter | (curr_col == numeric_data_range[0]) if numeric_data_range[0] is not None else lower_range_filter
-            #     upper_range_filter = upper_range_filter | (curr_col == numeric_data_range[1]) if numeric_data_range[1] is not None else upper_range_filter
+            # NOTE 1: Each value contains the current row in calculation (closed='right')
+            # NOTE 2: Values are present only if the time window is available
 
-            # rows_inside_range = lower_range_filter & upper_range_filter
+            rows_inside_range = get_mask_in_range(
+                series=curr_col,
+                min_value=numeric_data_range[0],
+                max_value=numeric_data_range[1],
+                include_min_max=include_range_extremes
+            )
 
-            # NOTE: Values are present only if the time window is available and each value contains the current row in calculation (closed='right')
+            # Count of observations used for moving averages
+            count_valid_obs = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').apply(lambda x: rows_inside_range.iloc[x.index].sum(), raw=False)
+            ts_mobile_averages['count'][ts_label][col] = count_valid_obs.astype('Int64')
+
+            # TODO: Check the methods used to obtain mobile averages, check function written above, simplify the logic
             
-            # Simple Moving Average
-            ma_simple = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').mean() # With closed='right' the last value (current row) is used for the moving average
+            # Simple Moving Average with range filter
+            ma_simple = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').apply(_simple_ma, raw=False)
             ts_mobile_averages['simple'][ts_label][col] = ma_simple
 
-            # Exponential Moving Average
-            ma_exponential = curr_col.ewm(span=rows_window, min_periods=rows_window, adjust=False).mean() # With adjust=False the mobile average is more reactive to the current value, because it is recursive
+            # Exponential Moving Average (not directly affected by the range filter, but the count is)
+            ma_exponential = curr_col.ewm(span=rows_window, min_periods=rows_window, adjust=False).mean()
             ts_mobile_averages['exponential'][ts_label][col] = ma_exponential
 
-            # Cumulative Moving Average
-            ma_cumulative = curr_col.expanding(min_periods=rows_window).mean()
+            # Cumulative Moving Average with range filter
+            ma_cumulative = curr_col.expanding(min_periods=rows_window).apply(_cumulative_ma, raw=False)
             ts_mobile_averages['cumulative'][ts_label][col] = ma_cumulative
 
-            # Weighted Moving Average
+            # Weighted Moving Average with range filter
             if weights is None:
                 weights_arr = np.ones(curr_col.shape[0], dtype=np.float64)
             else:
                 weights_arr = np.array(weights)
-                if weights_arr.shape[0] != curr_col.shape[0]:
-                    raise ValueError("weights length must match the number of observations in the series")
-            def weighted_ma(x):
-                # x.index is the index of the selected rows
-                w = weights_arr[x.index]
-                return np.sum(x * w) / np.sum(w)
-            ma_weighted = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').apply(weighted_ma, raw=False)
+            
+            ma_weighted = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').apply(_weighted_ma, raw=False)
             ts_mobile_averages['weighted'][ts_label][col] = ma_weighted
 
-            # Hull Moving Average
+            # Hull Moving Average with range filter
             if rows_window < 2:
                 warnings.warn(f"Hull moving average can not be calculated for [{ts_label}] [{col}] because the moving_average_window is too small.", stacklevel=2)
             else:
-                wma_short = curr_col.rolling(window=rows_window//2, min_periods=rows_window//2, closed='right').apply(
-                    lambda x: np.sum(x * np.arange(1, len(x) + 1)) / np.sum(np.arange(1, len(x) + 1)), raw=True)
-                wma_long = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').apply(
-                    lambda x: np.sum(x * np.arange(1, len(x) + 1)) / np.sum(np.arange(1, len(x) + 1)), raw=True)
+                wma_short = curr_col.rolling(window=rows_window//2, min_periods=rows_window//2, closed='right').apply(lambda x: _hull_wma(x), raw=False)
+                wma_long = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').apply(lambda x: _hull_wma(x), raw=False)
                 raw_hma = (2 * wma_short) - wma_long
-                # Check for negative values in raw_hma
                 if (raw_hma < 0).any():
                     warnings.warn(f"Hull Moving Average for [{ts_label}] [{col}] contains negative values, maybe due to sudden changes (drops) in the data.", stacklevel=2)
                 hma_window = max(1, int(np.sqrt(rows_window)))
                 ma_hull = raw_hma.rolling(window=hma_window, min_periods=hma_window, closed='right').mean()
                 ts_mobile_averages['hull'][ts_label][col] = ma_hull
 
-            # Adaptive Moving Average (Kaufman's Adaptive Moving Average)
+            # Adaptive Moving Average (Kaufman's Adaptive Moving Average) with adjustments for range filter
             change = curr_col.diff(rows_window).abs()
-            volatility = curr_col.diff().abs().rolling(window=rows_window, min_periods=rows_window, closed='right').sum()
+            volatility = curr_col.diff().abs().rolling(window=rows_window, min_periods=rows_window, closed='right').apply(_volatility_ma, raw=False)
             efficiency_ratio = pd.Series(np.zeros_like(change), index=change.index)
-            valid_volatility = (volatility != 0) & (~volatility.isna())
-            efficiency_ratio[valid_volatility] = change[valid_volatility] / volatility[valid_volatility]
+            valid_volatility_mask = (volatility != 0) & (~volatility.isna())
+            efficiency_ratio[valid_volatility_mask] = change[valid_volatility_mask] / volatility[valid_volatility_mask]
             fast = 2 / (2 + 1)
             slow = 2 / (30 + 1)
             smoothing_constant = (efficiency_ratio * (fast - slow) + slow) ** 2
-            ma_adaptive = ma_simple.copy()
+            ma_adaptive = ma_simple.copy()  # Using the simple MA as a base for adaptive MA
             for i in range(rows_window, len(curr_col)):
                 ma_adaptive.iloc[i] = ma_adaptive.iloc[i-1] + smoothing_constant.iloc[i] * (curr_col.iloc[i] - ma_adaptive.iloc[i-1]) # Adaptive moving average is a "correction" of the simple moving average
             ts_mobile_averages['adaptive'][ts_label][col] = ma_adaptive
@@ -228,7 +268,7 @@ def main(
         raise TypeError("quantiles must be a list of floats and all values must be between 0 and 1")
     if not isinstance(numeric_range, list) or len(numeric_range) != 2:
         raise TypeError("numeric_range must be a list of length 2")
-    if not all([isinstance(numeric, float) for numeric in numeric_range]):
+    if not all([isinstance(numeric, (float, type(None))) for numeric in numeric_range]):
         raise TypeError("numeric_range must be a list of floats")
     
     # Get the analysis environment
@@ -285,7 +325,7 @@ if __name__ == "__main__":
     parser.add_argument('--quantiles', type=float, nargs='+', default=[.75, .90], help='List of quantiles to calculate (default: [0.75, 0.90])')
     parser.add_argument('--numeric_range', type=float, nargs=2, default=[None, None], help='Numeric range to consider (default: [None, None])')
     parser.add_argument('--include_range_extremes', action='store_true', help='Include range extremes (default: False)')
-    parser.add_argument('--moving_average_window', type=pd.Timedelta, default=pd.Timedelta(days=31), help='Moving average window (default: 31 days)')
+    parser.add_argument('--moving_average_window', type=dt.timedelta, default=dt.timedelta(days=31), help='Moving average window (default: 31 days)')
     args = parser.parse_args()
 
     main(
