@@ -98,6 +98,7 @@ def get_mobile_averages(
         moving_average_window: dt.timedelta | pd.Timedelta=pd.Timedelta(days=31),
         numeric_data_range: list[float]=[None, None],
         include_range_extremes: bool=False,
+        cut_outside_range: bool = True,
         weights: list[float] | np.ndarray | pd.Series=None
     ) -> dict:
     """
@@ -123,6 +124,41 @@ def get_mobile_averages(
             include_min_max=include_range_extremes
         )
         return series.where(mask, np.nan), mask
+    
+    # Helper: filter and possibly cut results of mobile average if outside range limits
+    def _filter_series(series):
+        """Return a copy where out-of-range values are set to range limits."""
+        series = series.copy()
+        lower_mask = (series < numeric_data_range[0]).to_numpy() if numeric_data_range[0] is not None else np.zeros(len(series), dtype=bool)
+        upper_mask = (series > numeric_data_range[1]).to_numpy() if numeric_data_range[1] is not None else np.zeros(len(series), dtype=bool)
+        if lower_mask.any() and cut_outside_range:
+            series[lower_mask] = numeric_data_range[0]
+        if upper_mask.any() and cut_outside_range:
+            series[upper_mask] = numeric_data_range[1]
+        out_of_range_mask = pd.Series(lower_mask | upper_mask, index=series.index, name=series.name, dtype=bool)
+        return series, out_of_range_mask
+    
+    # Helper: weighted moving average
+    def _weighted_ma(x, weights_arr):
+        """Return the weighted moving average."""
+        valid_mask = ~np.isnan(x)
+        if not valid_mask.any():
+            return np.nan
+        idx = x.index[valid_mask]  # Get original indices for valid elements
+        valid_x = x[valid_mask]
+        valid_w = weights_arr[idx]  # Use original indices to get correct weights
+        return np.average(valid_x, weights=valid_w)
+
+    # Helper: hull weighted moving average
+    def _hull_wma(x):
+        """Return the hull weighted moving average."""
+        valid_mask = ~np.isnan(x)
+        if not valid_mask.any():
+            return np.nan
+        valid_idx = x.index[valid_mask]  # Get original indices for valid elements
+        valid_w = np.arange(1, len(valid_idx) + 1)  # Weights based on position in valid sequence
+        valid_x = x[valid_mask]
+        return np.sum(valid_x * valid_w) / np.sum(valid_w)
 
     # Validate window vs. data delta
     delta_time = time_sensitive_vars['datetimes']['start_date'].diff().mean()
@@ -131,6 +167,22 @@ def get_mobile_averages(
     if abs((moving_average_window % delta_time).total_seconds()) > 0.01:
         raise ValueError(f"Invalid moving_average_window [{moving_average_window}]. Must be a multiple of data delta_time: [{delta_time}]")
     rows_window = int(moving_average_window / delta_time)
+
+    if rows_window < 2:
+        warnings.warn("Hull moving average will not be calculated: the moving_average_window is smaller than twice the data delta_time.", stacklevel=2)
+
+    # Validate weights
+    if weights is None:
+        weights_arr = np.ones(time_sensitive_vars['datetimes'].shape[0], dtype=np.float64)
+    else:
+        weights_arr = np.array(weights, dtype=np.float64)
+    
+    if weights_arr.size != time_sensitive_vars['datetimes'].shape[0]:
+        raise ValueError(f"Invalid weights length [{weights_arr.size}]. Must match data length: [{time_sensitive_vars['datetimes'].shape[0]}]")
+    
+    # Hull weights
+    hull_fast = 2 / (2 + 1)
+    hull_slow = 2 / (30 + 1)
 
     # Initialise result containers
     ts_mobile_averages = {
@@ -145,12 +197,22 @@ def get_mobile_averages(
         'adaptive': {}
     }
 
+    out_of_range_mask = {
+        'simple': {},
+        'exponential': {},
+        'cumulative': {},
+        'weighted': {},
+        'hull': {},
+        'adaptive': {}
+    }
+
     for ts_label, ts_data in time_sensitive_vars['data'].items():
         # create empty dataframes for each metric
         ts_mobile_averages['count'][ts_label] = pd.DataFrame(index=ts_data.index, columns=ts_data.columns, dtype='Int64')
-        for ts_ma_key, ts_ma_val in ts_mobile_averages.items():
+        for ts_ma_key, _ in ts_mobile_averages.items():
             if isinstance(ts_mobile_averages[ts_ma_key], dict) and not ts_label in ts_mobile_averages[ts_ma_key]:
                 ts_mobile_averages[ts_ma_key][ts_label] = pd.DataFrame(index=ts_data.index, columns=ts_data.columns, dtype=np.float64)
+                out_of_range_mask[ts_ma_key][ts_label] = pd.DataFrame(index=ts_data.index, columns=ts_data.columns, dtype=bool)
         
         for col in ts_data.columns:
             curr_col = ts_data[col].copy()
@@ -161,9 +223,9 @@ def get_mobile_averages(
             # Count of valid observations inside the rolling window
             count_valid_obs = curr_col_mask.rolling(
                 window=rows_window,
-                min_periods=rows_window,  # NaN for partial windows
+                min_periods=rows_window, # This means NaN for partial windows (there are less than rows_window observations)
                 closed='right'
-            ).sum()
+            ).sum() # Vectorized sum (pandas sum ignores NaNs)
 
             ts_mobile_averages['count'][ts_label][col] = count_valid_obs.astype('Int64')
 
@@ -172,87 +234,59 @@ def get_mobile_averages(
                 window=rows_window,
                 min_periods=1,
                 closed='right'
-            ).mean()
+            ).mean() # Vectorized mean (pandas mean ignores NaNs)
 
-            ts_mobile_averages['simple'][ts_label][col] = ma_simple
+            ts_mobile_averages['simple'][ts_label][col], out_of_range_mask['simple'][ts_label][col]  = _filter_series(ma_simple)
 
             # -------------------- Exponential Moving Average ---------------
             ma_exponential = masked_curr_col.ewm(
                 span=rows_window,
                 min_periods=1,
                 adjust=False
-            ).mean()
+            ).mean() # Vectorized mean (pandas mean ignores NaNs)
 
-            ts_mobile_averages['exponential'][ts_label][col] = ma_exponential
+            ts_mobile_averages['exponential'][ts_label][col], out_of_range_mask['exponential'][ts_label][col] = _filter_series(ma_exponential)
 
             # -------------------- Cumulative Moving Average ---------------
-            ma_cumulative = masked_curr_col.expanding(
-                min_periods=rows_window
-            ).mean()
+            ma_cumulative = masked_curr_col.expanding( # With expanding, all the values are cumulative, since the beginning of the series -> this mobile average is very slow and stable
+                min_periods=1
+            ).mean() # Vectorized mean (pandas mean ignores NaNs)
 
-            ts_mobile_averages['cumulative'][ts_label][col] = ma_cumulative
+            ts_mobile_averages['cumulative'][ts_label][col], out_of_range_mask['cumulative'][ts_label][col] = _filter_series(ma_cumulative)
 
             # -------------------- Weighted Moving Average ------------------
-            if weights is None:
-                weights_arr = np.ones(curr_col.shape[0], dtype=np.float64)
-            else:
-                weights_arr = np.array(weights, dtype=np.float64)
-
-            def _weighted_ma(x):
-                valid_mask = ~np.isnan(x)
-                if not valid_mask.any():
-                    return np.nan
-                idx = x.index[valid_mask]  # Get original indices for valid elements
-                valid_x = x[valid_mask]
-                valid_w = weights_arr[idx]  # Use original indices to get correct weights
-                return np.average(valid_x, weights=valid_w)
-
             ma_weighted = masked_curr_col.rolling(
                 window=rows_window,
                 min_periods=1,
                 closed='right'
-            ).apply(_weighted_ma, raw=False)
+            ).apply(lambda x: _weighted_ma(x, weights_arr), raw=False) # Remember to exclude NaNs is _weighted_ma
 
-            ts_mobile_averages['weighted'][ts_label][col] = ma_weighted
+            ts_mobile_averages['weighted'][ts_label][col], out_of_range_mask['weighted'][ts_label][col] = _filter_series(ma_weighted)
 
             # -------------------- Hull Moving Average ----------------------
-            if rows_window < 2:
-                warnings.warn(f"Hull moving average can not be calculated for [{ts_label}] [{col}] because the moving_average_window is too small.", stacklevel=2)
-            else:
-                def _hull_wma(x):
-                    valid_mask = ~np.isnan(x)
-                    if not valid_mask.any():
-                        return np.nan
-                    valid_idx = x.index[valid_mask]  # Get original indices for valid elements
-                    valid_w = np.arange(1, len(valid_idx) + 1)  # Weights based on position in valid sequence
-                    valid_x = x[valid_mask]
-                    return np.sum(valid_x * valid_w) / np.sum(valid_w)
-
+            if rows_window >= 2:
                 wma_short = masked_curr_col.rolling(
                     window=rows_window // 2,
                     min_periods=1,
                     closed='right'
-                ).apply(_hull_wma, raw=False)
+                ).apply(_hull_wma, raw=False) # Remember to exclude NaNs is _hull_wma
 
                 wma_long = masked_curr_col.rolling(
                     window=rows_window,
                     min_periods=1,
                     closed='right'
-                ).apply(_hull_wma, raw=False)
+                ).apply(_hull_wma, raw=False) # Remember to exclude NaNs is _hull_wma
 
                 raw_hma = (2 * wma_short) - wma_long
-                if (raw_hma < 0).any():
-                    warnings.warn(f"Hull Moving Average for [{ts_label}] [{col}] contains negative values, maybe due to sudden changes (drops) in the data.", stacklevel=2)
-
                 hma_window = max(1, int(np.sqrt(rows_window)))
 
                 ma_hull = raw_hma.rolling(
                     window=hma_window,
                     min_periods=1,
                     closed='right'
-                ).mean()
+                ).mean() # Vectorized mean (pandas mean ignores NaNs)
 
-                ts_mobile_averages['hull'][ts_label][col] = ma_hull
+                ts_mobile_averages['hull'][ts_label][col], out_of_range_mask['hull'][ts_label][col] = _filter_series(ma_hull)
 
             # -------------------- Adaptive Moving Average -----------------
             change = masked_curr_col.diff(rows_window).abs()
@@ -261,22 +295,28 @@ def get_mobile_averages(
                 window=rows_window,
                 min_periods=1,
                 closed='right'
-            ).sum()  # Vectorized sum (ignores NaNs thanks to the rolling window, which exludes them)
+            ).sum()  # Vectorized sum (pandas sum ignores NaNs)
 
             efficiency_ratio = pd.Series(np.zeros_like(change), index=change.index)
             valid_vol_mask = (volatility != 0) & (~volatility.isna())
             efficiency_ratio[valid_vol_mask] = change[valid_vol_mask] / volatility[valid_vol_mask]
 
-            fast = 2 / (2 + 1)
-            slow = 2 / (30 + 1)
-            smoothing_constant = (efficiency_ratio * (fast - slow) + slow) ** 2
+            smoothing_constant = (efficiency_ratio * (hull_fast - hull_slow) + hull_slow) ** 2
             ma_adaptive = ma_simple.copy()  # Using the simple MA as a base for adaptive MA
             for i in range(rows_window, len(curr_col)):
                 curr_val = masked_curr_col.iloc[i]
-                if not (pd.isna(curr_val) or pd.isna(ma_adaptive.iloc[i-1])):
-                    ma_adaptive.iloc[i] = ma_adaptive.iloc[i-1] + smoothing_constant.iloc[i] * (curr_val - ma_adaptive.iloc[i-1]) # ma_adaptive can be seen as a corrected version of ma_simple
+                corrective_term = smoothing_constant.iloc[i] * (curr_val - ma_adaptive.iloc[i-1])
+                if not pd.isna(corrective_term):
+                    corrective_term = smoothing_constant.iloc[i] * (curr_val - ma_adaptive.iloc[i-1])
+                    ma_adaptive.iloc[i] = ma_adaptive.iloc[i-1] + corrective_term # ma_adaptive can be seen as a corrected version of ma_simple
             
-            ts_mobile_averages['adaptive'][ts_label][col] = ma_adaptive
+            ts_mobile_averages['adaptive'][ts_label][col], out_of_range_mask['adaptive'][ts_label][col] = _filter_series(ma_adaptive)
+    
+    warn_msg = "Out of range values were detected and automatically cut" if cut_outside_range else "Out of range values detected (please check it!)"
+    for ma_key, ma_dict in out_of_range_mask.items():
+        for ts_label, out_of_range_mask in ma_dict.items():
+            if out_of_range_mask.any(axis=None):
+                warnings.warn(f"{warn_msg} in {ma_key} MA for {ts_label}", stacklevel=2)
 
     return ts_mobile_averages
 
@@ -289,6 +329,7 @@ def main(
         quantiles: list[float] | float=[.8, .9],
         numeric_range: list[float]=[None, None],
         include_range_extremes: bool=False,
+        cut_outside_range: bool=True,
         moving_average_window: pd.Timedelta=pd.Timedelta(days=31)
     ) -> dict[str, pd.DataFrame]:
     """Main function to obtain statistical information of time-sensitive data."""
@@ -337,6 +378,7 @@ def main(
         moving_average_window=moving_average_window,
         numeric_data_range=ts_possible_range,
         include_range_extremes=include_range_extremes,
+        cut_outside_range=cut_outside_range,
         weights=None
     )
 
@@ -359,6 +401,7 @@ if __name__ == "__main__":
     parser.add_argument('--quantiles', type=float, nargs='+', default=[.75, .90], help='List of quantiles to calculate (default: [0.75, 0.90])')
     parser.add_argument('--numeric_range', type=float, nargs=2, default=[None, None], help='Numeric range to consider (default: [None, None])')
     parser.add_argument('--include_range_extremes', action='store_true', help='Include range extremes (default: False)')
+    parser.add_argument('--cut_outside_range', action='store_true', help='Cut outside range (default: True)')
     parser.add_argument('--moving_average_window', type=dt.timedelta, default=dt.timedelta(days=31), help='Moving average window (default: 31 days)')
     args = parser.parse_args()
 
@@ -370,5 +413,6 @@ if __name__ == "__main__":
         quantiles=args.quantiles,
         numeric_range=args.numeric_range,
         include_range_extremes=args.include_range_extremes,
+        cut_outside_range=args.cut_outside_range,
         moving_average_window=args.moving_average_window
     )
