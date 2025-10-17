@@ -113,65 +113,40 @@ def get_mobile_averages(
     Returns:
         dict: Dictionary containing different types of moving averages.
     """
-    def _simple_ma(x):
-        valid_rows = rows_inside_range.iloc[x.index]
-        valid_x = x[valid_rows]
-        if len(valid_x) == 0:
-            return np.nan
-        return valid_x.mean()
-    
-    def _cumulative_ma(x):
-        valid_rows = rows_inside_range.iloc[:x.index[-1]+1]  # Adjust index to match expanding
-        valid_x = x[valid_rows]
-        if len(valid_x) < rows_window:
-            return np.nan
-        return valid_x.mean()
-    
-    def _weighted_ma(x):
-        valid_rows = rows_inside_range.iloc[x.index]
-        valid_w = weights_arr[x.index] * valid_rows
-        valid_x = x[valid_rows]
-        if np.sum(valid_w) == 0:
-            return np.nan
-        return np.sum(valid_x * valid_w) / np.sum(valid_w)
-    
-    def _hull_wma(x):
-        valid_rows = rows_inside_range.iloc[x.index]
-        valid_w = np.arange(1, len(x) + 1) * valid_rows
-        valid_x = x[valid_rows]
-        if np.sum(valid_w) == 0:
-            return np.nan
-        return np.sum(valid_x * valid_w) / np.sum(valid_w)
-    
-    def _volatility_ma(x):
-        valid_rows = rows_inside_range.iloc[x.index]
-        valid_x = x[valid_rows]
-        if len(valid_x) == 0:
-            return np.nan
-        return valid_x.sum()
-    
+    # Helper: mask a series according to the numeric range
+    def _mask_series(series):
+        """Return a copy where out‑of‑range values are set to NaN."""
+        mask = get_mask_in_range(
+            series=series,
+            min_value=numeric_data_range[0],
+            max_value=numeric_data_range[1],
+            include_min_max=include_range_extremes
+        )
+        return series.where(mask, np.nan), mask
+
+    # Validate window vs. data delta
     delta_time = time_sensitive_vars['datetimes']['start_date'].diff().mean()
     if delta_time > moving_average_window:
         raise ValueError(f"Invalid moving_average_window [{moving_average_window}]. Must be greater than data delta_time: [{delta_time}]")
-    
-    if abs((moving_average_window%delta_time).total_seconds()) > 0.01:
+    if abs((moving_average_window % delta_time).total_seconds()) > 0.01:
         raise ValueError(f"Invalid moving_average_window [{moving_average_window}]. Must be a multiple of data delta_time: [{delta_time}]")
-    
-    rows_window = int(moving_average_window/delta_time)
-    
+    rows_window = int(moving_average_window / delta_time)
+
+    # Initialise result containers
     ts_mobile_averages = {
         'data_delta_time': delta_time,
         'window_delta_time': moving_average_window,
         'count': {},
-        'simple': {}, 
-        'exponential': {}, 
-        'cumulative': {}, 
-        'weighted': {}, 
-        'hull': {}, 
+        'simple': {},
+        'exponential': {},
+        'cumulative': {},
+        'weighted': {},
+        'hull': {},
         'adaptive': {}
     }
-    
+
     for ts_label, ts_data in time_sensitive_vars['data'].items():
+        # create empty dataframes for each metric
         ts_mobile_averages['count'][ts_label] = pd.DataFrame(index=ts_data.index, columns=ts_data.columns, dtype='Int64')
         for ts_ma_key, ts_ma_val in ts_mobile_averages.items():
             if isinstance(ts_mobile_averages[ts_ma_key], dict) and not ts_label in ts_mobile_averages[ts_ma_key]:
@@ -180,68 +155,127 @@ def get_mobile_averages(
         for col in ts_data.columns:
             curr_col = ts_data[col].copy()
 
-            # NOTE 1: Each value contains the current row in calculation (closed='right')
-            # NOTE 2: Values are present only if the time window is available
+            # Apply range filter once and reuse the masked series
+            masked_curr_col, curr_col_mask = _mask_series(curr_col)
 
-            rows_inside_range = get_mask_in_range(
-                series=curr_col,
-                min_value=numeric_data_range[0],
-                max_value=numeric_data_range[1],
-                include_min_max=include_range_extremes
-            )
+            # Count of valid observations inside the rolling window
+            count_valid_obs = curr_col_mask.rolling(
+                window=rows_window,
+                min_periods=rows_window,  # NaN for partial windows
+                closed='right'
+            ).sum()
 
-            # Count of observations used for moving averages
-            count_valid_obs = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').apply(lambda x: rows_inside_range.iloc[x.index].sum(), raw=False)
             ts_mobile_averages['count'][ts_label][col] = count_valid_obs.astype('Int64')
 
-            # TODO: Check the methods used to obtain mobile averages, check function written above, simplify the logic
-            
-            # Simple Moving Average with range filter
-            ma_simple = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').apply(_simple_ma, raw=False)
+            # -------------------- Simple Moving Average --------------------
+            ma_simple = masked_curr_col.rolling(
+                window=rows_window,
+                min_periods=1,
+                closed='right'
+            ).mean()
+
             ts_mobile_averages['simple'][ts_label][col] = ma_simple
 
-            # Exponential Moving Average (not directly affected by the range filter, but the count is)
-            ma_exponential = curr_col.ewm(span=rows_window, min_periods=rows_window, adjust=False).mean()
+            # -------------------- Exponential Moving Average ---------------
+            ma_exponential = masked_curr_col.ewm(
+                span=rows_window,
+                min_periods=1,
+                adjust=False
+            ).mean()
+
             ts_mobile_averages['exponential'][ts_label][col] = ma_exponential
 
-            # Cumulative Moving Average with range filter
-            ma_cumulative = curr_col.expanding(min_periods=rows_window).apply(_cumulative_ma, raw=False)
+            # -------------------- Cumulative Moving Average ---------------
+            ma_cumulative = masked_curr_col.expanding(
+                min_periods=rows_window
+            ).mean()
+
             ts_mobile_averages['cumulative'][ts_label][col] = ma_cumulative
 
-            # Weighted Moving Average with range filter
+            # -------------------- Weighted Moving Average ------------------
             if weights is None:
                 weights_arr = np.ones(curr_col.shape[0], dtype=np.float64)
             else:
-                weights_arr = np.array(weights)
-            
-            ma_weighted = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').apply(_weighted_ma, raw=False)
+                weights_arr = np.array(weights, dtype=np.float64)
+
+            def _weighted_ma(x):
+                valid_mask = ~np.isnan(x)
+                if not valid_mask.any():
+                    return np.nan
+                idx = x.index[valid_mask]  # Get original indices for valid elements
+                valid_x = x[valid_mask]
+                valid_w = weights_arr[idx]  # Use original indices to get correct weights
+                return np.average(valid_x, weights=valid_w)
+
+            ma_weighted = masked_curr_col.rolling(
+                window=rows_window,
+                min_periods=1,
+                closed='right'
+            ).apply(_weighted_ma, raw=False)
+
             ts_mobile_averages['weighted'][ts_label][col] = ma_weighted
 
-            # Hull Moving Average with range filter
+            # -------------------- Hull Moving Average ----------------------
             if rows_window < 2:
                 warnings.warn(f"Hull moving average can not be calculated for [{ts_label}] [{col}] because the moving_average_window is too small.", stacklevel=2)
             else:
-                wma_short = curr_col.rolling(window=rows_window//2, min_periods=rows_window//2, closed='right').apply(lambda x: _hull_wma(x), raw=False)
-                wma_long = curr_col.rolling(window=rows_window, min_periods=rows_window, closed='right').apply(lambda x: _hull_wma(x), raw=False)
+                def _hull_wma(x):
+                    valid_mask = ~np.isnan(x)
+                    if not valid_mask.any():
+                        return np.nan
+                    valid_idx = x.index[valid_mask]  # Get original indices for valid elements
+                    valid_w = np.arange(1, len(valid_idx) + 1)  # Weights based on position in valid sequence
+                    valid_x = x[valid_mask]
+                    return np.sum(valid_x * valid_w) / np.sum(valid_w)
+
+                wma_short = masked_curr_col.rolling(
+                    window=rows_window // 2,
+                    min_periods=1,
+                    closed='right'
+                ).apply(_hull_wma, raw=False)
+
+                wma_long = masked_curr_col.rolling(
+                    window=rows_window,
+                    min_periods=1,
+                    closed='right'
+                ).apply(_hull_wma, raw=False)
+
                 raw_hma = (2 * wma_short) - wma_long
                 if (raw_hma < 0).any():
                     warnings.warn(f"Hull Moving Average for [{ts_label}] [{col}] contains negative values, maybe due to sudden changes (drops) in the data.", stacklevel=2)
+
                 hma_window = max(1, int(np.sqrt(rows_window)))
-                ma_hull = raw_hma.rolling(window=hma_window, min_periods=hma_window, closed='right').mean()
+
+                ma_hull = raw_hma.rolling(
+                    window=hma_window,
+                    min_periods=1,
+                    closed='right'
+                ).mean()
+
                 ts_mobile_averages['hull'][ts_label][col] = ma_hull
 
-            # Adaptive Moving Average (Kaufman's Adaptive Moving Average) with adjustments for range filter
-            change = curr_col.diff(rows_window).abs()
-            volatility = curr_col.diff().abs().rolling(window=rows_window, min_periods=rows_window, closed='right').apply(_volatility_ma, raw=False)
+            # -------------------- Adaptive Moving Average -----------------
+            change = masked_curr_col.diff(rows_window).abs()
+
+            volatility = masked_curr_col.diff().abs().rolling(
+                window=rows_window,
+                min_periods=1,
+                closed='right'
+            ).sum()  # Vectorized sum (ignores NaNs thanks to the rolling window, which exludes them)
+
             efficiency_ratio = pd.Series(np.zeros_like(change), index=change.index)
-            valid_volatility_mask = (volatility != 0) & (~volatility.isna())
-            efficiency_ratio[valid_volatility_mask] = change[valid_volatility_mask] / volatility[valid_volatility_mask]
+            valid_vol_mask = (volatility != 0) & (~volatility.isna())
+            efficiency_ratio[valid_vol_mask] = change[valid_vol_mask] / volatility[valid_vol_mask]
+
             fast = 2 / (2 + 1)
             slow = 2 / (30 + 1)
             smoothing_constant = (efficiency_ratio * (fast - slow) + slow) ** 2
             ma_adaptive = ma_simple.copy()  # Using the simple MA as a base for adaptive MA
             for i in range(rows_window, len(curr_col)):
-                ma_adaptive.iloc[i] = ma_adaptive.iloc[i-1] + smoothing_constant.iloc[i] * (curr_col.iloc[i] - ma_adaptive.iloc[i-1]) # Adaptive moving average is a "correction" of the simple moving average
+                curr_val = masked_curr_col.iloc[i]
+                if not (pd.isna(curr_val) or pd.isna(ma_adaptive.iloc[i-1])):
+                    ma_adaptive.iloc[i] = ma_adaptive.iloc[i-1] + smoothing_constant.iloc[i] * (curr_val - ma_adaptive.iloc[i-1]) # ma_adaptive can be seen as a corrected version of ma_simple
+            
             ts_mobile_averages['adaptive'][ts_label][col] = ma_adaptive
 
     return ts_mobile_averages

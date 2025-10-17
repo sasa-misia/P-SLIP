@@ -7,8 +7,9 @@ import warnings
 def compare_dataframes(
         dataframe1: pd.DataFrame, 
         dataframe2: pd.DataFrame,
-        row_order: bool = True
-    ) -> np.ndarray:
+        row_order: bool = True,
+        round_numerics_decimals: int = None
+    ) -> pd.DataFrame:
     """
     Compare the elements of two dataframes, with or without considering the order of the rows.
 
@@ -18,13 +19,20 @@ def compare_dataframes(
         row_order (bool, optional): If True, the order of the rows is considered. Defaults to True.
         
     Returns:
-        np.ndarray: A boolean matrix with the same shape as the dataframes, where True means the elements are equal.
+        pd.DataFrame: A dataframe with the same shape as the input dataframes, where each element is a boolean indicating if the elements are equal.
     """
     if dataframe1.shape != dataframe2.shape:
         raise ValueError(f"Dataframes must have the same shape: {dataframe1.shape} != {dataframe2.shape}")
     
-    equality_matrix = np.zeros(dataframe1.shape, dtype=bool)
-    for r1, row1 in dataframe1.iterrows():
+    if not isinstance(round_numerics_decimals, (int, type(None))):
+        raise ValueError("round_numerics_decimals must be an integer or None")
+    
+    if round_numerics_decimals is not None:
+        tolerance = 10**(-round_numerics_decimals)
+    
+    equality_matrix = pd.DataFrame(index=dataframe1.index, columns=dataframe1.columns, dtype=bool)
+    equality_matrix_values = np.zeros(shape=dataframe1.shape, dtype=bool)
+    for r1, (_, row1) in enumerate(dataframe1.iterrows()):
         if row_order:
             row2 = dataframe2.iloc[r1]
         else:
@@ -36,13 +44,32 @@ def compare_dataframes(
             row2 = dataframe2.iloc[r2]
             
         for c1, (_, item1) in enumerate(row1.items()):
-            item2 = row2[c1]
+            item2 = row2.iloc[c1]
             if pd.isna(item1) and pd.isna(item2):
-                equality_matrix[r1, c1] = True
-            elif pd.isna(item1) or pd.isna(item2):
-                equality_matrix[r1, c1] = False
+                equality_matrix_values[r1, c1] = True
+            elif pd.isna(item1) ^ pd.isna(item2): # ^ is XOR
+                equality_matrix_values[r1, c1] = False
             else:
-                equality_matrix[r1, c1] = np.array_equal(item1, item2)
+                if not isinstance(item1, np.ndarray):
+                    item1_array = np.array(item1)
+                else:
+                    item1_array = item1
+
+                if not isinstance(item2, np.ndarray):
+                    item2_array = np.array(item2)
+                else:
+                    item2_array = item2
+
+                if round_numerics_decimals is not None:
+                    if np.issubdtype(item1_array.dtype, np.number) and np.issubdtype(item2_array.dtype, np.number):
+                        item1_array = np.round(item1_array, round_numerics_decimals)
+                        item2_array = np.round(item2_array, round_numerics_decimals)
+                        equality_matrix_values[r1, c1] = np.allclose(item1_array, item2_array, atol=tolerance)
+                        continue # Skip this cycle because comparison was done with tolerances
+                   
+                equality_matrix_values[r1, c1] = np.array_equal(item1_array, item2_array)
+    
+    equality_matrix[:] = equality_matrix_values
 
     return equality_matrix
 
