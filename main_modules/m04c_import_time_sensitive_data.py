@@ -33,7 +33,7 @@ from main_modules.m00a_env_init import get_or_create_analysis_environment, obtai
 logger = setup_logger(__name__)
 logger.info("=== Importing time-sensitive data ===") # This script must be putted after m03, because with satellite you need dtm and abg grids
 
-# %% === Methods to import time sensitive data as rainfall and temperature
+# %% === Helper functions and global variables
 SOURCE_MODES = ['station', 'satellite']
 AGGREGATION_METHODS = ['mean', 'sum', 'min', 'max']
 

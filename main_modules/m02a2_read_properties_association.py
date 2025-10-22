@@ -3,7 +3,6 @@ import os
 import sys
 import pandas as pd
 import argparse
-from typing import Dict, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -24,7 +23,7 @@ from main_modules.m00a_env_init import get_or_create_analysis_environment, setup
 logger = setup_logger(__name__)
 logger.info("=== Associate properties to polygons ===")
 
-# %% === Methods to add associations
+# %% === Helper functions
 def class_association(
         prop_df: pd.DataFrame, 
         association_df: pd.DataFrame,
@@ -60,7 +59,7 @@ def main(
         source_subtype: str=None, 
         standard_classes_filepath: str=None, 
         parameter_classes_filepath: str=None
-    ) -> Dict[str, Any]: 
+    ) -> dict[str, object]: 
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
         raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
     

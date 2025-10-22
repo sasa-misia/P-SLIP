@@ -1,7 +1,13 @@
+# %% === Import necessary modules
 import shapely.geometry as geom
 import warnings
+import numpy as np
+import pandas as pd
 
-def get_rectangle_parameters(n_rectangles: int) -> list:
+# %% === Function to get rectangle parameters
+def get_rectangle_parameters(
+        n_rectangles: int
+    ) -> list:
     """
     Get rectangle parameters from user input.
 
@@ -33,9 +39,13 @@ def get_rectangle_parameters(n_rectangles: int) -> list:
             raise ValueError("Invalid rectangle coordinates: ensure x_min < x_max and y_min < y_max.")
 
         rectangle_params.append((x_min, y_min, x_max, y_max))
+
     return rectangle_params
 
-def create_rectangle_polygons(rectangle_coordinates: list) -> list:
+# %% === Function to create rectangle based on given coordinates
+def create_rectangle_polygons(
+        rectangle_coordinates: list
+    ) -> list:
     """
     Create rectangular polygons from a list of (x_min, y_min, x_max, y_max).
 
@@ -56,4 +66,57 @@ def create_rectangle_polygons(rectangle_coordinates: list) -> list:
             (x_max, y_max), (x_min, y_max)
         ])
         polygons.append(poly)
+
     return polygons
+
+# %% === Function to create polygons from points
+def create_polygons_from_points(
+        x: int | float | list[float] | np.ndarray | pd.Series,
+        y: int | float | list[float] | np.ndarray | pd.Series, 
+        buffer: float | int=10, # same unit as x and y!
+        shape: str='circle'
+    ) -> list[geom.Polygon]:
+    """
+    Create polygons from a list of points.
+
+    Args:
+        x (list): List of x coordinates.
+        y (list): List of y coordinates.
+        buffer (float, optional): Buffer size to apply in the units of x and y (default is 10).
+        shape (str, optional): Shape of the polygon ('circle' or 'rectangle') (default is 'circle').
+
+    Returns:
+        list: List of shapely.geometry.Polygon objects, each representing a polygon.
+    """
+    if not isinstance(x, np.ndarray):
+        x = np.atleast_1d(x)
+    if not isinstance(y, np.ndarray):
+        y = np.atleast_1d(y)
+    if x.ndim != y.ndim:
+        raise ValueError("x and y must have the same number of dimensions.")
+    if x.size != y.size:
+        raise ValueError("x and y must have the same number of elements.")
+    if x.ndim > 1:
+        raise ValueError("x and y must be 1D arrays.")
+    
+    if not isinstance(buffer, (int, float)):
+        raise TypeError("Buffer must be a float or int.")
+    
+    if not isinstance(shape, str) :
+        raise TypeError("Shape must be a string.")
+    if shape not in ['circle', 'rectangle']:
+        raise ValueError("Shape must be 'circle' or 'rectangle'.")
+    
+    if shape == 'circle':
+        polygons = [geom.Point(xy).buffer(buffer) for xy in zip(x, y)]
+    elif shape == 'rectangle':
+        polygons = [geom.Polygon([
+            (xy[0] - buffer, xy[1] - buffer), 
+            (xy[0] + buffer, xy[1] - buffer), 
+            (xy[0] + buffer, xy[1] + buffer), 
+            (xy[0] - buffer, xy[1] + buffer)
+        ]) for xy in zip(x, y)]
+
+    return polygons
+
+# %%

@@ -3,7 +3,6 @@ import os
 import sys
 import pandas as pd
 import argparse
-from typing import Dict, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -26,7 +25,7 @@ from main_modules.m00a_env_init import get_or_create_analysis_environment, setup
 logger = setup_logger(__name__)
 logger.info("=== Refine study area ===")
 
-# %% === Methods to subtract polygons from study area
+# %% === Helper functions
 def subtract_polygons_from_study_area(
     study_area_dict: dict,
     rem_poly_df: pd.DataFrame,
@@ -75,7 +74,7 @@ def main(
         gui_mode: bool=False,
         source_type: str="land_use", 
         source_subtype: str=None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, object]:
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
         raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
     

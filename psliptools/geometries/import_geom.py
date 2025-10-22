@@ -9,7 +9,9 @@ import os
 from .manipulate_geom import intersect_polygons, add_buffer_to_polygons
 
 # %% === Function to check and fix geometries in a GeoDataFrame
-def _check_and_fix_gpd_geometries(shape_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def _check_and_fix_gpd_geometries(
+        shape_gdf: gpd.GeoDataFrame
+    ) -> gpd.GeoDataFrame:
     """
     Check and fix invalid geometries in a GeoDataFrame.
     If any geometry is invalid, it will be fixed using buffer(0).
@@ -27,24 +29,30 @@ def _check_and_fix_gpd_geometries(shape_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFra
     if n_invalid > 0:
         out_shape_gdf.loc[invalid_mask, 'geometry'] = out_shape_gdf.loc[invalid_mask, 'geometry'].buffer(0)
         warnings.warn(f"{n_invalid} invalid geometries found and fixed using buffer(0).", stacklevel=2)
+    
     return out_shape_gdf
 
 # %% === Function to validate geometry in a GeoDataFrame row
-def _valid_geom_row(row: pd.Series, points_lim: int = 80000) -> bool:
+def _valid_geom_row(
+        row: pd.Series, 
+        points_lim: int = 80000,
+        allow_only_polygons: bool = True
+    ) -> bool:
     """
     Check if the geometry in a GeoDataFrame row is valid and does not exceed the points limit.
     Issues a warning with the row index if the geometry is invalid or too complex.
 
     Args:
         row (pd.Series): A row from a GeoDataFrame.
-        points_lim (int): Maximum allowed number of points.
+        points_lim (int): Maximum allowed number of points (return False if exceeded).
+        allow_only_polygons (bool): If True, allow only Polygon or MultiPolygon geometries (return False for other geometries).
 
     Returns:
         bool: True if geometry is valid and within the limit, False otherwise.
     """
     row_geom = row.geometry
     idx = row.name
-    if row_geom.is_empty:
+    if row_geom is None or row_geom.is_empty:
         warnings.warn(f"Row {idx} geometry is empty.", stacklevel=2)
         return False
     elif isinstance(row_geom, geom.MultiPolygon):
@@ -57,13 +65,44 @@ def _valid_geom_row(row: pd.Series, points_lim: int = 80000) -> bool:
         if points_tot > points_lim:
             warnings.warn(f"Row {idx} Polygon exceeds points limit ({points_tot} > {points_lim})", stacklevel=2)
             return False
+    elif isinstance(row_geom, geom.LineString):
+        if allow_only_polygons:
+            return False
+        points_tot = len(list(row_geom.coords))
+        if points_tot > points_lim:
+            warnings.warn(f"Row {idx} LineString exceeds points limit ({points_tot} > {points_lim})", stacklevel=2)
+            return False
+    elif isinstance(row_geom, geom.MultiLineString):
+        if allow_only_polygons:
+            return False
+        points_tot = sum(len(list(line.coords)) for line in row_geom.geoms)
+        if points_tot > points_lim:
+            warnings.warn(f"Row {idx} MultiLineString exceeds points limit ({points_tot} > {points_lim})", stacklevel=2)
+            return False
+    elif isinstance(row_geom, geom.Point):
+        if allow_only_polygons:
+            return False
+        points_tot = 1
+        if points_tot > points_lim:
+            warnings.warn(f"Row {idx} Point exceeds points limit ({points_tot} > {points_lim})", stacklevel=2)
+            return False
+    elif isinstance(row_geom, geom.MultiPoint):
+        if allow_only_polygons:
+            return False
+        points_tot = len(row_geom.geoms)
+        if points_tot > points_lim:
+            warnings.warn(f"Row {idx} MultiPoint exceeds points limit ({points_tot} > {points_lim})", stacklevel=2)
+            return False
     else:
-        warnings.warn(f"Row {idx} geometry is not a valid Polygon or MultiPolygon.", stacklevel=2)
+        warnings.warn(f"Row {idx} geometry is not a valid geometry.", stacklevel=2)
         return False
+    
     return True
 
 # %% === Function to check if a polygon is valid and in EPSG:4326
-def _check_poly_bound_is_geo(poly_bound: geom.base.BaseGeometry) -> None:
+def _check_poly_bound_is_geo(
+        poly_bound: geom.base.BaseGeometry
+    ) -> None:
     """
     Check that poly_bound is a Polygon or MultiPolygon in EPSG:4326 (lat/lon) and coordinates are in valid ranges.
     Raises ValueError if type is not Polygon/MultiPolygon, or if coordinates are outside typical lon/lat ranges.
@@ -106,6 +145,7 @@ def convert_gdf_to_geo(shape_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
     if shape_gdf.crs is not None and shape_gdf.crs.to_epsg() != 4326:
         return _check_and_fix_gpd_geometries(shape_gdf.to_crs(epsg=4326))
+    
     return _check_and_fix_gpd_geometries(shape_gdf)
         
 # %% === Function to load polygons from a shapefile with optional filtering
@@ -149,10 +189,11 @@ def load_shapefile_polygons_simple(
         for g in shape_gdf.geometry
     ]
     sel_names = [str(val) for val in shape_gdf[field_name].tolist()] # Ensure names are strings
+
     return pd.DataFrame({'class_name': sel_names, 'geometry': sel_polys})
 
 # %% === Function to load polygons from a shapefile with advanced options
-def load_shapefile_polygons(
+def load_shapefile_geometry(
         shapefile_path: str,
         field_name: str = None,
         sel_filter: list = None,
@@ -160,7 +201,8 @@ def load_shapefile_polygons(
         mask_out_poly: bool = True,
         extra_bound_meters: float = 0.0, # in meters
         points_lim: int = 80000,
-        convert_to_geo: bool = False
+        convert_to_geo: bool = False,
+        allow_only_polygons: bool = True
     ) -> pd.DataFrame:
     """
     Load polygons from a shapefile with advanced options (filtering, bounding, masking, class selection).
@@ -174,6 +216,7 @@ def load_shapefile_polygons(
         extra_bound_meters (float, optional): Extra boundary to apply (in meters).
         points_lim (int, optional): Maximum number of points per polygon.
         convert_to_geo (bool, optional): If True, convert the GeoDataFrame to EPSG:4326.
+        allow_only_polygons (bool, optional): If True, raise an error if any geometry is not a Polygon or MultiPolygon.
 
     Returns:
         pd.DataFrame: DataFrame with columns 'class_name' and 'geometry'.
@@ -187,7 +230,7 @@ def load_shapefile_polygons(
         shape_gdf = gpd.read_file(shapefile_path)
 
     # Ensure all geometries are shapely polygons
-    if not shape_gdf.geometry.geom_type.isin(['Polygon', 'MultiPolygon']).all():
+    if not shape_gdf.geometry.geom_type.isin(['Polygon', 'MultiPolygon']).all() and allow_only_polygons:
         raise ValueError("All geometries in the shapefile must be Polygon or MultiPolygon types.")
 
     # Filter by field/class if needed
@@ -231,7 +274,7 @@ def load_shapefile_polygons(
         shape_gdf = shape_gdf[shape_gdf_geo.geometry.intersects(poly_bound_geo)] # This is to filter geometries that intersect the bounding polygon, WITHOUT CLIPPING THEM!
 
     # Remove polygons with too many points
-    shape_gdf = shape_gdf[shape_gdf.apply(lambda row: _valid_geom_row(row, points_lim=points_lim), axis=1)]
+    shape_gdf = shape_gdf[shape_gdf.apply(lambda row: _valid_geom_row(row, points_lim=points_lim, allow_only_polygons=allow_only_polygons), axis=1)]
 
     # Group and merge polygons by class
     sel_polys = []
@@ -269,4 +312,7 @@ def load_shapefile_polygons(
 
     # Output always as DataFrame
     out_df = pd.DataFrame({'class_name': sel_names, 'geometry': sel_polys})
+    
     return out_df
+
+# %%

@@ -21,7 +21,7 @@ from main_modules.m00a_env_init import get_or_create_analysis_environment, setup
 logger = setup_logger(__name__)
 logger.info("=== Create morphological grids ===")
 
-# %% === Methods to create morphological grids
+# %% === Helper functions
 def get_angles_and_curvatures(
         abg_df: pd.DataFrame,
         dtm_df: pd.DataFrame

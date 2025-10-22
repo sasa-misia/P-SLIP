@@ -3,7 +3,6 @@ import os
 import sys
 import argparse
 import pandas as pd
-from typing import Dict
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -13,7 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from psliptools
 from psliptools.geometries import (
-    load_shapefile_polygons,
+    load_shapefile_geometry,
     get_rectangle_parameters,
     create_rectangle_polygons,
     union_polygons,
@@ -32,16 +31,17 @@ from main_modules.m00a_env_init import get_or_create_analysis_environment, setup
 logger = setup_logger(__name__)
 logger.info("=== Import or Create Study Area ===")
 
-# %% === Study Area methods
+# %% === Helper functions
 REM_POLY_DF = pd.DataFrame(columns=['type', 'subtype', 'class_name', 'geometry']) # Empty DataFrame for removed areas
 
 def define_study_area_from_shapefile(shapefile_path, id_field, id_selection):
     """Define study area from a shapefile, optionally clipping with custom polygons."""
-    study_area_df = load_shapefile_polygons(
+    study_area_df = load_shapefile_geometry(
         shapefile_path=shapefile_path, 
         field_name=id_field, 
         sel_filter=id_selection,
-        convert_to_geo=True
+        convert_to_geo=True,
+        allow_only_polygons=True
     )
     id_polys = study_area_df['geometry']
     study_area_poly = union_polygons(id_polys)
@@ -80,7 +80,7 @@ def define_study_area_from_rectangles(rectangle_polygons):
 def main(
         base_dir: str=None,
         gui_mode: bool=False
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
     """Main function to define the study area."""
     src_type = 'study_area'
 
@@ -103,7 +103,7 @@ def main(
             src_mode = 'shapefile'
             print("\n=== Shapefile selection ===")
             src_path = select_file_prompt(
-                base_dir=env.folders['inputs']['study_area']['path'],
+                base_dir=env.folders['inputs'][src_type]['path'],
                 usr_prompt=f"Name or full path of the {src_type} shapefile (ex. {src_type}.shp): ",
                 src_ext='shp'
             )

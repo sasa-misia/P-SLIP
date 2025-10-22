@@ -28,7 +28,7 @@ from main_modules.m00a_env_init import get_or_create_analysis_environment, setup
 logger = setup_logger(__name__)
 logger.info("=== Module ===")
 
-# %% === Methods to ....
+# %% === Helper functions
 
 # %% === Main function
 def main(

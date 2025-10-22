@@ -5,7 +5,6 @@ import numpy as np
 import sys
 import argparse
 import warnings
-from typing import Dict, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -38,7 +37,7 @@ from main_modules.m00a_env_init import get_or_create_analysis_environment, setup
 logger = setup_logger(__name__)
 logger.info("=== Indexing of polygons with parameters ===")
 
-# %% === Methods for main parameters association
+# %% === Helper functions
 def get_raw_associated_df(
         env: AnalysisEnvironment
     ) -> pd.DataFrame:
@@ -156,7 +155,7 @@ def align_and_index_associated_df(
 def main(
         base_dir: str=None,
         gui_mode: bool=False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, object]:
     """Main function to create soil and vegetation grids."""
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)

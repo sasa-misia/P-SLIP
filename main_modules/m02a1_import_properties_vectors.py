@@ -2,7 +2,6 @@
 import os
 import sys
 import argparse
-from typing import Dict, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -13,7 +12,7 @@ from config import (
 
 # Importing necessary modules from psliptools
 from psliptools.geometries import (
-    load_shapefile_polygons,
+    load_shapefile_geometry,
     get_shapefile_fields
 )
 
@@ -27,8 +26,7 @@ from main_modules.m00a_env_init import get_or_create_analysis_environment, obtai
 logger = setup_logger(__name__)
 logger.info("=== Import polygons with main properties ===")
 
-# %% === Methods to import shapefiles with main properties
-
+# %% === Helper functions
 
 # %% === Main function
 def main(
@@ -36,7 +34,7 @@ def main(
         gui_mode: bool=False,
         source_type: str="land_use", 
         source_subtype: str=None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, object]:
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
         raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
     
@@ -67,13 +65,14 @@ def main(
             allow_multiple=False
         )[0]
     
-    prop_df = load_shapefile_polygons(
+    prop_df = load_shapefile_geometry(
         shapefile_path=src_path,
         field_name=sel_shp_field,
         poly_bound_geo=study_area_polygon,
         mask_out_poly=True,
         convert_to_geo=True,
-        points_lim=80000
+        points_lim=80000,
+        allow_only_polygons=True
     )
 
     prop_df['label'] = prop_df['class_name']

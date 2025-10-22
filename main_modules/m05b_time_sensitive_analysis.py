@@ -25,7 +25,7 @@ from main_modules.m04c_import_time_sensitive_data import get_numeric_data_ranges
 logger = setup_logger(__name__)
 logger.info("=== Analyzing time-sensitive data patterns ===")
 
-# %% === Methods to analyze time-sensitive data
+# %% === Helper functions
 def get_time_sensitive_statistics(
         time_sensitive_vars: dict,
         quantiles: list[float]=[.8, .9],
@@ -331,7 +331,7 @@ def main(
         include_range_extremes: bool=False,
         cut_outside_range: bool=True,
         moving_average_window: pd.Timedelta=pd.Timedelta(days=31)
-    ) -> dict[str, pd.DataFrame]:
+    ) -> dict[str, object]:
     """Main function to obtain statistical information of time-sensitive data."""
     if not source_type in KNOWN_DYNAMIC_INPUT_TYPES:
         raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES))

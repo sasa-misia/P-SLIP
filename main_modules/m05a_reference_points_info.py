@@ -37,7 +37,7 @@ from main_modules.m00a_env_init import get_or_create_analysis_environment, setup
 logger = setup_logger(__name__)
 logger.info(f"=== Obtain reference points info ===")
 
-# %% === Methods to extract reference points info
+# %% === Helper functions and global variables
 MORPHOLOGY_NAMES = ['elevation', 'slope', 'aspect', 'profile_curvature', 'planform_curvature', 'twisting_curvature']
 PARAMETER_NAMES = ['GS', 'gd', 'c', 'cr', 'phi', 'kt', 'beta', 'A', 'lambda', 'n', 'E', 'ni']
 TIME_SENSITIVE_NAMES = ['nearest_rain_station']

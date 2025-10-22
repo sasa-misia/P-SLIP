@@ -61,7 +61,7 @@ def _check_polygon_is_valid(
 # %% === Function to check the geometry of a polygon and fix it if necessary
 def _check_and_fix_polygon(
         polygon: geom.Polygon | geom.MultiPolygon
-    ) -> None:
+    ) -> geom.Polygon | geom.MultiPolygon:
     """
     Check the geometry of a polygon and fix it if necessary.
 
@@ -77,7 +77,7 @@ def _check_and_fix_polygon(
     if not isinstance(polygon, (geom.Polygon, geom.MultiPolygon)):
         raise ValueError("Input must be a shapely Polygon or MultiPolygon.")
     if not _check_polygon_is_valid(polygon):
-        polygon = polygon.buffer(0)
+        polygon = polygon.buffer(1e-8) # Add a small buffer to repair invalid geometries
         if not _check_polygon_is_valid(polygon):
             raise ValueError("Tried to fix polygon geometry, but it is still invalid.")
         

@@ -192,7 +192,7 @@ def get_projected_epsg_code_from_bbox(
         raise ValueError(f"Unable to find a suitable UTM CRS for the bounding box: {geo_bbox}")
     
     if len(utm_crs_list) > 1:
-        warnings.warn(f"Multiple UTM CRS found for the bounding box: {geo_bbox}. Using the first one: {utm_crs_list[0].code}", stacklevel=2)
+        warnings.warn(f"Multiple UTM CRS found ({[crs.code for crs in utm_crs_list]}) for the bounding box: {geo_bbox}. Using the first one: {utm_crs_list[0].code}", stacklevel=2)
 
     utm_epsg_code = utm_crs_list[0].code
     if isinstance(utm_epsg_code, str):

@@ -4,7 +4,6 @@ import pandas as pd
 import sys
 import argparse
 import shapely
-from typing import Dict, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -33,7 +32,7 @@ from main_modules.m00a_env_init import get_or_create_analysis_environment, setup
 logger = setup_logger(__name__)
 logger.info("=== Import DTM ===")
 
-# %% === DEM and Analysis Base Grid (ABG) methods
+# %% === Helper functions
 # Read and import DTM files in a dataframe
 def import_dtm_files(
         env: AnalysisEnvironment,
@@ -111,7 +110,7 @@ def main(
         resample_method: str='average', 
         apply_mask_to_raster: bool=False, 
         check_plot: bool=False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, object]:
     """Main function to define the base grid."""
     src_type = 'dtm'
     
