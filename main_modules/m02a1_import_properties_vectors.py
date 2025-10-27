@@ -7,13 +7,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    KNOWN_OPTIONAL_STATIC_INPUT_TYPES
+    KNOWN_OPTIONAL_STATIC_INPUT_TYPES,
+    SUPPORTED_FILE_TYPES
 )
 
 # Importing necessary modules from psliptools
 from psliptools.geometries import (
-    load_shapefile_geometry,
-    get_shapefile_fields
+    load_vectorial_file_geometry,
+    get_geo_file_attributes
 )
 
 from psliptools.utilities import (
@@ -53,21 +54,21 @@ def main(
         src_path = select_file_prompt(
             base_dir=env.folders['inputs'][source_type]['path'],
             usr_prompt=f"Name or full path of the {source_type} [subtype: {source_subtype}] shapefile (ex. {source_type}.shp): ",
-            src_ext='shp'
+            src_ext=SUPPORTED_FILE_TYPES['vectorial']
         )
 
-        shp_fields, shp_types = get_shapefile_fields(src_path)
-        print("\n=== Shapefile fields and types ===")
+        shp_fields, shp_types = get_geo_file_attributes(src_path)
+        print("\n=== Shapefile attribute and types ===")
         sel_shp_field = select_from_list_prompt(
             obj_list=shp_fields, 
             obj_type=shp_types, 
-            usr_prompt="Select the field:", 
+            usr_prompt="Select the attribute:", 
             allow_multiple=False
         )[0]
     
-    prop_df = load_shapefile_geometry(
-        shapefile_path=src_path,
-        field_name=sel_shp_field,
+    prop_df = load_vectorial_file_geometry(
+        file_path=src_path,
+        attribute=sel_shp_field,
         poly_bound_geo=study_area_polygon,
         mask_out_poly=True,
         convert_to_geo=True,

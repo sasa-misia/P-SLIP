@@ -24,7 +24,8 @@ from .default_params import (
     PARAMETER_CLASSES_FILENAME,
     DEFAULT_PARAMETER_CLASSES,
     REFERENCE_POINTS_FILENAME,
-    REFERENCE_POINTS_CVS_COLUMNS
+    REFERENCE_POINTS_CVS_COLUMNS,
+    SUPPORTED_FILE_TYPES
 )
 
 from .version_writer import (
@@ -59,6 +60,7 @@ __all__ = [
     'DEFAULT_PARAMETER_CLASSES',
     'REFERENCE_POINTS_FILENAME',
     'REFERENCE_POINTS_CVS_COLUMNS',
+    'SUPPORTED_FILE_TYPES',
     'AnalysisEnvironment',
     'create_analysis_environment',
     'get_analysis_environment',

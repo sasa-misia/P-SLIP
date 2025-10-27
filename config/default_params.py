@@ -255,3 +255,11 @@ DEFAULT_PARAMETER_CLASSES = [
 # %% === Default reference points csv
 REFERENCE_POINTS_FILENAME = 'reference_points.csv'
 REFERENCE_POINTS_CVS_COLUMNS = ['lon', 'lat', 'id', 'date', 'info']
+
+# %% === dictionary of supported file types
+SUPPORTED_FILE_TYPES = {
+    'vectorial': ['.shp', '.gpkg', '.geojson', '.sqlite'], 
+    'table': ['.csv'],
+    'raster': ['.tif', '.tiff'],
+    'climate': ['.nc']
+}

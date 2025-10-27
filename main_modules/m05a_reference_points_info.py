@@ -11,7 +11,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # Importing necessary modules from config
 from config import (
     AnalysisEnvironment,
-    REFERENCE_POINTS_FILENAME
+    REFERENCE_POINTS_FILENAME,
+    SUPPORTED_FILE_TYPES
 )
 
 # Importing necessary modules from psliptools
@@ -287,7 +288,7 @@ def main(
             ref_points_csv_path = select_file_prompt(
                 base_dir=env.folders['user_control']['path'],
                 usr_prompt=f"Name or full path of the reference points csv (Default: {REFERENCE_POINTS_FILENAME}): ",
-                src_ext='csv',
+                src_ext=SUPPORTED_FILE_TYPES['table'],
                 default_file=os.path.join(env.folders['user_control']['path'], REFERENCE_POINTS_FILENAME)
             )
 

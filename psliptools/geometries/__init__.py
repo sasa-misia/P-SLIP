@@ -31,14 +31,14 @@ from .manipulate_geom import (
 
 from .info_geom import (
     get_polygon_extremes,
-    get_shapefile_fields,
-    get_shapefile_field_values
+    get_geo_file_attributes,
+    get_geo_file_field_values
 )
 
 from .import_geom import (
     convert_gdf_to_geo,
-    load_shapefile_polygons_simple,
-    load_shapefile_geometry
+    load_vectorial_file_geometry_simple,
+    load_vectorial_file_geometry
 )
 
 __all__ = [
@@ -46,8 +46,8 @@ __all__ = [
     "create_rectangle_polygons",
     "create_polygons_from_points",
     "convert_gdf_to_geo",
-    "load_shapefile_polygons_simple",
-    "load_shapefile_geometry",
+    "load_vectorial_file_geometry_simple",
+    "load_vectorial_file_geometry",
     "intersect_polygons",
     "union_polygons",
     "subtract_polygons",
@@ -65,6 +65,6 @@ __all__ = [
     "align_polygons",
     "resolve_polygons_intersections",
     "get_polygon_extremes",
-    "get_shapefile_fields",
-    "get_shapefile_field_values"
+    "get_geo_file_attributes",
+    "get_geo_file_field_values"
 ]

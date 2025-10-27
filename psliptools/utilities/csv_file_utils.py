@@ -1,6 +1,7 @@
 # %% ===  Import necessary modules
-import pandas as pd
 import os
+import chardet
+import pandas as pd
 
 # %% === Function to check if a path is relative to a base directory
 def _is_relative_path(raw_inp_path: str, csv_base_dir: str) -> bool:
@@ -344,4 +345,16 @@ def rename_csv_header(
     csv_df.rename(columns=rename_mapping, inplace=True)
     csv_df.to_csv(csv_path, index=False)
     
+# %% === Function to read a CSV file with the more comprehensive pandas read_csv function
+def read_generic_csv(
+        csv_path: str
+    ) -> pd.DataFrame:
+    with open(csv_path, 'rb') as f:
+        result = chardet.detect(f.read())
+        charenc = result['encoding']
+
+    read_df = pd.read_csv(csv_path, encoding=charenc, sep=None, engine='python')
+    
+    return read_df
+
 # %%

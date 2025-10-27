@@ -1,29 +1,33 @@
-#%% === Import necessary libraries
+# %% === Import necessary libraries
+import os
+import fiona
 import pandas as pd
 import shapely.geometry as geom
-import fiona
-import os
 
-#%% === Function to check if the input is a shapefile
-def _shapefile_checker(shapefile_path: str) -> None:
+# %% === Function to check if the input is a shapefile
+def _geo_file_checker(
+        file_path: str
+    ) -> None:
     """
     Check if the input is a shapefile.
 
     Args:
-        shapefile_path (str): The path to the shapefile.
+        file_path (str): The path to the shapefile (or other vectorial file).
 
     Raises:
         ValueError: If the input is not a shapefile.
         FileNotFoundError: If the shapefile does not exist.
     """
-    if not shapefile_path.endswith('.shp'):
+    if not any([file_path.endswith(x) for x in ['shp', 'gpkg', 'geojson']]):
         raise ValueError("Input must be a shapefile.")
     
-    if not os.path.exists(shapefile_path):
-        raise FileNotFoundError(f"Shapefile not found: {shapefile_path}")
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Vectorial file not found: {file_path}")
 
-#%% === Function to get min/max coordinates from a polygon
-def get_polygon_extremes(polygon: geom.Polygon) -> pd.DataFrame:
+# %% === Function to get min/max coordinates from a polygon
+def get_polygon_extremes(
+        polygon: geom.Polygon
+    ) -> pd.DataFrame:
     """Get min/max coordinates from a polygon.
     
     Args:
@@ -50,48 +54,58 @@ def get_polygon_extremes(polygon: geom.Polygon) -> pd.DataFrame:
             columns=['lon', 'lat'], 
             index=['min', 'max']
         )
+    
     return df
 
-#%% === Function to get field names and data types from a shapefile
-def get_shapefile_fields(shapefile_path: str) -> tuple[list, list]:
+# %% === Function to get field names and data types from a shapefile
+def get_geo_file_attributes(
+        file_path: str
+    ) -> tuple[list, list]:
     """
-    Get field names and data types from a shapefile.
+    Get attribute names and data types from a shapefile (or other vectorial file).
 
     Args:
-        shapefile_path (str): The path to the shapefile.
+        file_path (str): The path to the shapefile (or other vectorial file).
 
     Returns:
-        list: A list of field names.
-        list: A list of data types.
+        tuple(list, list): A tuple containing a list of attribute names and a list of data types.
     """
-    _shapefile_checker(shapefile_path)
+    _geo_file_checker(file_path)
     
-    with fiona.open(shapefile_path, 'r') as src:
+    with fiona.open(file_path, 'r') as src:
         schema = src.schema
-        fields = list(schema['properties'].keys())
+        attributes = list(schema['properties'].keys())
         data_types = list(schema['properties'].values())
-        return fields, data_types
 
-#%% === Function to get field values from a shapefile
-def get_shapefile_field_values(shapefile_path: str, field_name: str, sort: bool = False) -> list:
+        return attributes, data_types
+
+# %% === Function to get field values from a shapefile
+def get_geo_file_field_values(
+        file_path: str, 
+        attribute: str, 
+        sort: bool = False
+    ) -> list[str]:
     """
-    Get field values from a shapefile as strings.
+    Get attribute values from a shapefile (or other vectorial file) as strings.
     
     Args:
-        shapefile_path (str): The path to the shapefile.
-        field_name (str): The name of the field to get values from.
+        file_path (str): The path to the shapefile (or other vectorial file).
+        attribute (str): The name of the attribute to get values from.
         
     Returns:
-        list: A list of field values as strings.
+        list: A list of attribute values as strings.
     """
-    _shapefile_checker(shapefile_path)
+    _geo_file_checker(file_path)
     
-    with fiona.open(shapefile_path, 'r') as src:
-        if field_name not in src.schema['properties']:
-            raise ValueError(f"Field '{field_name}' not found in shapefile.")
+    with fiona.open(file_path, 'r') as src:
+        if attribute not in src.schema['properties']:
+            raise ValueError(f"Attribute [{attribute}] not found in vectorial file.")
         
         if sort:
-            field_values = sorted(set([str(feature['properties'][field_name]) for feature in src])) # sorted always returns a list
+            attribute_values = sorted(set([str(feature['properties'][attribute]) for feature in src])) # sorted always returns a list
         else:
-            field_values = [str(feature['properties'][field_name]) for feature in src]
-        return field_values
+            attribute_values = [str(feature['properties'][attribute]) for feature in src]
+
+        return attribute_values
+    
+# %%

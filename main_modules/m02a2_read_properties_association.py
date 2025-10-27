@@ -10,7 +10,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import (
     KNOWN_OPTIONAL_STATIC_INPUT_TYPES,
     STANDARD_CLASSES_FILENAME,
-    PARAMETER_CLASSES_FILENAME
+    PARAMETER_CLASSES_FILENAME,
+    SUPPORTED_FILE_TYPES
 )
 
 from psliptools.utilities import (
@@ -75,7 +76,7 @@ def main(
             standard_classes_filepath = select_file_prompt(
                 base_dir=env.folders['user_control']['path'],
                 usr_prompt=f"Name or full path of the standard classes association file (default: [{STANDARD_CLASSES_FILENAME}]): ",
-                src_ext='csv',
+                src_ext=SUPPORTED_FILE_TYPES['table'],
                 default_file=STANDARD_CLASSES_FILENAME
             )
 
@@ -84,7 +85,7 @@ def main(
             parameter_classes_filepath = select_file_prompt(
                 base_dir=env.folders['user_control']['path'],
                 usr_prompt=f"Name or full path of the parameter classes association file (default: [{PARAMETER_CLASSES_FILENAME}]): ",
-                src_ext='csv',
+                src_ext=SUPPORTED_FILE_TYPES['table'],
                 default_file=PARAMETER_CLASSES_FILENAME
             )
         

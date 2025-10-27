@@ -202,6 +202,33 @@ def get_projected_epsg_code_from_bbox(
         raise ValueError(f"Invalid UTM EPSG code: {utm_epsg_code}. Expected an integer value.")
     return utm_epsg_code
 
+# %% === Function to obtain the unit of measure applied to an epsg code
+def get_unit_of_measure_from_epsg(
+        epsg_code: int
+    ) -> str:
+    """
+    Get the unit of measure applied to an EPSG code.
+
+    Args:
+        epsg_code (int): The EPSG code.
+
+    Returns:
+        str: The unit of measure applied to the EPSG code.
+    """
+    crs = pyproj.CRS.from_epsg(epsg_code)
+    
+    unit = crs.axis_info[0].unit_name.lower()
+    if unit in ['metre', 'meter']:
+        epsg_unit = 'meter'
+    elif unit in ['foot', 'feet']:
+        epsg_unit = 'feet'
+    elif unit in ['degree', 'degrees']:
+        epsg_unit = 'degree'
+    else:
+        epsg_unit = 'unknown'
+    
+    return epsg_unit
+
 # %% === Function to get the projected crs from a bounding box
 def get_projected_crs_from_bbox(
         geo_bbox: list | np.ndarray

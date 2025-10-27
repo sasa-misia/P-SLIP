@@ -9,7 +9,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importing necessary modules from config
 from config import (
-    AnalysisEnvironment
+    AnalysisEnvironment,
+    SUPPORTED_FILE_TYPES
 )
 
 # Importing necessary modules from psliptools
@@ -123,10 +124,17 @@ def main(
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
         print("\n=== Directory selection ===")
-        dtm_fold = select_dir_prompt(default_dir=env.folders['inputs'][src_type]['path'], content_type=src_type)
+        dtm_fold = select_dir_prompt(
+            default_dir=env.folders['inputs'][src_type]['path'], 
+            content_type=src_type
+        )
         
         print("\n=== Raster selection ===")
-        dtm_paths = select_files_in_folder_prompt(base_dir=dtm_fold, src_ext=['.tif', '.tiff'], allow_multiple=True)
+        dtm_paths = select_files_in_folder_prompt(
+            base_dir=dtm_fold, 
+            src_ext=SUPPORTED_FILE_TYPES['raster'], 
+            allow_multiple=True
+        )
     
     dtm_df, abg_df, cust_id = import_dtm_files(
         env,

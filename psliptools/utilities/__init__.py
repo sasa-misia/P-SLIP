@@ -8,7 +8,8 @@ from .csv_file_utils import (
     check_raw_path,
     add_row_to_csv,
     get_csv_column_names,
-    rename_csv_header
+    rename_csv_header,
+    read_generic_csv
 )
 
 from .pandas_utils import (
@@ -53,6 +54,7 @@ __all__ = [
     "add_row_to_csv",
     "get_csv_column_names",
     "rename_csv_header",
+    "read_generic_csv",
     "compare_dataframes",
     "compare_dataframes_columns",
     "get_list_of_values_from_dataframe",

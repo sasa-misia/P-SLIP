@@ -1,8 +1,8 @@
 # %% === Import necessary modules
-import shapely.geometry as geom
 import warnings
 import numpy as np
 import pandas as pd
+import shapely.geometry as geom
 
 # %% === Function to get rectangle parameters
 def get_rectangle_parameters(
@@ -44,8 +44,8 @@ def get_rectangle_parameters(
 
 # %% === Function to create rectangle based on given coordinates
 def create_rectangle_polygons(
-        rectangle_coordinates: list
-    ) -> list:
+        rectangle_coordinates: list[tuple[float, float, float, float]]
+    ) -> list[geom.Polygon]:
     """
     Create rectangular polygons from a list of (x_min, y_min, x_max, y_max).
 
@@ -83,7 +83,7 @@ def create_polygons_from_points(
         x (list): List of x coordinates.
         y (list): List of y coordinates.
         buffer (float, optional): Buffer size to apply in the units of x and y (default is 10).
-        shape (str, optional): Shape of the polygon ('circle' or 'rectangle') (default is 'circle').
+        shape (str, optional): Shape of the polygon ('circle' or 'square') (default is 'circle').
 
     Returns:
         list: List of shapely.geometry.Polygon objects, each representing a polygon.
@@ -104,18 +104,20 @@ def create_polygons_from_points(
     
     if not isinstance(shape, str) :
         raise TypeError("Shape must be a string.")
-    if shape not in ['circle', 'rectangle']:
-        raise ValueError("Shape must be 'circle' or 'rectangle'.")
+    if shape not in ['circle', 'square']:
+        raise ValueError("Shape must be 'circle' or 'square'.")
     
     if shape == 'circle':
         polygons = [geom.Point(xy).buffer(buffer) for xy in zip(x, y)]
-    elif shape == 'rectangle':
+    elif shape == 'square':
         polygons = [geom.Polygon([
             (xy[0] - buffer, xy[1] - buffer), 
             (xy[0] + buffer, xy[1] - buffer), 
             (xy[0] + buffer, xy[1] + buffer), 
             (xy[0] - buffer, xy[1] + buffer)
         ]) for xy in zip(x, y)]
+    else:
+        raise ValueError("Shape type not recognized.")
 
     return polygons
 

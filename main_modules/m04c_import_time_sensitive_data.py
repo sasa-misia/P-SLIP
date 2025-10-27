@@ -10,7 +10,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # Importing necessary modules from config
 from config import (
     KNOWN_DYNAMIC_INPUT_TYPES,
-    DYNAMIC_SUBFOLDERS
+    DYNAMIC_SUBFOLDERS,
+    SUPPORTED_FILE_TYPES
 )
 
 from psliptools.utilities import (
@@ -157,11 +158,6 @@ def main(
     if last_date is not None and not isinstance(last_date, pd.Timestamp):
         raise TypeError("last_date must be a datetime object or None")
     
-    if source_mode == 'station':
-        allowed_extensions = ['.csv'] # Other extensions must be implemented
-    elif source_mode == 'satellite':
-        allowed_extensions = ['.nc'] # Other extensions must be implemented
-    
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
 
@@ -180,7 +176,7 @@ def main(
         print("\n=== Data files selection ===")
         data_paths = select_files_in_folder_prompt(
             base_dir=data_fold, 
-            src_ext=allowed_extensions, 
+            src_ext=SUPPORTED_FILE_TYPES['climate'] + SUPPORTED_FILE_TYPES['table'], 
             allow_multiple=True, 
             usr_prompt="Number, name or full path of the data files (ex. data.csv): "
         )
@@ -191,7 +187,7 @@ def main(
             gauge_info_path = select_file_prompt(
                 base_dir=env.folders['inputs'][source_type][source_subtype]['path'], 
                 usr_prompt="Name or full path of the gauge info file (ex. gauge_info.csv): ", 
-                src_ext=allowed_extensions
+                src_ext=SUPPORTED_FILE_TYPES['table']
             )
 
     ts_numeric_data_range = get_numeric_data_ranges(source_type)
