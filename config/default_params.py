@@ -37,6 +37,8 @@ DYNAMIC_SUBFOLDERS = [
     'forecast'
 ]
 GENERIC_INPUT_TYPE = ['miscellaneous']
+MODELING_SUBFOLDERS = ['safety_factors', 'machine_learning', 'evolution']
+FIGURES_SUBFOLDERS = ['susceptibility_maps']
 
 # Configuration for the folder structure
 # This dictionary defines the folder structure for the project.
@@ -48,16 +50,10 @@ ANALYSIS_FOLDER_STRUCTURE = {
         *GENERIC_INPUT_TYPE
     ],
     'variables': [],
-    'results': [
-        'safety_factors',
-        'machine_learning',
-        'evolution'
-    ],
+    'modeling': MODELING_SUBFOLDERS,
     'user_control': [],
     'outputs': [
-        {'figures': [
-            'susceptibility_maps',
-        ]},
+        {'figures': FIGURES_SUBFOLDERS},
         'tables'
     ],
     'logs': []
@@ -104,18 +100,9 @@ ANALYSIS_CONFIGURATION = {
         **{k: [{'settings': {}, 'custom_id': []}] for k in KNOWN_DYNAMIC_INPUT_TYPES},
         **{k: [{'settings': {}, 'custom_id': []}] for k in GENERIC_INPUT_TYPE}
     },
-    'variables': { # Here a list of variables and content (ex: {'variable.pkl': {'var1', 'var2', 'var3'}}})
-        'example.pkl': [
-            'example_var1',
-            'example_var2', 
-            'example_var3'
-        ]
-    },
-    'results': { # Here all the settings for the results are defined
-        'example_mdl_name': {
-            'settings': {},
-            'folder': None 
-        }
+    'variables': {}, # Here a list of variables and content ( ex: {'variable.pkl': ['var1', 'var2', 'var3']} )
+    'modeling': { # Here all the settings for the models are defined ( ex: {'machine_learning': {'mdl_name': {'settings': {}}}} )
+        name: {'mdl_name': {'settings': {}}} for name in MODELING_SUBFOLDERS
     },
     'outputs': {
         'figures': { # Here all the settings for the figures are defined
