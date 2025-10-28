@@ -1,9 +1,9 @@
 # %% === Import necessary modules
 import os
-import pandas as pd
 import sys
 import argparse
 import shapely
+import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -41,6 +41,8 @@ def import_dtm_files(
         files_path: list[str], 
         resample_size: tuple[int, int]=None, 
         resample_method: str='average',
+        data_dtype: str=None,
+        coord_dtype: str='float32',
         poly_mask: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None,
         apply_mask_to_raster: bool=False
     ) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
@@ -51,10 +53,11 @@ def import_dtm_files(
     for idx, dtm_path in enumerate(files_path):
         raster_data, raster_profile, raster_x, raster_y, mask_matrix = load_georaster(
             filepath=dtm_path,
-            set_dtype='float32', 
+            set_dtype=data_dtype, 
             convert_to_geo=False, 
             poly_mask=poly_mask,
-            squeeze=True # To remove the dimension with length 1
+            squeeze=True, # To remove the dimension with length 1
+            set_coord_dtype=coord_dtype
         )
 
         if raster_data is None: # No pixels inside poly_load_mask_geo
@@ -76,7 +79,8 @@ def import_dtm_files(
         raster_lon, raster_lat = convert_coords_to_geo(
             crs_in=raster_profile['crs'].to_epsg(), 
             in_coords_x=raster_x, 
-            in_coords_y=raster_y
+            in_coords_y=raster_y,
+            force_ndarray=True
         )
 
         mask_idx_1d = get_1d_idx_from_2d_mask(mask_matrix, order='C') # C order is the default and means row-major (row by row)
@@ -108,12 +112,14 @@ def main(
         base_dir: str=None, 
         gui_mode: bool=False, 
         resample_size: int=None, 
-        resample_method: str='average', 
+        resample_method: str='average',
+        data_dtype: str=None,
+        coord_dtype: str='float32',
         apply_mask_to_raster: bool=False, 
         check_plot: bool=False
     ) -> dict[str, object]:
     """Main function to define the base grid."""
-    src_type = 'dtm'
+    source_type = 'dtm'
     
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
@@ -125,8 +131,8 @@ def main(
     else:
         print("\n=== Directory selection ===")
         dtm_fold = select_dir_prompt(
-            default_dir=env.folders['inputs'][src_type]['path'], 
-            content_type=src_type
+            default_dir=env.folders['inputs'][source_type]['path'], 
+            content_type=source_type
         )
         
         print("\n=== Raster selection ===")
@@ -137,26 +143,28 @@ def main(
         )
     
     dtm_df, abg_df, cust_id = import_dtm_files(
-        env,
-        src_type, 
-        dtm_paths, 
+        env=env,
+        file_type=source_type, 
+        files_path=dtm_paths, 
         resample_size=resample_size, 
-        resample_method=resample_method, 
+        resample_method=resample_method,
+        data_dtype=data_dtype,
+        coord_dtype=coord_dtype,
         poly_mask=study_area_cln_poly,
         apply_mask_to_raster=apply_mask_to_raster
     )
 
     dtm_abg_vars = {'dtm': dtm_df, 'abg': abg_df}
 
-    env.config['inputs'][src_type][0]['settings'] = {
+    env.config['inputs'][source_type][0]['settings'] = {
         'resample_size': resample_size, # None or (x, y)
         'resample_method': resample_method,
         'apply_mask_to_raster': apply_mask_to_raster
     }
-    env.config['inputs'][src_type][0]['custom_id'] = cust_id
-    env.collect_input_files(file_type=[src_type], multi_extension=True)
+    env.config['inputs'][source_type][0]['custom_id'] = cust_id
+    env.collect_input_files(file_type=[source_type], multi_extension=True)
 
-    env.save_variable(variable_to_save=dtm_abg_vars, variable_filename=f"{src_type}_vars.pkl")
+    env.save_variable(variable_to_save=dtm_abg_vars, variable_filename=f"{source_type}_vars.pkl", compression='gzip')
 
     # Check-plot
     if check_plot:
@@ -171,6 +179,8 @@ if __name__ == '__main__':
     parser.add_argument('--gui_mode', action='store_true', help="Run in GUI mode (not implemented yet).")
     parser.add_argument('--resample_size', type=int, default=None, help="Resample size for the DEM.")
     parser.add_argument('--resample_method', type=str, default='average', help="Resample method for the DEM.")
+    parser.add_argument('--data_dtype', type=str, default=None, help="Raster data type for the DEM.")
+    parser.add_argument('--coord_dtype', type=str, default='float32', help="Coordinate data type for the DEM.")
     parser.add_argument('--apply_mask_to_raster', action='store_true', help="Apply mask to raster data.")
     parser.add_argument('--check_plot', action='store_true', help="Check plot for the DEM.")
     args = parser.parse_args()
@@ -180,6 +190,8 @@ if __name__ == '__main__':
         gui_mode=args.gui_mode, 
         resample_size=args.resample_size, 
         resample_method=args.resample_method,
+        data_dtype=args.data_dtype,
+        coord_dtype=args.coord_dtype,
         apply_mask_to_raster=args.apply_mask_to_raster,
         check_plot=args.check_plot
     )

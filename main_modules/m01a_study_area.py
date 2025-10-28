@@ -169,7 +169,7 @@ def main(
         gui_mode: bool=False,
         source_mode: str="geo_file",
         point_buffer: float=2000, # in meters
-        point_buffer_type: str="rectangle",
+        point_buffer_type: str="square",
     ) -> dict[str, object]:
     """Main function to define the study area."""
     if not source_mode in SOURCE_MODE_ALLOWED:

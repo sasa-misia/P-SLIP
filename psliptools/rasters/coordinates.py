@@ -37,6 +37,7 @@ def _get_crs(
         if set_crs is None:
             raise ValueError(f"Unable to read crs of raster file: {raster_path}. Please specify a code as the set_crs argument.")
         crs_obj = rasterio.crs.CRS.from_epsg(set_crs)
+    
     return crs_obj
 
 # %% === Function to check if coordinates are given in a correct format, converting if necessary
@@ -64,6 +65,7 @@ def _check_and_convert_coords(
     
     if x_coords.ndim != y_coords.ndim or x_coords.size != y_coords.size:
         raise ValueError("x_coords and y_coords must have the same number of dimensions and size.")
+    
     return x_coords, y_coords
 
 
@@ -105,6 +107,7 @@ def get_georaster_info(
             raise ValueError(f"Invalid bounding box: {set_bbox}. Please specify each element as an integer or float.")
         
         src_profile['transform'] = rasterio.transform.from_bounds(*set_bbox, src_profile['width'], src_profile['height'])
+    
     return src_profile
 
 # %% === Function to create xy grids from profile
@@ -127,6 +130,7 @@ def get_xy_grids_from_profile(
             np.arange(profile['height']),
             col
         )
+    
     return ref_grid_x, ref_grid_y
 
 # %% === Function to get the bounding box from a profile
@@ -154,6 +158,7 @@ def get_bbox_from_profile(
         profile['width'], 
         profile['transform']
     )
+
     return np.array(bbox)
 
 # %% === Function to get the projected epsg code from a bounding box
@@ -200,6 +205,7 @@ def get_projected_epsg_code_from_bbox(
     if not isinstance(utm_epsg_code, int):
         print(type(utm_epsg_code))  # This will raise an error if utm_epsg_code is not an integer
         raise ValueError(f"Invalid UTM EPSG code: {utm_epsg_code}. Expected an integer value.")
+    
     return utm_epsg_code
 
 # %% === Function to obtain the unit of measure applied to an epsg code
@@ -247,6 +253,7 @@ def get_projected_crs_from_bbox(
     utm_crs = rasterio.crs.CRS.from_epsg(epsg_code)
     if not utm_crs.is_projected:
         raise ValueError('The auto-generated UTM CRS is not projected!')
+    
     return utm_crs
 
 # %% === Check if arrays contain geographic coordinates
@@ -265,6 +272,7 @@ def are_coords_geographic(
         bool: True if the arrays contain geographic coordinates, False otherwise.
     """
     lon, lat = _check_and_convert_coords(lon, lat)
+
     return np.all(lon >= -180) and np.all(lon <= 180) and np.all(lat >= -90) and np.all(lat <= 90)
 
 # %% === Function to create bounding box from coordinates
@@ -291,6 +299,7 @@ def create_bbox_from_grids(
         coords_x.max() + dx_pixel/2, # right
         coords_y.max() + dy_pixel/2  # top
     ])
+
     return out_bbox
 
 # %% === Function to create grid from bounding box
@@ -380,15 +389,7 @@ def convert_coords(
         in_coords_x, in_coords_y = _check_and_convert_coords(in_coords_x, in_coords_y)
     transformer = pyproj.Transformer.from_crs(crs_in, crs_out, always_xy=True)
     out_coords_x, out_coords_y = transformer.transform(in_coords_x, in_coords_y)
-    # ===== Less efficient
-    # crs_in = rasterio.crs.CRS.from_epsg(crs_in)
-    # crs_out = rasterio.crs.CRS.from_epsg(crs_out)
-    # in_coords_x_flat = in_coords_x.flatten()
-    # in_coords_y_flat = in_coords_y.flatten()
-    # out_coords_x_flat, out_coords_y_flat = rasterio.warp.transform(crs_in, crs_out, in_coords_x_flat, in_coords_y_flat)
-    # out_coords_x = np.array(out_coords_x_flat).reshape(in_coords_x.shape)
-    # out_coords_y = np.array(out_coords_y_flat).reshape(in_coords_y.shape)
-    # =====
+
     return out_coords_x, out_coords_y
 
 # %% === Function to convert coordinates inside lists
@@ -415,13 +416,15 @@ def convert_coords_from_list(
         x_temp, y_temp = convert_coords(crs_in, crs_out, x_coords, y_coords, force_ndarray=True)
         out_coords_x.append(x_temp)
         out_coords_y.append(y_temp)
+    
     return out_coords_x, out_coords_y
 
 # %% === Function to convert coordinates to geographic
 def convert_coords_to_geo(
         crs_in: int,  
         in_coords_x: np.ndarray, 
-        in_coords_y: np.ndarray
+        in_coords_y: np.ndarray,
+        force_ndarray: bool = False
     ) -> tuple[np.ndarray, np.ndarray]:
     """
     Convert coordinates from one coordinate reference system to another.
@@ -435,6 +438,13 @@ def convert_coords_to_geo(
         tuple[np.ndarray, np.ndarray]: Tuple containing the converted longitude and latitude coordinates.
     """
     out_coords_x, out_coords_y = convert_coords(crs_in, 4326, in_coords_x, in_coords_y)
+    if force_ndarray:
+        out_coords_x, out_coords_y = _check_and_convert_coords(out_coords_x, out_coords_y)
+        if isinstance(in_coords_x, np.ndarray):
+            out_coords_x = out_coords_x.astype(in_coords_x.dtype)
+        if isinstance(in_coords_y, np.ndarray):
+            out_coords_y = out_coords_y.astype(in_coords_y.dtype)
+    
     return out_coords_x, out_coords_y
 
 # %% === Function to convert bbox
@@ -457,6 +467,7 @@ def convert_bbox(
     in_coords_x = np.array([bbox[0], bbox[2]])
     in_coords_y = np.array([bbox[1], bbox[3]])
     out_coords_x, out_coords_y = convert_coords(crs_in, crs_out, in_coords_x, in_coords_y)
+
     return np.array([out_coords_x.min(), out_coords_y.min(), out_coords_x.max(), out_coords_y.max()])
 
 # %% === Function to create a transformer from grids
@@ -471,6 +482,7 @@ def transformer_from_grids(
     e_trans = np.average(grid_y[1, :] - grid_y[0, :])
     f_trans = grid_y[0, 0] + e_trans/2
     out_transformer = rasterio.transform.Affine(a_trans, b_trans, c_trans, d_trans, e_trans, f_trans)
+
     return out_transformer
 
 # %% === Function to convert grids and profile to EPSG:4326 (WGS84)
@@ -508,6 +520,7 @@ def convert_grids_and_profile_to_geo(
     # =====
     out_profile['transform'] = transformer_from_grids(out_lons, out_lats)
     out_profile['crs'] = rasterio.crs.CRS.from_epsg(4326)
+
     return out_lons, out_lats, out_profile
 
 # %% === Function to convert grids and profile to projected crs
@@ -566,6 +579,7 @@ def convert_grids_and_profile_to_prj(
     
     out_profile['transform'] = transformer_from_grids(out_coords_x, out_coords_y)
     out_profile['crs'] = crs_out_obj
+
     return out_coords_x, out_coords_y, out_profile
 
 # %% === Function to obtain pixels that are inside a polygon
@@ -614,6 +628,7 @@ def get_pixels_inside_polygon(
         profile=raster_profile
     )
     mask = rasterio.features.geometry_mask([geo_polygon], out_shape=[raster_profile_geo['height'], raster_profile['width']], transform=raster_profile_geo['transform'], invert=True, all_touched=True)
+
     return mask
 
 # %% === Function to check if raster is within a polygon and return a mask
@@ -634,6 +649,7 @@ def raster_within_polygon(
         tuple[bool, np.ndarray]: A tuple where the first element is True if the raster is within the polygon, and the second element is a mask of the pixels that are within the polygon.
     """
     mask = get_pixels_inside_polygon(geo_polygon, raster_profile, x_grid, y_grid)
+
     return np.any(mask), mask
 
 # %% === Function to obtain the 1d index of the pixel that is closest to a given coordinate
@@ -693,6 +709,7 @@ def get_closest_pixel_idx(
     if replace_out_idx:
         pixel_size = np.sqrt((ref_grid_x[1,1] - ref_grid_x[0,0])**2 + (ref_grid_y[1,1] - ref_grid_y[0,0])**2)
         idx_1d = np.where(dst_1d > pixel_size, fill_value, idx_1d)
+    
     return idx_1d, dst_1d
 
 # %%

@@ -7,19 +7,20 @@ Module for creating the folder structure for the analysis.
 
 #%% Import necessary modules
 import os
-import numpy as np
 import platform
 import importlib
 import json
-import logging
-import logging.handlers
-import pandas as pd
 import copy
 import pickle
+import shutil
+import gzip
+import bz2
+import logging
+import logging.handlers
+import numpy as np
+import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, Tuple
-import shutil
 
 # Import default configuration
 from .default_params import (
@@ -163,7 +164,7 @@ def _import_corrected_name(lib: str) -> str:
         )
 
 def _check_libraries(required_file: str = LIBRARIES_CONFIG['required_file'],
-                     optional_file: str = LIBRARIES_CONFIG['optional_file']) -> Tuple[bool, bool]:
+                     optional_file: str = LIBRARIES_CONFIG['optional_file']) -> tuple[bool, bool]:
     """
     Verify if the required and optional libraries are installed.
     If any required library is missing, an ImportError is raised.
@@ -217,7 +218,7 @@ def _check_libraries(required_file: str = LIBRARIES_CONFIG['required_file'],
     logger.info("Library check completed: required OK=%s, optional OK=%s", len(missing_required) == 0, len(missing_optional) == 0)
     return (len(missing_required) == 0, len(missing_optional) == 0)
 
-def _create_nested_folders(base_path: str, structure: list) -> Dict[str, Any]:
+def _create_nested_folders(base_path: str, structure: list) -> dict[str, object]:
     """
     Recursively create nested folders and return a dict with their paths.
 
@@ -251,7 +252,7 @@ def _create_nested_folders(base_path: str, structure: list) -> Dict[str, Any]:
                 result[subkey] = _create_nested_folders(sub_path, subval)
     return result
 
-def _update_paths(paths_dict: Dict[str, Any], old_base: str, new_base: str) -> None:
+def _update_paths(paths_dict: dict[str, object], old_base: str, new_base: str) -> None:
     """
     Recursively update paths in the environment dictionary.
 
@@ -365,7 +366,7 @@ class AnalysisEnvironment:
         if not hasattr(self, 'config') or self.config is None or not isinstance(self.config, dict):
             self.config = copy.deepcopy(ANALYSIS_CONFIGURATION)
 
-    # Function to save the environment to a JSON file
+    # Method to save the environment to a JSON file
     def to_json(
             self, 
             file_path: str
@@ -384,7 +385,7 @@ class AnalysisEnvironment:
         with open(file_path, 'w') as f:
             json.dump(self.__dict__, f, indent=4)
     
-    # Function to create analysis folders
+    # Method to create analysis folders
     def create_folder_structure(
             self,
             base_dir: str
@@ -426,12 +427,12 @@ class AnalysisEnvironment:
 
         logger.info(f"Analysis folder structure created successfully for: {self.case_name}")
     
-    # Function to add an input file to the RAW_INPUT_FILENAME
+    # Method to add an input file to the RAW_INPUT_FILENAME
     def add_input_file(
             self, 
             file_path: str,
             file_type: str,
-            file_subtype: Optional[str] = None,
+            file_subtype: str = None,
             force_add: bool = True,
         ) -> tuple[bool, str]:
         """
@@ -476,28 +477,35 @@ class AnalysisEnvironment:
             logger.info(f"File {file_path} not added in the input files CSV.")
         return (row_added, new_id)
     
-    # Functions to save a variable
+    # Method to save variables in a file
     def save_variable(
             self, 
-            variable_to_save: Dict[str, Any], 
+            variable_to_save: dict[str, object], 
             variable_filename: str,
             environment_filename: str = ENVIRONMENT_FILENAME,
+            compression: str = None,
         ) -> None:
         """
-        saves variables in a pickle file and updates the config dictionary in the environment.
+        saves variables in a pickle file (optionally compressed) and updates the config dictionary in the environment.
         
         Args:
             variable_to_save (Dict[str, Any]): Dictionary containing the variables to save.
             variable_filename (str): Name of the file to save the variables (must end with '.pkl').
             environment_filename (str): Name of the environment file to update (default is ENVIRONMENT_FILENAME).
+            compression (str, optional): Compression type ('gzip' or 'bz2') or None for no compression.
         
         Raises:
             TypeError: If variable_to_save is not a dictionary.
             FileNotFoundError: If the var_dir directory does not exist.
             IOError: If there is an error during file saving.
+            ValueError: If compression is not 'gzip', 'bz2', or None.
         """
         logger = logging.getLogger(__name__)
-        logger.info(f"Start saving variable: {variable_filename}")
+        logger.info(f"Start saving variable: {variable_filename} with compression: {compression}")
+
+        if compression not in [None, 'gzip', 'bz2']:
+            logger.error(f"Expected compression to be None, 'gzip', or 'bz2', received: {compression}")
+            raise ValueError(f"Expected compression to be None, 'gzip', or 'bz2', received: {compression}")
 
         if os.path.isabs(variable_filename):
             variable_filename = os.path.basename(variable_filename)
@@ -517,18 +525,32 @@ class AnalysisEnvironment:
         # Construct the full file path
         file_path = os.path.join(var_dir_path, variable_filename)
         
-        # Save the variable to a pickle file
+        # Save the variable to a pickle file, with optional compression
         try:
-            with open(file_path, 'wb') as f:
-                pickle.dump(variable_to_save, f)
-            logger.info(f"Variables saved successfully in: {file_path}")
+            if compression == 'gzip':
+                with gzip.open(file_path, 'wb') as f:
+                    pickle.dump(variable_to_save, f)
+            elif compression == 'bz2':
+                with bz2.open(file_path, 'wb') as f:
+                    pickle.dump(variable_to_save, f)
+            elif compression is None:
+                with open(file_path, 'wb') as f:
+                    pickle.dump(variable_to_save, f)
+            else:
+                logger.error(f"Compression [{compression}] not implemented.")
+                raise ValueError(f"Compression [{compression}] not implemented.")
+            
+            logger.info(f"Variables saved successfully in: {file_path} with compression: {compression}")
         except Exception as e:
             logger.error(f"Error during file saving {file_path}: {e}")
             raise IOError(f"Error during file saving {file_path}: {e}")
         
-        # Update env.config[filename]
+        # Update env.config[filename] with variable labels and compression info
         variable_keys = list(variable_to_save.keys())
-        self.config['variables'][variable_filename] = variable_keys
+        self.config['variables'][variable_filename] = {
+            'labels': variable_keys,
+            'compression': compression
+        }
 
         if os.path.isabs(environment_filename):
             environment_filename = os.path.basename(environment_filename)
@@ -537,14 +559,15 @@ class AnalysisEnvironment:
         env_file_path = os.path.join(self.folders['base']['path'], environment_filename)
         self.to_json(env_file_path)
 
-        logger.info(f"Updated env.config['{variable_filename}'] with {len(variable_keys)} variables")
+        logger.info(f"Updated env.config['{variable_filename}'] with {len(variable_keys)} variables and compression: {compression}")
 
+    # Method to load variables from file
     def load_variable(
             self,
             variable_filename: str,
-        ) -> Dict[str, Any]:
+        ) -> dict[str, object]:
         """
-        Load variables from a pickle file and return them as a dictionary.
+        Load variables from a pickle file (optionally compressed) and return them as a dictionary.
         
         Args:
             variable_filename (str): name of the file to load, must end with '.pkl' (e.g., 'study_area_vars.pkl').
@@ -572,6 +595,9 @@ class AnalysisEnvironment:
             raise KeyError(f"File '{variable_filename}' not found in env.config['variables']. "
                         f"Available files: {available_files}")
         
+        # Get compression info
+        compression = self.config['variables'][variable_filename].get('compression', None)
+        
         # Construct the full file path
         var_dir_path = self.folders['variables']['path']
         file_path = os.path.join(var_dir_path, variable_filename)
@@ -581,20 +607,34 @@ class AnalysisEnvironment:
             logger.error(f"File does not exist: {file_path}")
             raise FileNotFoundError(f"File does not exist: {file_path}")
         
-        # Load the variable from the pickle file
-        logger.info(f"Loading variables from: {file_path}")
+        # Load the variable from the pickle file, with optional decompression
+        logger.info(f"Loading variables from: {file_path} with compression: {compression}")
         try:
-            with open(file_path, 'rb') as f:
-                variable_data = pickle.load(f)
-            logger.info(f"Variables loaded successfully from: {file_path}")
+            if compression == 'gzip':
+                with gzip.open(file_path, 'rb') as f:
+                    variable_data = pickle.load(f)
+            elif compression == 'bz2':
+                with bz2.open(file_path, 'rb') as f:
+                    variable_data = pickle.load(f)
+            elif compression is None:
+                with open(file_path, 'rb') as f:
+                    variable_data = pickle.load(f)
+            else:
+                logger.error(f"Compression [{compression}] not implemented.")
+                raise ValueError(f"Compression [{compression}] not implemented.")
+            
             if not isinstance(variable_data, dict):
                 logger.error(f"Loaded data from {file_path} is not a dictionary: {type(variable_data)}")
                 raise TypeError(f"Loaded data from {file_path} is not a dictionary: {type(variable_data)}")
+            
+            logger.info(f"Variables loaded successfully from: {file_path}")
+
             return variable_data
         except Exception as e:
             logger.error(f"Error loading file {file_path}: {e}")
             raise IOError(f"Error loading file {file_path}: {e}")
     
+    # Method to collect input files into analysis folders
     def collect_input_files(
             self,
             file_type: list[str] = None,
@@ -710,6 +750,7 @@ class AnalysisEnvironment:
         inp_files_df.to_csv(inp_csv_path, index=False)
         logger.info("Input files collected and copied to the input directory successfully.")
     
+    # Method to generate default CSV files
     def generate_default_csv(self) -> None:
         """Generate default CSV files in the user control directory."""
         logger = logging.getLogger(__name__)
@@ -736,6 +777,7 @@ class AnalysisEnvironment:
         )
         logger.info(f"Default reference points CSV generated at: {def_ref_pts_filename}")
 
+    # Method to load the environment from a JSON file
     @classmethod
     def from_json(cls, file_path: str) -> "AnalysisEnvironment":
         """Load the environment from a JSON file, including dynamic attributes."""
@@ -752,7 +794,7 @@ class AnalysisEnvironment:
         return obj
 
 # %% === Methods to create or get the analysis environment ===
-def create_analysis_environment(base_dir: str, case_name: Optional[str] = None) -> AnalysisEnvironment:
+def create_analysis_environment(base_dir: str, case_name: str = None) -> AnalysisEnvironment:
     """
     Create a new analysis and its folder structure.
 

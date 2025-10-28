@@ -15,7 +15,8 @@ def load_georaster(
         set_dtype: str=None,
         convert_to_geo: bool=False,
         poly_mask: shapely.geometry.Polygon | shapely.geometry.MultiPolygon=None,
-        squeeze: bool=False
+        squeeze: bool=False,
+        set_coord_dtype: str='float32'
     ) -> tuple[np.ndarray, dict, np.ndarray, np.ndarray]:
     """
     Load a GeoTIFF raster as a rasterio.DatasetReader object.
@@ -28,9 +29,10 @@ def load_georaster(
         set_dtype (str, optional): The data type of the raster (e.g., 'uint8', 'float32', 'int16', etc.). Defaults to None.
         convert_to_geo (bool, optional): Whether to convert the raster to geographic coordinates. Defaults to True.
         poly_mask (shapely.geometry.Polygon | shapely.geometry.MultiPolygon, optional): The polygon to mask the raster. Defaults to None. If provided, the raster will be loaded only if it is within the polygon.
+        squeeze (bool, optional): Whether to squeeze the raster data. Defaults to False.
 
     Returns:
-        tuple[np.ndarray, dict, np.ndarray, np.ndarray, np.ndarray]: Tuple containing the raster data, raster profile, x and y grids, and mask matrix.
+        tuple(np.ndarray, dict, np.ndarray, np.ndarray, np.ndarray): Tuple containing the raster data, raster profile, x and y grids, and mask matrix.
     """
     raster_profile = get_georaster_info(raster_path=filepath, set_crs=set_crs, set_bbox=set_bbox)
     ref_grid_x, ref_grid_y = get_xy_grids_from_profile(raster_profile)
@@ -58,6 +60,13 @@ def load_georaster(
             in_grid_y=ref_grid_y,
             profile=raster_profile
         )
+    
+    # Convert xy grids to the desired dtype
+    allowed_coord_dtypes = ['float32', 'float64']
+    if set_coord_dtype not in allowed_coord_dtypes:
+        raise ValueError(f"set_coord_dtype must be one of {allowed_coord_dtypes}, but found {set_coord_dtype} instead.")
+    ref_grid_x = ref_grid_x.astype(set_coord_dtype)
+    ref_grid_y = ref_grid_y.astype(set_coord_dtype)
 
     if raster_profile.get('nodata', None) is None:
         if set_nodata and isinstance(set_nodata, (int, float)):
@@ -69,8 +78,8 @@ def load_georaster(
             else:
                 warnings.warn(f"Unable to read nodata value of raster file: {filepath}. Consider to specify a value as the set_nodata argument.", stacklevel=2)
 
-    if raster_profile.get('dtype', None) is None:
-        if set_dtype is not None and isinstance(set_dtype, str):
+    if (raster_profile.get('dtype', None) is None) or (set_dtype is not None):
+        if isinstance(set_dtype, str):
             allowed_dtypes = ['uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32', 'int64', 'float16', 'float32', 'float64']
             if set_dtype not in allowed_dtypes:
                 raise ValueError(f"Invalid dtype: {set_dtype}. It must be one of the following: {', '.join(allowed_dtypes)}")
