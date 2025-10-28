@@ -151,8 +151,8 @@ def convert_gdf_to_geo(shape_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 # %% === Function to load polygons from a shapefile with optional filtering
 def load_vectorial_file_geometry_simple(
         file_path: str, 
-        attribute: str, 
-        filter: list = None,
+        field: str, 
+        attributes: list = None,
         convert_to_geo: bool = False,
         return_only_polygons: bool = True
     ) -> pd.DataFrame:
@@ -161,8 +161,8 @@ def load_vectorial_file_geometry_simple(
 
     Args:
         file_path (str): Path to the shapefile.
-        attribute (str): Name of the attribute to filter on.
-        filter (list, optional): List of values to select from attribute. If None, all classes are loaded.
+        field (str): Name of the field to filter on.
+        attributes (list, optional): List of attributes to select from field. If None, all classes are loaded.
         convert_to_geo (bool, optional): If True, convert the GeoDataFrame to EPSG:4326.
         return_only_polygons (bool, optional): If True, returns only polygons, ignoring non-polygon geometries.
 
@@ -178,12 +178,12 @@ def load_vectorial_file_geometry_simple(
     else:
         shape_gdf = gpd.read_file(file_path)
 
-    if attribute not in shape_gdf.columns:
-        raise ValueError(f"Field '{attribute}' not found in shapefile.")
+    if field not in shape_gdf.columns:
+        raise ValueError(f"Field '{field}' not found in shapefile.")
     
-    if filter:
-        sel_set = set(str(s) for s in filter)
-        shape_gdf = shape_gdf[shape_gdf[attribute].astype(str).isin(sel_set)]
+    if attributes:
+        sel_set = set(str(s) for s in attributes)
+        shape_gdf = shape_gdf[shape_gdf[field].astype(str).isin(sel_set)]
     
     poly_mask = pd.Series([True] * len(shape_gdf), index=shape_gdf.index)
     if return_only_polygons:
@@ -192,15 +192,15 @@ def load_vectorial_file_geometry_simple(
     shape_gdf = shape_gdf[poly_mask]
 
     sel_polys = [g for g in shape_gdf.geometry]
-    sel_names = [str(val) for val in shape_gdf[attribute].tolist()] # Ensure names are strings
+    sel_names = [str(val) for val in shape_gdf[field].tolist()] # Ensure names are strings
 
     return pd.DataFrame({'class_name': sel_names, 'geometry': sel_polys})
 
 # %% === Function to load polygons from a shapefile with advanced options
 def load_vectorial_file_geometry(
         file_path: str,
-        attribute: str = None,
-        filter: list[str] = None,
+        field: str = None,
+        attributes: list[str] = None,
         poly_bound_geo: geom.base.BaseGeometry = None,  # Polygon or MultiPolygon in EPSG:4326
         mask_out_poly: bool = True,
         extra_bound_meters: float = 0.0, # in meters
@@ -214,8 +214,8 @@ def load_vectorial_file_geometry(
 
     Args:
         file_path (str): Path to the shapefile (or geopackage, etc).
-        attribute (str, optional): Name of the attribute to use to group polygons, or 'None' (default, all polygons are loaded and merged).
-        filter (list, optional): List of classes to select from attribute.
+        field (str, optional): Name of the field to use to group polygons, or 'None' (default, all polygons are loaded and merged).
+        attributes (list, optional): List of attributes to select from field.
         poly_bound_geo (shapely.geometry.Polygon or shapely.geometry.MultiPolygon, optional): Polygon or MultiPolygon to use as bounding box (in lon/lat, EPSG:4326).
         mask_out_poly (bool, optional): If True, mask output polygons by poly_bound.
         extra_bound_meters (float, optional): Extra boundary to apply (in meters).
@@ -239,27 +239,27 @@ def load_vectorial_file_geometry(
         raise ValueError("All geometries in the shapefile must be Polygon or MultiPolygon types.")
 
     # Filter by attribute and class if needed
-    if attribute:
-        if attribute not in shape_gdf.columns:
-            raise ValueError(f"Field '{attribute}' not found in shapefile.")
+    if field:
+        if field not in shape_gdf.columns:
+            raise ValueError(f"Field '{field}' not found in shapefile.")
         
-        shape_gdf[attribute] = shape_gdf[attribute].astype(str) # Ensure field is string type for consistency
+        shape_gdf[field] = shape_gdf[field].astype(str) # Ensure field is string type for consistency
 
-        if filter:
-            filter = [str(s) for s in filter]
-            missing = [c for c in filter if c not in set(shape_gdf[attribute])]
+        if attributes:
+            attributes = [str(s) for s in attributes]
+            missing = [c for c in attributes if c not in set(shape_gdf[field])]
 
             if missing:
                 raise ValueError(f"Some classes in sel_filter are not present: {missing}")
             
-            shape_gdf = shape_gdf[shape_gdf[attribute].isin(filter)]
-            sel_classes = filter
+            shape_gdf = shape_gdf[shape_gdf[field].isin(attributes)]
+            sel_classes = attributes
         else:
-            sel_classes = sorted(shape_gdf[attribute].unique())
+            sel_classes = sorted(shape_gdf[field].unique())
     else:
         # Create a new field explicitly and merge all polygons
-        attribute = 'ALL_POLYGONS_MERGED'
-        shape_gdf[attribute] = 'ALL_POLYGONS_MERGED' # String type for consistency
+        field = 'ALL_POLYGONS_MERGED'
+        shape_gdf[field] = 'ALL_POLYGONS_MERGED' # String type for consistency
         sel_classes = ['ALL_POLYGONS_MERGED']
 
     # Check poly_bound CRS (must be in lat/lon)
@@ -285,7 +285,7 @@ def load_vectorial_file_geometry(
     sel_polys = []
     sel_names = []
     for cls in sel_classes:
-        sel_cls_gdf = shape_gdf[shape_gdf[attribute] == cls]
+        sel_cls_gdf = shape_gdf[shape_gdf[field] == cls]
         if sel_cls_gdf.empty:
             continue
         # Always merge all geometries for this class into a single geometry (Polygon or MultiPolygon)

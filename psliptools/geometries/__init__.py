@@ -31,8 +31,8 @@ from .manipulate_geom import (
 
 from .info_geom import (
     get_polygon_extremes,
-    get_geo_file_attributes,
-    get_geo_file_field_values
+    get_geo_file_fields,
+    get_geo_file_field_attributes
 )
 
 from .import_geom import (
@@ -65,6 +65,6 @@ __all__ = [
     "align_polygons",
     "resolve_polygons_intersections",
     "get_polygon_extremes",
-    "get_geo_file_attributes",
-    "get_geo_file_field_values"
+    "get_geo_file_fields",
+    "get_geo_file_field_attributes"
 ]

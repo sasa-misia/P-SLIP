@@ -58,17 +58,17 @@ def get_polygon_extremes(
     return df
 
 # %% === Function to get field names and data types from a shapefile
-def get_geo_file_attributes(
+def get_geo_file_fields(
         file_path: str
     ) -> tuple[list, list]:
     """
-    Get attribute names and data types from a shapefile (or other vectorial file).
+    Get field names and data types from a shapefile (or other vectorial file).
 
     Args:
         file_path (str): The path to the shapefile (or other vectorial file).
 
     Returns:
-        tuple(list, list): A tuple containing a list of attribute names and a list of data types.
+        tuple(list, list): A tuple containing a list of field names and a list of data types.
     """
     _geo_file_checker(file_path)
     
@@ -79,32 +79,32 @@ def get_geo_file_attributes(
 
         return attributes, data_types
 
-# %% === Function to get field values from a shapefile
-def get_geo_file_field_values(
+# %% === Function to get field attributes from a shapefile
+def get_geo_file_field_attributes(
         file_path: str, 
-        attribute: str, 
+        field: str, 
         sort: bool = False
     ) -> list[str]:
     """
-    Get attribute values from a shapefile (or other vectorial file) as strings.
+    Get attribute values of a field from a shapefile (or other vectorial file) as strings.
     
     Args:
         file_path (str): The path to the shapefile (or other vectorial file).
-        attribute (str): The name of the attribute to get values from.
+        field (str): The name of the field to get atributes from.
         
     Returns:
-        list: A list of attribute values as strings.
+        list: A list of attribute values as strings, for the selected field.
     """
     _geo_file_checker(file_path)
     
     with fiona.open(file_path, 'r') as src:
-        if attribute not in src.schema['properties']:
-            raise ValueError(f"Attribute [{attribute}] not found in vectorial file.")
+        if field not in src.schema['properties']:
+            raise ValueError(f"Attribute [{field}] not found in vectorial file.")
         
         if sort:
-            attribute_values = sorted(set([str(feature['properties'][attribute]) for feature in src])) # sorted always returns a list
+            attribute_values = sorted(set([str(feature['properties'][field]) for feature in src])) # sorted always returns a list
         else:
-            attribute_values = [str(feature['properties'][attribute]) for feature in src]
+            attribute_values = [str(feature['properties'][field]) for feature in src]
 
         return attribute_values
     

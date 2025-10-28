@@ -14,7 +14,7 @@ from config import (
 # Importing necessary modules from psliptools
 from psliptools.geometries import (
     load_vectorial_file_geometry,
-    get_geo_file_attributes
+    get_geo_file_fields
 )
 
 from psliptools.utilities import (
@@ -57,7 +57,7 @@ def main(
             src_ext=SUPPORTED_FILE_TYPES['vectorial']
         )
 
-        shp_fields, shp_types = get_geo_file_attributes(src_path)
+        shp_fields, shp_types = get_geo_file_fields(src_path)
         print("\n=== Shapefile attribute and types ===")
         sel_shp_field = select_from_list_prompt(
             obj_list=shp_fields, 
@@ -68,7 +68,7 @@ def main(
     
     prop_df = load_vectorial_file_geometry(
         file_path=src_path,
-        attribute=sel_shp_field,
+        field=sel_shp_field,
         poly_bound_geo=study_area_polygon,
         mask_out_poly=True,
         convert_to_geo=True,

@@ -19,8 +19,8 @@ from psliptools.geometries import (
     create_rectangle_polygons,
     union_polygons,
     get_polygon_extremes,
-    get_geo_file_attributes,
-    get_geo_file_field_values,
+    get_geo_file_fields,
+    get_geo_file_field_attributes,
     create_polygons_from_points,
     convert_polygons_crs
 )
@@ -70,14 +70,14 @@ def define_study_area_from_user_bbox(
 
 def define_study_area_from_geo_file(
         file_path: str, 
-        attribute: str = None, 
-        filter: list[str] = None
+        field: str = None, 
+        attributes: list[str] = None
     ) -> dict[str, object]:
     """Define study area from a shapefile (or geopackage, etc), optionally clipping with custom polygons."""
     study_area_df = load_vectorial_file_geometry(
         file_path=file_path, 
-        attribute=attribute, 
-        filter=filter,
+        field=field, 
+        attributes=attributes,
         convert_to_geo=True,
         allow_only_polygons=True
     )
@@ -181,16 +181,16 @@ def main(
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=True)
 
     # Initialize variables
-    source_path, source_att, source_sel = None, None, None
+    source_path, source_field, source_attributes = None, None, None
 
     # --- User choices section ---
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
-        if source_mode == 'user_bbox':
+        if source_mode == 'user_bbox': # === User bounding box ===
             n_rectangles = int(input("How many bounding boxes? [1]: ") or "1")
             rec_polys = create_rectangle_polygons(get_rectangle_parameters(n_rectangles))
-        elif source_mode == 'geo_file':
+        elif source_mode == 'geo_file': # === Geo file ===
             print("\n=== Vectorial file selection ===")
             source_path = select_file_prompt(
                 base_dir=env.folders['inputs'][source_type]['path'],
@@ -198,23 +198,23 @@ def main(
                 src_ext=SUPPORTED_FILE_TYPES['vectorial']
             )
 
-            shp_fields, shp_types = get_geo_file_attributes(source_path)
-            print("\n=== Vectorial file attributes and types ===")
-            source_att = select_from_list_prompt(
+            shp_fields, shp_types = get_geo_file_fields(source_path)
+            print("\n=== Vectorial file field ===")
+            source_field = select_from_list_prompt(
                 obj_list=shp_fields, 
                 obj_type=shp_types, 
-                usr_prompt="Select the attribute:", 
+                usr_prompt="Select the field:", 
                 allow_multiple=False
             )[0]
 
-            shp_field_vals = get_geo_file_field_values(source_path, source_att, sort=True)
-            print("\n=== Vectorial file attribute classes ===")
-            source_sel = select_from_list_prompt(
+            shp_field_vals = get_geo_file_field_attributes(source_path, source_field, sort=True)
+            print("\n=== Vectorial file attributes ===")
+            source_attributes = select_from_list_prompt(
                 obj_list=shp_field_vals,
-                usr_prompt=f"Select the class(es) inside the field ({source_att}):", 
+                usr_prompt=f"Select the attribute(s) inside the field ({source_field}):", 
                 allow_multiple=True
             )
-        elif source_mode == 'reference_points':
+        elif source_mode == 'reference_points': # === Reference points ===
             print("\n=== Reference points file selection ===")
             source_path = select_file_prompt(
                 base_dir=env.folders['user_control']['path'],
@@ -229,8 +229,8 @@ def main(
     elif source_mode == 'geo_file':
         study_area_vars = define_study_area_from_geo_file(
             file_path=source_path, 
-            attribute=source_att, 
-            filter=source_sel
+            field=source_field, 
+            attributes=source_attributes
         )
     elif source_mode == 'reference_points':
         study_area_vars = define_study_area_from_reference_points(
@@ -243,8 +243,8 @@ def main(
 
     env.config['inputs'][source_type][0]['settings'] = {
         'source_mode': source_mode,
-        'source_attribute': source_att,
-        'source_selection': source_sel,
+        'source_field': source_field,
+        'source_attributes': source_attributes,
         'source_refined': False
     }
 

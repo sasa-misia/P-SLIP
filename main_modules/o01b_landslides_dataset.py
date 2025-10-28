@@ -18,7 +18,7 @@ from config import (
 # Importing necessary modules from psliptools
 from psliptools.geometries import (
     load_vectorial_file_geometry,
-    get_geo_file_attributes,
+    get_geo_file_fields,
     create_polygons_from_points,
     convert_polygons_crs
 )
@@ -62,7 +62,7 @@ def load_vectorials_w_mapper(
     for src_shp, (src_shp_path, src_shp_id_field) in file_mapper.items():
         curr_df = load_vectorial_file_geometry( # TODO: Speed up this function
             file_path=src_shp_path,
-            attribute=src_shp_id_field,
+            field=src_shp_id_field,
             convert_to_geo=True,
             allow_only_polygons=False
         )
@@ -202,7 +202,7 @@ def main(
                         default_file=src_shp_w_ext
                     )
                 if file_mapper[src_shp][1] is None:
-                    shp_fields, shp_types = get_geo_file_attributes(file_mapper[src_shp][0])
+                    shp_fields, shp_types = get_geo_file_fields(file_mapper[src_shp][0])
                     file_mapper[src_shp][1] = select_from_list_prompt(
                         obj_list=shp_fields, 
                         obj_type=shp_types, 
