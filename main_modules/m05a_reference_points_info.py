@@ -199,6 +199,30 @@ def convert_abg_and_ref_points_to_prj(
 
     return abg_prj_df, ref_points_prj_df, ts_stations_prj
 
+def get_closest_dtm_point(
+        x: float,
+        y: float,
+        base_grid_df: pd.DataFrame,
+        base_grid_x_col: str='prj_x',
+        base_grid_y_col: str='prj_y'
+    ) -> tuple[int, int, float]:
+    """Helper function to get closest DTM point"""
+    point_idxs, points_dists = np.zeros(base_grid_df.shape[0]), np.zeros(base_grid_df.shape[0])
+    for n, (_, row_abg) in enumerate(base_grid_df.iterrows()): # _ because I don't care about the actual index (different if reordered based on priority), but just the current order of rows
+        curr_idx, curr_dst = \
+            get_closest_pixel_idx(x=x, y=y, x_grid=row_abg[base_grid_x_col], y_grid=row_abg[base_grid_y_col])
+        
+        if curr_idx.size == 1 and curr_dst.size == 1:
+            point_idxs[n], points_dists[n] = curr_idx.item(), curr_dst.item()
+        else:
+            raise ValueError(f"Not unique match found for point: [x={x}; y={y}] in DTM n. {n}")
+    
+    nearest_dtm = int(np.nanargmin(points_dists))
+    nearest_1d_idx = int(point_idxs[nearest_dtm])
+    dist_to_grid_pixel = points_dists[nearest_dtm]
+
+    return nearest_dtm, nearest_1d_idx, dist_to_grid_pixel
+
 def update_reference_points_csv(
         abg_df: pd.DataFrame,
         ref_points_csv_path: str,
@@ -218,32 +242,29 @@ def update_reference_points_csv(
     )
 
     for i, row_ref_prj_pnt in ref_points_prj_df.iterrows():
-        point_idxs, points_dists = np.zeros(abg_df.shape[0]), np.zeros(abg_df.shape[0])
-        for n, (_, row_abg_prj) in enumerate(abg_prj_df.iterrows()): # _ because I don't care about the actual index (different if reordered based on priority), but just the current order of rows
-            curr_idx, curr_dst = \
-                get_closest_pixel_idx(x=row_ref_prj_pnt['prj_x'], y=row_ref_prj_pnt['prj_y'], x_grid=row_abg_prj['prj_x'], y_grid=row_abg_prj['prj_y'])
-            
-            if curr_idx.size == 1 and curr_dst.size == 1:
-                point_idxs[n], points_dists[n] = curr_idx.item(), curr_dst.item()
-            else:
-                raise ValueError(f"Not unique match found for point {i} (lon={ref_points_df.loc[i,'lon']}, lat={ref_points_df.loc[i,'lat']}) in DTM n. {n}")
+        curr_sel_dtm, curr_sel_1d_idx, curr_dist_to_grid_point = get_closest_dtm_point(
+            x=row_ref_prj_pnt['prj_x'], 
+            y=row_ref_prj_pnt['prj_y'], 
+            base_grid_df=abg_prj_df, 
+            base_grid_x_col='prj_x', 
+            base_grid_y_col='prj_y'
+        )
         
-        curr_sel_dtm = int(np.nanargmin(points_dists))
-        if np.isnan(point_idxs[curr_sel_dtm]):
+        if np.isnan(curr_sel_1d_idx):
             warnings.warn(f"No match found for point {i} (lon={ref_points_df.loc[i,'lon']}, lat={ref_points_df.loc[i,'lat']}). Nearest DTM is {curr_sel_dtm}.", stacklevel=2)
             continue
 
         ref_points_df.loc[i, 'dtm'] = curr_sel_dtm
-        ref_points_df.loc[i, 'idx_1d'] = int(point_idxs[curr_sel_dtm])
-        ref_points_df.loc[i, 'dist'] = points_dists[curr_sel_dtm]
+        ref_points_df.loc[i, 'idx_1d'] = curr_sel_1d_idx
+        ref_points_df.loc[i, 'dist'] = curr_dist_to_grid_point
 
         if morph_grids is not None:
             for morph in morph_grids.keys():
-                ref_points_df.loc[i, morph] = pick_point_from_1d_idx(morph_grids[morph][curr_sel_dtm], point_idxs[curr_sel_dtm], order='C')
+                ref_points_df.loc[i, morph] = pick_point_from_1d_idx(morph_grids[morph][curr_sel_dtm], curr_sel_1d_idx, order='C')
 
         if par_grids is not None:
             for par in par_grids.keys():
-                ref_points_df.loc[i, par] = pick_point_from_1d_idx(par_grids[par][curr_sel_dtm], point_idxs[curr_sel_dtm], order='C')
+                ref_points_df.loc[i, par] = pick_point_from_1d_idx(par_grids[par][curr_sel_dtm], curr_sel_1d_idx, order='C')
         
         if ts_stations_prj is not None:
             for ts_par in ts_stations_prj.keys():
