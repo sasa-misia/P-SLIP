@@ -31,7 +31,9 @@ from .manage_raster import (
     get_2d_idx_from_1d_idx,
     get_2d_mask_from_1d_idx,
     mask_raster_with_1d_idx,
-    pick_point_from_1d_idx
+    pick_point_from_1d_idx,
+    get_d8_neighbors_row_col,
+    get_d8_neighbors_slope
 )
 
 from .manipulate_raster import (
@@ -73,6 +75,8 @@ __all__ = [
     "get_2d_mask_from_1d_idx",
     "mask_raster_with_1d_idx",
     "pick_point_from_1d_idx",
+    "get_d8_neighbors_row_col",
+    "get_d8_neighbors_slope",
     "create_bbox_from_grids",
     "create_grid_from_bbox",
     "convert_coords",

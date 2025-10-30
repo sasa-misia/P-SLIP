@@ -1,5 +1,6 @@
 # %% === Import necessary modules
 import numpy as np
+import pandas as pd
 
 # %% === Defaults
 DEFAULT_ORDER_C = 'C' # C style (row-major)
@@ -62,7 +63,7 @@ def get_1d_idx_from_2d_idx(
 
 # %% === Function to obtain 2d indices of an array from 1d indices
 def get_2d_idx_from_1d_idx(
-        indices: np.ndarray, 
+        indices: np.ndarray | list[int | float] | int | float, 
         shape: tuple, 
         order: str=DEFAULT_ORDER_C
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -78,6 +79,8 @@ def get_2d_idx_from_1d_idx(
     Returns:
         tuple(np.ndarray, np.ndarray): Tuple containing the row and column indices.
     """
+    indices = np.array(indices)
+
     if indices.ndim > 1:
         raise ValueError('indices must be a 1D array or scalar')
     
@@ -152,7 +155,7 @@ def mask_raster_with_1d_idx(
 # %% === Function to pick a point from a raster with a 1d index
 def pick_point_from_1d_idx(
         raster: np.ndarray, 
-        idx_1d: np.ndarray,
+        idx_1d: np.ndarray | list[int | float] | int | float,
         order: str=DEFAULT_ORDER_C
     ) -> np.ndarray:
     """
@@ -167,8 +170,150 @@ def pick_point_from_1d_idx(
     Returns:
         np.ndarray: The picked point(s).
     """
+    if not isinstance(raster, np.ndarray):
+        raise ValueError('raster must be a numpy array')
+    
     rows, cols = get_2d_idx_from_1d_idx(indices=idx_1d, shape=raster.shape, order=order)
     values = raster[rows, cols]
     return values
+
+# %% === Function to get D8 neighbors
+def get_d8_neighbors_row_col(
+        row: int | float | np.ndarray,
+        col: int | float | np.ndarray, 
+        grid_shape: tuple[int, int],
+        search_size: int=1
+    ) -> np.ndarray:
+    """
+    Get 8 possible neighbors (D8 directions, clockwise starting from east).
+
+    Args:
+        row (int): The row index of the center pixel.
+        col (int): The column index of the center pixel.
+        grid_shape (tuple): The shape of the grid (rows, columns).
+        search_size (int, optional): The size of the search window, which means the number of pixels to search around the center pixel (default is 1).
+
+    Returns:
+        np.ndarray: A 2D array of neighbors indices (row, col) (-1 indicates no neighbor because it is outside the grid).
+    """
+    row = np.atleast_1d(row)
+    col = np.atleast_1d(col)
+    grid_shape = np.atleast_1d(grid_shape)
+    search_size = np.atleast_1d(search_size)
+    if row.size != 1 or row%1 != 0:
+        raise ValueError('row must be integer and scalar')
+    if col.size != 1 or col%1 != 0:
+        raise ValueError('col must be integer and scalar')
+    if grid_shape.size != 2 or grid_shape[0]%1 != 0 or grid_shape[1]%1 != 0:
+        raise ValueError('grid_shape must be a tuple of integer with length 2')
+    if search_size.size != 1 or search_size%1 != 0:
+        raise ValueError('search_size must be integer and scalar')
+    
+    row = row.item()
+    col = col.item()
+    grid_shape = grid_shape.astype(int)
+    search_size = search_size.item()
+    
+    directions = np.array( # D8 directions clockwise starting from east
+        [
+            (0, search_size), # Right (E)
+            (search_size, search_size), # Bottom-right (SE)
+            (search_size, 0), # Bottom (S)
+            (search_size, -search_size), # Bottom-left (SW)
+            (0, -search_size), # Left (W)
+            (-search_size, -search_size), # Top-left (NW)
+            (-search_size, 0), # Top (N)
+            (-search_size, search_size), # Top-right (NE)
+        ],
+        dtype=int
+    )
+
+    neighbors = np.array([row, col]) + directions
+    valid_mask = np.array([
+        (0 <= neighbors[:,0]) & (neighbors[:,0] < grid_shape[0]),
+        (0 <= neighbors[:,1]) & (neighbors[:,1] < grid_shape[1])
+    ]).T
+    neighbors[~valid_mask] = -1
+    
+    return neighbors
+
+# %% Function to get the slope of the D8 neighbors
+def get_d8_neighbors_slope(
+    row: int | float | np.ndarray,
+    col: int | float | np.ndarray,
+    z_grid: np.ndarray,
+    x_grid: np.ndarray=None,
+    y_grid: np.ndarray=None,
+    search_size: int=1,
+    output_format: str='pandas' # or 'numpy'
+    ) -> pd.DataFrame | np.ndarray:
+    """
+    Get the slope of the D8 neighbors.
+
+    Args:
+        row (int): The row index of the center pixel.
+        col (int): The column index of the center pixel.
+        z_grid (np.ndarray): The elevation data.
+        x_grid (np.ndarray, optional): The x coordinates of the grid (default is None).
+        y_grid (np.ndarray, optional): The y coordinates of the grid (default is None).
+        search_size (int, optional): The size of the search window, which means the number of pixels to search around the center pixel (default is 1).
+        output_format (str, optional): The output format ('pandas' or 'numpy') (default is 'pandas'). 
+            - if pandas, returns a DataFrame with multiple info about the neighbors;
+            - if numpy, returns just the array of the D8 neighbors slopes.
+
+    Returns:
+        (pd.DataFrame | np.ndarray): The slope of the D8 neighbors.
+    """
+    if x_grid is None or y_grid is None:
+        x_coords = np.arange(z_grid.shape[1])
+        y_coords = np.arange(z_grid.shape[0])[::-1]
+        x_grid, y_grid = np.meshgrid(x_coords, y_coords) # Fake base grid with size 1x1
+    
+    center_coords = np.array((x_grid[row, col], y_grid[row, col], z_grid[row, col]))
+    neighbors = get_d8_neighbors_row_col(row, col, z_grid.shape, search_size=search_size)
+
+    edge_mask = (neighbors == -1).any(axis=1)
+
+    neighbor_coords = np.array([
+        x_grid[neighbors[:,0], neighbors[:,1]], 
+        y_grid[neighbors[:,0], neighbors[:,1]], 
+        z_grid[neighbors[:,0], neighbors[:,1]]
+    ]).T
+    plane_length = np.sqrt(np.sum((neighbor_coords[:, 0:2] - center_coords[0:2])**2, axis=1))
+    tridim_length = np.sqrt(np.sum((neighbor_coords - center_coords)**2, axis=1))
+    delta_z = neighbor_coords[:,2] - center_coords[2] # positive value means uphill
+    slopes = delta_z / plane_length
+
+    neighbor_coords[edge_mask] = np.nan
+    plane_length[edge_mask] = np.nan
+    tridim_length[edge_mask] = np.nan
+    delta_z[edge_mask] = np.nan
+    slopes[edge_mask] = np.nan
+    
+    if output_format == 'pandas':
+        row_indices = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']
+        slopes_df = pd.DataFrame(
+            {
+                'row_start': row,
+                'col_start': col,
+                'row_end': neighbors[:,0],
+                'col_end': neighbors[:,1],
+                'coords_start': [center_coords],
+                'coords_end': neighbor_coords.tolist(),
+                'plane_length': plane_length,
+                'tridim_length': tridim_length,
+                'delta_z': delta_z,
+                'slope': slopes,
+            },
+            index=row_indices
+        )
+
+        slopes_out = slopes_df
+    elif output_format == 'numpy':
+        slopes_out = slopes
+    else:
+        raise ValueError('output_format must be either "pandas" or "numpy"')
+    
+    return slopes_out
 
 # %%

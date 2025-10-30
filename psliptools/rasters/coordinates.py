@@ -659,7 +659,7 @@ def get_closest_pixel_idx(
         x_grid: np.ndarray=None,
         y_grid: np.ndarray=None,
         raster_profile: dict=None,
-        replace_out_idx: bool = True,
+        skip_out_of_bbox: bool = True,
         fill_value: float = np.nan
     ) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -671,7 +671,7 @@ def get_closest_pixel_idx(
         x_grid (np.ndarray, optional): The longitude or projected x grid of the raster. If not provided, it will be obtained from the raster profile.
         y_grid (np.ndarray, optional): The latitude or projected y grid of the raster. If not provided, it will be obtained from the raster profile.
         raster_profile (dict, optional): The raster profile dictionary. If not provided, x_grid and y_grid must be provided.
-        replace_out_idx (bool, optional): Whether to replace the index with a fill value if it is outside of the raster (default is True).
+        skip_out_of_bbox (bool, optional): Whether to skip pixels that are outside of the raster bbox (placing fill_value in all the outputs) (default is True).
         fill_value (float, optional): The value to fill instead of the index if it is outside of the raster (default is np.nan).
 
     Returns:
@@ -699,16 +699,24 @@ def get_closest_pixel_idx(
     if x.size != y.size:
         raise ValueError('x and y must have the same size!')
     
-    # === Fast KDTree method
-    grid_points = np.column_stack((ref_grid_x.flatten(), ref_grid_y.flatten()))
-    query_points = np.column_stack((x, y))
-    kdtree = scipy.spatial.cKDTree(grid_points)
-    dst_1d, idx_1d = kdtree.query(query_points, k=1)
+    idx_1d, dst_1d = np.full(x.size, fill_value), np.full(x.size, fill_value) # initialize with fill_value
 
-    # Just a filler value for points outside raster boundary (optional)
-    if replace_out_idx:
-        pixel_size = np.sqrt((ref_grid_x[1,1] - ref_grid_x[0,0])**2 + (ref_grid_y[1,1] - ref_grid_y[0,0])**2)
-        idx_1d = np.where(dst_1d > pixel_size, fill_value, idx_1d)
+    # === Filter points to be evaluated
+    if skip_out_of_bbox:
+        grid_bbox = create_bbox_from_grids(coords_x=ref_grid_x, coords_y=ref_grid_y)
+        eval_mask = (x >= grid_bbox[0]) & (x <= grid_bbox[2]) & (y >= grid_bbox[1]) & (y <= grid_bbox[3])
+    else:
+        eval_mask = np.full(x.size, True)
+    
+    if eval_mask.any():
+        # === Fast KDTree method
+        grid_points = np.column_stack((ref_grid_x.flatten(), ref_grid_y.flatten()))
+        query_points = np.column_stack((x[eval_mask], y[eval_mask]))
+        kdtree = scipy.spatial.cKDTree(grid_points)
+        dst_1d_sel, idx_1d_sel = kdtree.query(query_points, k=1)
+
+        idx_1d[eval_mask] = idx_1d_sel
+        dst_1d[eval_mask] = dst_1d_sel
     
     return idx_1d, dst_1d
 
