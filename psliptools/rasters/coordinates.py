@@ -9,6 +9,25 @@ import pyproj
 import shapely
 import scipy.spatial
 
+# %% Function to generate fake x and y grids
+def generate_fake_xy_grids(
+        grid_shape: tuple[int, int]
+    ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Generate fake x and y grids for testing purposes.
+    
+    Args:
+        grid_shape (tuple[int, int]): Shape of the grid (rows, columns).
+        
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Fake x and y grids (coordinates are ranges of integers).
+    """
+    x_coords = np.arange(grid_shape[1])
+    y_coords = np.arange(grid_shape[0])[::-1]
+    x_grid, y_grid = np.meshgrid(x_coords, y_coords)
+
+    return x_grid, y_grid
+
 # %% === Function to get raster crs
 def _get_crs(
         raster_path: str, 

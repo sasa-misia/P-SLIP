@@ -401,11 +401,11 @@ class AnalysisEnvironment:
             None
         """
         logger = logging.getLogger(__name__)
-        logger.info(f"Starting folder structure creation for case: {self.case_name}")
+        logger.info(f"Starting folder structure creation for case: [{self.case_name}]")
 
         # Check if base_dir is provided and exists
         if not os.path.isdir(base_dir):
-            raise ValueError(f"The specified base directory does not exist: {base_dir}")
+            raise ValueError(f"The specified base directory does not exist: [{base_dir}]")
 
         self.folders['base'] = {'path': base_dir}
 
@@ -423,9 +423,9 @@ class AnalysisEnvironment:
         # Save the environment to a JSON file
         env_file_path = os.path.join(self.folders['base']['path'], ENVIRONMENT_FILENAME)
         self.to_json(env_file_path)
-        logger.info(f"Analysis environment saved to: {env_file_path}")
+        logger.info(f"Analysis environment saved to: [{env_file_path}]")
 
-        logger.info(f"Analysis folder structure created successfully for: {self.case_name}")
+        logger.info(f"Analysis folder structure created successfully for: [{self.case_name}]")
     
     # Method to add an input file to the RAW_INPUT_FILENAME
     def add_input_file(
@@ -449,7 +449,7 @@ class AnalysisEnvironment:
             str: The new ID of the added row.
         """
         logger = logging.getLogger(__name__)
-        logger.info(f"Adding input file: {file_path} of type {file_type}")
+        logger.info(f"Adding input file: [{file_path}] (type: [{file_type}])")
         
         inp_csv_path = os.path.join(self.folders['inputs']['path'], RAW_INPUT_FILENAME)
         
@@ -470,11 +470,11 @@ class AnalysisEnvironment:
 
         if row_added:
             if entry_already_exists:
-                logger.warning(f"File {file_path} might already exist in the input files CSV, but it was added/overwritten anyway.")
+                logger.warning(f"File [{file_path}] might already exist in the input files CSV, but it was added/overwritten anyway.")
             else:
-                logger.info(f"File {file_path} added to the input files CSV.")
+                logger.info(f"File [{file_path}] added to the input files CSV.")
         else:
-            logger.info(f"File {file_path} not added in the input files CSV.")
+            logger.info(f"File [{file_path}] not added in the input files CSV.")
         return (row_added, new_id)
     
     # Method to save variables in a file
@@ -501,11 +501,11 @@ class AnalysisEnvironment:
             ValueError: If compression is not 'gzip', 'bz2', or None.
         """
         logger = logging.getLogger(__name__)
-        logger.info(f"Start saving variable: {variable_filename} with compression: {compression}")
+        logger.info(f"Start saving variable: [{variable_filename}] (compression: [{compression}])")
 
         if compression not in [None, 'gzip', 'bz2']:
-            logger.error(f"Expected compression to be None, 'gzip', or 'bz2', received: {compression}")
-            raise ValueError(f"Expected compression to be None, 'gzip', or 'bz2', received: {compression}")
+            logger.error(f"Expected compression to be None, 'gzip', or 'bz2', received: [{compression}]")
+            raise ValueError(f"Expected compression to be None, 'gzip', or 'bz2', received: [{compression}]")
 
         if os.path.isabs(variable_filename):
             variable_filename = os.path.basename(variable_filename)
@@ -513,14 +513,14 @@ class AnalysisEnvironment:
         
         # Verify that variable_to_save is a dictionary
         if not isinstance(variable_to_save, dict):
-            logger.error(f"variable_to_save must be a dictionary, received: {type(variable_to_save)}")
-            raise TypeError(f"variable_to_save must be a dictionary, received: {type(variable_to_save)}")
+            logger.error(f"variable_to_save must be a dictionary, received: [{type(variable_to_save)}]")
+            raise TypeError(f"variable_to_save must be a dictionary, received: [{type(variable_to_save)}]")
         
         # Verify that var_dir exists
         var_dir_path = self.folders['variables']['path']
         if not os.path.exists(var_dir_path):
             logger.error(f"var_dir directory not found: {var_dir_path}")
-            raise FileNotFoundError(f"var_dir directory not found: {var_dir_path}")
+            raise FileNotFoundError(f"variables directory not found: [{var_dir_path}]")
         
         # Construct the full file path
         file_path = os.path.join(var_dir_path, variable_filename)
@@ -540,10 +540,10 @@ class AnalysisEnvironment:
                 logger.error(f"Compression [{compression}] not implemented.")
                 raise ValueError(f"Compression [{compression}] not implemented.")
             
-            logger.info(f"Variables saved successfully in: {file_path} with compression: {compression}")
+            logger.info(f"Variables saved successfully in: [{file_path}] (compression: [{compression}])")
         except Exception as e:
-            logger.error(f"Error during file saving {file_path}: {e}")
-            raise IOError(f"Error during file saving {file_path}: {e}")
+            logger.error(f"Error during file saving [{file_path}]: {e}")
+            raise IOError(f"Error during file saving [{file_path}]: {e}")
         
         # Update env.config[filename] with variable labels and compression info
         variable_keys = list(variable_to_save.keys())
@@ -559,7 +559,7 @@ class AnalysisEnvironment:
         env_file_path = os.path.join(self.folders['base']['path'], environment_filename)
         self.to_json(env_file_path)
 
-        logger.info(f"Updated env.config['{variable_filename}'] with {len(variable_keys)} variables and compression: {compression}")
+        logger.info(f"Updated env.config['{variable_filename}'] with {len(variable_keys)} variables (compression: [{compression}])")
 
     # Method to load variables from file
     def load_variable(
@@ -581,7 +581,7 @@ class AnalysisEnvironment:
             IOError: if there is an error loading the file.
         """
         logger = logging.getLogger(__name__)
-        logger.info(f"Start loading variables from {variable_filename}")
+        logger.info(f"Start loading variables from [{variable_filename}]")
 
         if os.path.isabs(variable_filename):
             variable_filename = os.path.basename(variable_filename)
@@ -590,10 +590,8 @@ class AnalysisEnvironment:
         # Verify that variable_filename is a valid key in env.config['variables']
         available_files = list(self.config['variables'].keys())
         if variable_filename not in available_files:
-            logger.error(f"File '{variable_filename}' not found in env.config['variables']. "
-                        f"Available files: {available_files}")
-            raise KeyError(f"File '{variable_filename}' not found in env.config['variables']. "
-                        f"Available files: {available_files}")
+            logger.error(f"File [{variable_filename}] not found in env.config['variables']. Available files: {available_files}")
+            raise KeyError(f"File [{variable_filename}] not found in env.config['variables']. Available files: {available_files}")
         
         # Get compression info
         compression = self.config['variables'][variable_filename].get('compression', None)
@@ -604,11 +602,11 @@ class AnalysisEnvironment:
         
         # Verify that the file exists
         if not os.path.exists(file_path):
-            logger.error(f"File does not exist: {file_path}")
-            raise FileNotFoundError(f"File does not exist: {file_path}")
+            logger.error(f"File does not exist: [{file_path}]")
+            raise FileNotFoundError(f"File does not exist: [{file_path}]")
         
         # Load the variable from the pickle file, with optional decompression
-        logger.info(f"Loading variables from: {file_path} with compression: {compression}")
+        logger.info(f"Loading variables from: [{file_path}] (compression: [{compression}])")
         try:
             if compression == 'gzip':
                 with gzip.open(file_path, 'rb') as f:
@@ -624,15 +622,15 @@ class AnalysisEnvironment:
                 raise ValueError(f"Compression [{compression}] not implemented.")
             
             if not isinstance(variable_data, dict):
-                logger.error(f"Loaded data from {file_path} is not a dictionary: {type(variable_data)}")
-                raise TypeError(f"Loaded data from {file_path} is not a dictionary: {type(variable_data)}")
+                logger.error(f"Loaded data from [{file_path}] is not a dictionary, instead: [{type(variable_data)}]")
+                raise TypeError(f"Loaded data from [{file_path}] is not a dictionary, instead: [{type(variable_data)}]")
             
-            logger.info(f"Variables loaded successfully from: {file_path}")
+            logger.info(f"Variables loaded successfully from: [{file_path}]")
 
             return variable_data
         except Exception as e:
-            logger.error(f"Error loading file {file_path}: {e}")
-            raise IOError(f"Error loading file {file_path}: {e}")
+            logger.error(f"Error loading file [{file_path}]: {e}")
+            raise IOError(f"Error loading file [{file_path}]: {e}")
     
     # Method to collect input files into analysis folders
     def collect_input_files(
@@ -660,8 +658,8 @@ class AnalysisEnvironment:
         input_dir = self.folders['inputs']['path']
         inp_csv_path = os.path.join(input_dir, RAW_INPUT_FILENAME)
         if not os.path.exists(inp_csv_path):
-            logger.error(f"Input files CSV not found at {inp_csv_path}. Please create it first.")
-            raise FileNotFoundError(f"Input files CSV not found at {inp_csv_path}. Please create it first.")
+            logger.error(f"Input files CSV not found at [{inp_csv_path}]. Please create it first.")
+            raise FileNotFoundError(f"Input files CSV not found at [{inp_csv_path}]. Please create it first.")
         
         inp_files_df = pd.read_csv(inp_csv_path)
 
@@ -704,7 +702,7 @@ class AnalysisEnvironment:
         for idx, row in inp_files_df_filtered.iterrows():
             # Parse the internal path field to get the correct file(s) path
             if parse_csv_internal_path_field(row['internal'], row['path'], inp_csv_path):
-                logger.info(f"File {row['path']} already exists in the input directory. Skipping copy.")
+                logger.info(f"File [{row['path']}] already exists in the input directory. Skipping copy.")
                 continue
             if multi_extension:
                 # If multi_extension is True, we need to find all files with the same basename
@@ -724,7 +722,7 @@ class AnalysisEnvironment:
 
             for file_path in file_paths:
                 if not os.path.exists(file_path):
-                    logger.warning(f"File {file_path} does not exist. Skipping...")
+                    logger.warning(f"File [{file_path}] does not exist. Skipping...")
                     continue
                 
                 # Check if the file is already in the input directory
@@ -734,10 +732,10 @@ class AnalysisEnvironment:
                     try:
                         # Copy the file to the input directory
                         shutil.copy(file_path, dest_path)
-                        logger.info(f"Copied {file_path} to {dest_path}")
+                        logger.info(f"Copied [{file_path}] to [{dest_path}]")
                     except Exception as e:
-                        logger.error(f"Error copying file {file_path} to {dest_path}: {e}")
-                        raise IOError(f"Error copying file {file_path} to {dest_path}: {e}")
+                        logger.error(f"Error copying file [{file_path}] to [{dest_path}]: {e}")
+                        raise IOError(f"Error copying file [{file_path}] to [{dest_path}]: {e}")
                 else:
                     logger.info(f"File {file_path} already exists in the input directory. Skipping copy.")
             
@@ -761,21 +759,21 @@ class AnalysisEnvironment:
             def_std_cls_filename,
             index=False
         )
-        logger.info(f"Default standard classes CSV generated at: {def_std_cls_filename}")
+        logger.info(f"Default standard classes CSV generated at: [{def_std_cls_filename}]")
 
         def_par_cls_filename = os.path.join(self.folders['user_control']['path'], PARAMETER_CLASSES_FILENAME)
         pd.DataFrame(DEFAULT_PARAMETER_CLASSES).to_csv(
             def_par_cls_filename,
             index=False
         )
-        logger.info(f"Default parameter classes CSV generated at: {def_par_cls_filename}")
+        logger.info(f"Default parameter classes CSV generated at: [{def_par_cls_filename}]")
 
         def_ref_pts_filename = os.path.join(self.folders['user_control']['path'], REFERENCE_POINTS_FILENAME)
         pd.DataFrame(columns=REFERENCE_POINTS_CVS_COLUMNS).to_csv(
             def_ref_pts_filename,
             index=False
         )
-        logger.info(f"Default reference points CSV generated at: {def_ref_pts_filename}")
+        logger.info(f"Default reference points CSV generated at: [{def_ref_pts_filename}]")
 
     # Method to load the environment from a JSON file
     @classmethod

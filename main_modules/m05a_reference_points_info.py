@@ -129,30 +129,38 @@ def get_parameters_grids(
 
     return par_grids
 
-def get_time_sensitive_stations(
+def get_time_sensitive_dict(
         env: AnalysisEnvironment,
-        selected_time_sensitive: list[str]
+        sel_ts_opts: list[str]
     ) -> dict[str, pd.DataFrame]:
-    """Helper function to get time sensitive data"""
-    if not all([x in TIME_SENSITIVE_NAMES for x in selected_time_sensitive]):
+    """Helper function to get time sensitive options"""
+    if not all([x in TIME_SENSITIVE_NAMES for x in sel_ts_opts]):
         raise ValueError(f"Please select one or more of the following time sensitive options: {TIME_SENSITIVE_NAMES}")
     
-    ts_stations = {ts: [] for ts in selected_time_sensitive}
-    for ts in selected_time_sensitive:
+    ts_dict = {ts: [] for ts in sel_ts_opts}
+    for ts in sel_ts_opts:
         if ts == 'nearest_rain_station':
             sta_df = env.load_variable(variable_filename='rain_recordings_vars.pkl')['stations']
-            ts_stations[ts] = sta_df
+            ts_dict[ts] = sta_df
         else:
             raise ValueError(f"{ts} not recognized as a valid time sensitive option during extracion of sations.")
     
-    return ts_stations
+    return ts_dict
 
 def convert_abg_and_ref_points_to_prj(
         abg_df: pd.DataFrame,
-        ref_points_df: pd.DataFrame,
-        ts_stations: dict[str, pd.DataFrame]=None
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Helper function to convert reference points to projected"""
+        ref_points_df: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.DataFrame, int]:
+    """
+    Helper function to convert reference points to projected
+    
+    Args:
+        abg_df (pd.DataFrame): ABG dataframe
+        ref_points_df (pd.DataFrame): Reference points dataframe
+
+    Returns:
+        tuple(pd.DataFrame, pd.DataFrame, int): ABG dataframe, reference points dataframe, projected epsg code
+    """
     # Find projected epsg
     abg_first_bbox = create_bbox_from_grids(coords_x=abg_df['longitude'][0], coords_y=abg_df['latitude'][0])
     prj_epsg = get_projected_epsg_code_from_bbox(geo_bbox=abg_first_bbox)
@@ -182,22 +190,38 @@ def convert_abg_and_ref_points_to_prj(
     ref_points_prj_df['prj_x'] = ref_points_prj_x
     ref_points_prj_df['prj_y'] = ref_points_prj_y
 
-    ts_stations_prj = None
-    if ts_stations:
-        ts_stations_prj = ts_stations.copy()
-        for key, ts_df in ts_stations_prj.items():
+    return abg_prj_df, ref_points_prj_df, prj_epsg
+
+def convert_time_sens_dict_to_prj(
+    out_epsg: int,
+    ts_dict: dict[str, pd.DataFrame]=None
+    ) -> dict[str, pd.DataFrame]:
+    """
+    Helper function to convert time sensitive dict to projected
+    
+    Args:
+        out_epsg (int): Projected epsg code
+        ts_dict (dict[str, pd.DataFrame], optional): Time sensitive dictionary (each key is a time sensitive option to collect, like 'nearest_rain_station', which contains the stations_df table) (defaults to None).
+    
+    Returns:
+        dict[str, pd.DataFrame]: Time sensitive dictionary with projected coordinates
+    """
+    ts_prj_dict = None
+    if ts_dict:
+        ts_prj_dict = ts_dict.copy()
+        for key, ts_df in ts_prj_dict.items():
             ts_df = ts_df.rename(columns={'longitude': 'prj_x', 'latitude': 'prj_y'})
             ts_prj_x, ts_prj_y = convert_coords(
                 crs_in=4326,
-                crs_out=prj_epsg,
-                in_coords_x=ts_stations[key]['longitude'],
-                in_coords_y=ts_stations[key]['latitude']
+                crs_out=out_epsg,
+                in_coords_x=ts_dict[key]['longitude'],
+                in_coords_y=ts_dict[key]['latitude']
             )
             ts_df['prj_x'] = ts_prj_x
             ts_df['prj_y'] = ts_prj_y
-            ts_stations_prj[key] = ts_df
-
-    return abg_prj_df, ref_points_prj_df, ts_stations_prj
+            ts_prj_dict[key] = ts_df
+    
+    return ts_prj_dict
 
 def get_closest_dtm_point(
         x: float,
@@ -228,17 +252,21 @@ def update_reference_points_csv(
         ref_points_csv_path: str,
         morph_grids: dict[str, list[np.ndarray]]=None,
         par_grids: dict[str, list[np.ndarray]]=None,
-        ts_stations: dict[str, pd.DataFrame]=None
+        ts_dict: dict[str, pd.DataFrame]=None
     ) -> pd.DataFrame:
     """Helper function to update reference points csv"""
     ref_points_df = pd.read_csv(ref_points_csv_path)
     if ref_points_df.empty:
         raise ValueError(f"Reference points CSV ({ref_points_csv_path}) is empty. Please check the file.")
     
-    abg_prj_df, ref_points_prj_df, ts_stations_prj = convert_abg_and_ref_points_to_prj(
+    abg_prj_df, ref_points_prj_df, prj_epsg_code = convert_abg_and_ref_points_to_prj(
         abg_df=abg_df, 
-        ref_points_df=ref_points_df,
-        ts_stations=ts_stations
+        ref_points_df=ref_points_df
+    )
+    
+    ts_prj_dict = convert_time_sens_dict_to_prj(
+        out_epsg=prj_epsg_code, 
+        ts_dict=ts_dict
     )
 
     for i, row_ref_prj_pnt in ref_points_prj_df.iterrows():
@@ -266,16 +294,16 @@ def update_reference_points_csv(
             for par in par_grids.keys():
                 ref_points_df.loc[i, par] = pick_point_from_1d_idx(par_grids[par][curr_sel_dtm], curr_sel_1d_idx, order='C')
         
-        if ts_stations_prj is not None:
-            for ts_par in ts_stations_prj.keys():
+        if ts_prj_dict is not None:
+            for ts_par in ts_prj_dict.keys():
                 nearest_sta_idx, nearest_sta_dist = get_closest_point_id(
                     x=row_ref_prj_pnt['prj_x'], 
                     y=row_ref_prj_pnt['prj_y'], 
-                    x_ref=ts_stations_prj[ts_par]['prj_x'], 
-                    y_ref=ts_stations_prj[ts_par]['prj_y']
+                    x_ref=ts_prj_dict[ts_par]['prj_x'], 
+                    y_ref=ts_prj_dict[ts_par]['prj_y']
                 )
 
-                ref_points_df.loc[i, ts_par] = ts_stations_prj[ts_par].loc[nearest_sta_idx.item(), 'station']
+                ref_points_df.loc[i, ts_par] = ts_prj_dict[ts_par].loc[nearest_sta_idx.item(), 'station']
                 ref_points_df.loc[i, f"dist_{ts_par}"] = nearest_sta_dist
 
     ref_points_df.to_csv(ref_points_csv_path, index=False)
@@ -338,11 +366,11 @@ def main(
         )
 
     if time_sensitive is None:
-        ts_stations = None
+        ts_dict = None
     else:
-        ts_stations = get_time_sensitive_stations(
+        ts_dict = get_time_sensitive_dict(
             env=env,
-            selected_time_sensitive=time_sensitive
+            sel_ts_opts=time_sensitive
         )
     
     logger.info("Updating reference points csv...")
@@ -351,7 +379,7 @@ def main(
         ref_points_csv_path=ref_points_csv_path,
         morph_grids=morph_grids,
         par_grids=par_grids,
-        ts_stations=ts_stations
+        ts_dict=ts_dict
     )
 
     return ref_points_df

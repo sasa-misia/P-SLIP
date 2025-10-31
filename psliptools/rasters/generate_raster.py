@@ -135,8 +135,8 @@ class GridGenerationParams(BaseModel):
 def generate_grids_from_indices(
         indices: list[list[np.ndarray]],
         classes: list[str],
-        shapes: tuple[int, int] | list[tuple[int, int]],  # <-- Usando pipe
-        csv_paths: str | list[str],  # <-- Usando pipe
+        shapes: tuple[int, int] | list[tuple[int, int]],
+        csv_paths: str | list[str],
         csv_parameter_column: str,
         csv_classes_column: str,
         out_type: str='float32',
@@ -178,8 +178,74 @@ def generate_grids_from_indices(
             rasters[i][mask] = value
     return rasters
 
+# %% === Function to gerenerate gradient rasters
+def generate_gradient_rasters( # TODO: Check this function
+        dtm: np.ndarray,
+        lon: np.ndarray,
+        lat: np.ndarray,
+        profile: dict=None,
+        out_type: str='float32',
+        no_data: float | int | str=0
+    ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Calculate gradients in x and y directions from DTM, longitude, and latitude grids.
+    
+    Args:
+        dtm (np.ndarray): Array of DTM values (it must be in meters and 2D).
+        lon (np.ndarray): Array of longitude values (it must be in degrees and 2D).
+        lat (np.ndarray): Array of latitude values (it must be in degrees and 2D).
+        profile (dict, optional): Raster profile for coordinate conversion (default: None).
+        out_type (str, optional): The data type of the output rasters (default: 'float32').
+        no_data (float | int | str, optional): The no_data value of the input and output rasters (default: 0).
+    
+    Returns:
+        tuple(np.ndarray, np.ndarray): Tuple containing dz_dx and dz_dy gradient rasters.
+    """
+    if not isinstance(dtm, np.ndarray) or not isinstance(lon, np.ndarray) or not isinstance(lat, np.ndarray):
+        raise ValueError("DTM, longitude, and latitude must be numpy arrays.")
+    
+    # Validate input arrays
+    if dtm.ndim != 2:
+        raise ValueError("DTM must be a 2D array")
+    if lon.ndim != 2 or lat.ndim != 2:
+        raise ValueError("Longitude and latitude must be 2D arrays")
+    if dtm.shape != lon.shape or dtm.shape != lat.shape:
+        raise ValueError("DTM, longitude, and latitude arrays must have the same shape")
+    
+    if profile:
+        if lon is not None or lat is not None:
+            raise ValueError('If profile is provided, lon and lat must not be provided')
+        lon, lat = get_xy_grids_from_profile(profile)
+    
+    # Check if coordinates are geographic and convert to projected CRS if needed
+    if are_coords_geographic(lon, lat):
+        # Convert to projected coordinates (meters)
+        x_proj, y_proj, _ = convert_grids_and_profile_to_prj(lon, lat)
+    else:
+        # Already in projected coordinates
+        x_proj, y_proj = lon, lat
+    
+    # Calculate pixel sizes in x and y directions
+    dx = np.abs(np.mean(x_proj[:, 1:] - x_proj[:, :-1]))
+    dy = np.abs(np.mean(y_proj[1:, :] - y_proj[:-1, :]))
+    
+    # Calculate gradients using numpy gradient
+    dz_dy, dz_dx = np.gradient(dtm, dy, dx)
+    
+    # Handle no_data values
+    if no_data is not None:
+        dtm_mask = (dtm == no_data)
+        dz_dx[dtm_mask] = no_data
+        dz_dy[dtm_mask] = no_data
+    
+    # Convert to specified output type
+    dz_dx = dz_dx.astype(out_type)
+    dz_dy = dz_dy.astype(out_type)
+    
+    return dz_dx, dz_dy
+
 # %% Method to create slope and aspect rasters from dtm, longitude, and latitude grids
-def generate_slope_and_aspect_rasters(
+def generate_slope_and_aspect_rasters( # TODO: Check this function
         dtm: np.ndarray,
         lon: np.ndarray,
         lat: np.ndarray,
@@ -232,7 +298,7 @@ def generate_slope_and_aspect_rasters(
     dy = np.abs(np.mean(y_proj[1:, :] - y_proj[:-1, :]))
     
     # Calculate gradients using numpy gradient
-    dz_dx, dz_dy = np.gradient(dtm, dx, dy)
+    dz_dy, dz_dx = np.gradient(dtm, dy, dx)
     
     # Calculate slope (in degrees)
     slope_rad = np.arctan(np.sqrt(dz_dx**2 + dz_dy**2))
@@ -258,7 +324,7 @@ def generate_slope_and_aspect_rasters(
     return slope_deg, aspect_deg
 
 # %% Method to create curvature rasters from dtm
-def generate_curvature_rasters(
+def generate_curvature_rasters( # TODO: Check this function
         dtm: np.ndarray,
         lon: np.ndarray,
         lat: np.ndarray,
@@ -311,7 +377,7 @@ def generate_curvature_rasters(
     dy = np.abs(np.mean(y_proj[1:, :] - y_proj[:-1, :]))
     
     # Calculate first derivatives (slope components)
-    dz_dx, dz_dy = np.gradient(dtm, dx, dy)
+    dz_dy, dz_dx = np.gradient(dtm, dy, dx)
     
     # Calculate second derivatives
     dz_dx2 = np.gradient(dz_dx, dx, axis=1)

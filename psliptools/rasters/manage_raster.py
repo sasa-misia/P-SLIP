@@ -2,6 +2,8 @@
 import numpy as np
 import pandas as pd
 
+from .coordinates import generate_fake_xy_grids
+
 # %% === Defaults
 DEFAULT_ORDER_C = 'C' # C style (row-major)
 
@@ -239,13 +241,13 @@ def get_d8_neighbors_row_col(
 
 # %% Function to get the slope of the D8 neighbors
 def get_d8_neighbors_slope(
-    row: int | float | np.ndarray,
-    col: int | float | np.ndarray,
-    z_grid: np.ndarray,
-    x_grid: np.ndarray=None,
-    y_grid: np.ndarray=None,
-    search_size: int=1,
-    output_format: str='pandas' # or 'numpy'
+        row: int | float | np.ndarray,
+        col: int | float | np.ndarray,
+        z_grid: np.ndarray,
+        x_grid: np.ndarray=None,
+        y_grid: np.ndarray=None,
+        search_size: int=1,
+        output_format: str='pandas' # or 'numpy'
     ) -> pd.DataFrame | np.ndarray:
     """
     Get the slope of the D8 neighbors.
@@ -262,12 +264,10 @@ def get_d8_neighbors_slope(
             - if numpy, returns just the array of the D8 neighbors slopes.
 
     Returns:
-        (pd.DataFrame | np.ndarray): The slope of the D8 neighbors.
+        (pd.DataFrame | np.ndarray): The slope of the D8 neighbors (slope is just the elevation difference divided by the distance between the current pixel and the neighbor, not the slope in degrees!).
     """
     if x_grid is None or y_grid is None:
-        x_coords = np.arange(z_grid.shape[1])
-        y_coords = np.arange(z_grid.shape[0])[::-1]
-        x_grid, y_grid = np.meshgrid(x_coords, y_coords) # Fake base grid with size 1x1
+        x_grid, y_grid = generate_fake_xy_grids(z_grid.shape) # Fake base grid with size 1x1
     
     center_coords = np.array((x_grid[row, col], y_grid[row, col], z_grid[row, col]))
     neighbors = get_d8_neighbors_row_col(row, col, z_grid.shape, search_size=search_size)
@@ -315,5 +315,60 @@ def get_d8_neighbors_slope(
         raise ValueError('output_format must be either "pandas" or "numpy"')
     
     return slopes_out
+
+# %% === Function to get gradients at a certain point of a grid
+def get_point_gradients(
+        row: int | float | np.ndarray,
+        col: int | float | np.ndarray,
+        z_grid: np.ndarray,
+        x_grid: np.ndarray=None,
+        y_grid: np.ndarray=None,
+        search_size: int=1
+    ) -> tuple[float, float]:
+    """
+    Calculate gradient vector (dx, dy) at current position using finite differences.
+
+    Args:
+        row (int): The row index of the center pixel.
+        col (int): The column index of the center pixel.
+        z_grid (np.ndarray): The elevation data.
+        x_grid (np.ndarray, optional): The x coordinates of the grid (default is None).
+        y_grid (np.ndarray, optional): The y coordinates of the grid (default is None).
+        search_size (int, optional): The size of window to use for finite differences, 
+            which means that the gradient is calculated using the pixels that are 
+            search_size away from the current pixel (default is 1).
+    
+    Returns:
+        tuple[float, float]: The gradient vector (dx, dy). If the box for the gradient is outside the grid, returns nans in one or both directions.
+    """
+    if x_grid is None or y_grid is None:
+        x_grid, y_grid = generate_fake_xy_grids(z_grid.shape) # Fake base grid with size 1x1
+    
+    rows, cols = z_grid.shape
+    search_size = np.int64(search_size)
+    row_d = row + search_size # Down pixel
+    row_u = row - search_size # Up pixel
+    col_l = col - search_size # Left pixel
+    col_r = col + search_size # Right pixel
+
+    if col_l > 0 and col_r < cols - 1:
+        z_left  = z_grid[row, col_l]
+        z_right = z_grid[row, col_r]
+        x_left  = x_grid[row, col_l]
+        x_right = x_grid[row, col_r]
+        grad_x  = (z_right - z_left) / np.abs(x_right - x_left)
+    else:
+        grad_x = float('nan')  # Edge, no gradient
+
+    if row_u > 0 and row_d < rows - 1:
+        z_up   = z_grid[row_u, col]
+        z_down = z_grid[row_d, col]
+        y_up   = y_grid[row_u, col]
+        y_down = y_grid[row_d, col]
+        grad_y = (z_down - z_up) / np.abs(y_down - y_up) # First down because has greater index
+    else:
+        grad_y = float('nan') # Edge, no gradient
+    
+    return grad_x, grad_y
 
 # %%

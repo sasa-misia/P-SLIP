@@ -5,6 +5,7 @@ Provides functions for importing and generating raster grids (e.g., elevation).
 """
 
 from .coordinates import (
+    generate_fake_xy_grids,
     get_georaster_info,
     get_xy_grids_from_profile,
     get_bbox_from_profile,
@@ -33,7 +34,8 @@ from .manage_raster import (
     mask_raster_with_1d_idx,
     pick_point_from_1d_idx,
     get_d8_neighbors_row_col,
-    get_d8_neighbors_slope
+    get_d8_neighbors_slope,
+    get_point_gradients
 )
 
 from .manipulate_raster import (
@@ -53,6 +55,7 @@ from .import_raster import (
 
 from .generate_raster import (
     generate_grids_from_indices,
+    generate_gradient_rasters,
     generate_slope_and_aspect_rasters,
     generate_curvature_rasters
 )
@@ -77,6 +80,7 @@ __all__ = [
     "pick_point_from_1d_idx",
     "get_d8_neighbors_row_col",
     "get_d8_neighbors_slope",
+    "get_point_gradients",
     "create_bbox_from_grids",
     "create_grid_from_bbox",
     "convert_coords",
@@ -91,6 +95,8 @@ __all__ = [
     "plot_elevation_isometric",
     "plot_elevation_3d",
     "generate_grids_from_indices",
+    "generate_fake_xy_grids",
+    "generate_gradient_rasters",
     "generate_slope_and_aspect_rasters",
     "generate_curvature_rasters"
 ]

@@ -20,7 +20,9 @@ from psliptools.rasters import (
     pick_point_from_1d_idx,
     get_2d_idx_from_1d_idx,
     get_d8_neighbors_row_col,
-    get_d8_neighbors_slope
+    get_d8_neighbors_slope,
+    get_point_gradients,
+    get_closest_pixel_idx
 )
 
 from psliptools.utilities import (
@@ -70,28 +72,6 @@ def calculate_slope(elev1, elev2, step_size):
         return 0
     return np.degrees(np.arctan((elev2 - elev1) / step_size))
 
-def calculate_gradient(curr_row, curr_col, z_grid, x_grid, y_grid):
-    """Calculate gradient vector (dx, dy) at current position using finite differences."""
-    rows, cols = z_grid.shape
-    dx = dy = 1.0  # Default step, but use actual distances if available
-    if curr_col > 0 and curr_col < cols - 1:
-        z_left = z_grid[curr_row, curr_col - 1]
-        z_right = z_grid[curr_row, curr_col + 1]
-        x_left = x_grid[curr_row, curr_col - 1]
-        x_right = x_grid[curr_row, curr_col + 1]
-        grad_x = (z_right - z_left) / (x_right - x_left)
-    else:
-        grad_x = 0.0  # Edge, no gradient
-    if curr_row > 0 and curr_row < rows - 1:
-        z_up = z_grid[curr_row - 1, curr_col]
-        z_down = z_grid[curr_row + 1, curr_col]
-        y_up = y_grid[curr_row - 1, curr_col]
-        y_down = y_grid[curr_row + 1, curr_col]
-        grad_y = (z_down - z_up) / (y_down - y_up)
-    else:
-        grad_y = 0.0
-    return grad_x, grad_y
-
 def find_nearest_grid_idx(x, y, x_grid, y_grid): # TODO: Compare with your implementation from psliptools (get_closest_pixel_idx)
     """Find the nearest (row, col) index to given (x, y) coordinates."""
     coords = np.column_stack((x_grid.ravel(), y_grid.ravel()))
@@ -120,11 +100,23 @@ def generate_path(
     invalid_steps = 0
     stop_reason = None
     curr_row, curr_col = start_idx
+
+    dx = np.abs(np.mean(x_grid[curr_row, 1:] - x_grid[curr_row, :-1]))
+    dy = np.abs(np.mean(y_grid[1:, curr_col] - y_grid[:-1, curr_col]))
+
+    curr_x, curr_y = start_coords[0].copy(), start_coords[1].copy()
     
     while steps_count < max_steps:
         if method == 'gradient': # TODO: Check this method
             # Compute gradient at current position
-            grad_x, grad_y = calculate_gradient(curr_row, curr_col, z_grid, x_grid, y_grid)
+            grad_x, grad_y = get_point_gradients(
+                row=curr_row, 
+                col=curr_col, 
+                z_grid=z_grid, 
+                x_grid=x_grid, 
+                y_grid=y_grid,
+                search_size=step_size
+            )
             grad_magnitude = np.sqrt(grad_x**2 + grad_y**2)
             
             # Determine direction: negative gradient for descent, positive for ascent
@@ -136,23 +128,21 @@ def generate_path(
                 direction_y = grad_y
             
             # Update position with learning rate (step_size)
-            new_x = x_grid[curr_row, curr_col] + step_size * direction_x
-            new_y = y_grid[curr_row, curr_col] + step_size * direction_y
+            curr_x = curr_x + 10 * dx * step_size * direction_x # 10 is just a learning rate to speed up the process
+            curr_y = curr_y + 10 * dy * step_size * direction_y # 10 is just a learning rate to speed up the process
             
             # Check if new position is within grid bounds
             x_min, x_max = np.min(x_grid), np.max(x_grid)
             y_min, y_max = np.min(y_grid), np.max(y_grid)
-            if not (x_min <= new_x <= x_max and y_min <= new_y <= y_max):
+            if not (x_min <= curr_x <= x_max and y_min <= curr_y <= y_max):
                 stop_reason = 'edge_reached'
                 break
             
             # Find nearest grid index to new position
-            next_row, next_col = find_nearest_grid_idx(new_x, new_y, x_grid, y_grid)
-            
-            # Check for minimal movement (avoid stalling on flat areas)
-            if (next_row, next_col) == (curr_row, curr_col):
-                invalid_steps += 1
-            elif grad_magnitude < min_slope:  # Use gradient magnitude as slope proxy
+            next_1d_idx, _ = get_closest_pixel_idx(x=curr_x, y=curr_y, x_grid=x_grid, y_grid=y_grid)
+            next_row, next_col = get_2d_idx_from_1d_idx(indices=next_1d_idx, shape=z_grid.shape)
+
+            if grad_magnitude < min_slope:  # Use gradient magnitude as slope proxy
                 invalid_steps += 1
             else:
                 invalid_steps = 0
@@ -209,8 +199,11 @@ def generate_path(
     # Check max runout
     if steps_count >= max_steps:
         stop_reason = 'max_runout'
+
+    if stop_reason is None:
+        stop_reason = 'completed'
     
-    return np.array(path_coords), np.array(path_idx), steps_count, stop_reason or 'completed'
+    return np.array(path_coords), np.array(path_idx), steps_count, stop_reason
 
 def generate_slope_compatible_paths(start_idx, start_coords, grid, lon_grid, lat_grid, flow_sense, step_size, max_steps, min_slope_degrees, invalid_steps_tolerance, min_steps):
     """Generate multiple slope-compatible paths (recursive branching)."""
@@ -284,6 +277,11 @@ def main(
     # Get starting points
     logger.info(f"Loading starting points from {source_path}")
     starting_points_df = get_starting_points(env=env, starting_source=starting_source, file_path=source_path)
+
+    abg_prj_df, starting_points_prj_df, prj_epsg_code = convert_abg_and_ref_points_to_prj( # Both DataFrames are now projected and contain prj_x and prj_y columns
+        abg_df=abg_df,
+        ref_points_df=starting_points_df
+    )
     
     # Generate paths
     logger.info("Generating paths...")
@@ -291,33 +289,35 @@ def main(
     path_id = 0
     for sp_row_idx, sp_row in starting_points_df.iterrows():
         sp_id = sp_row['id']
-        sp_x = sp_row['lon']
-        sp_y = sp_row['lat']
+        sp_lon = sp_row['lon']
+        sp_lat = sp_row['lat']
+        sp_x = starting_points_prj_df['prj_x'][sp_row_idx]
+        sp_y = starting_points_prj_df['prj_y'][sp_row_idx]
 
-        logger.info(f"Getting closest DTM point for starting point {sp_id} ({sp_x}, {sp_y})")
+        logger.info(f"Getting closest DTM point for starting point {sp_id} ({sp_lon}, {sp_lat})")
         curr_dtm, curr_1d_idx, curr_dist_to_grid_point = get_closest_dtm_point(
             x=sp_x,
             y=sp_y, 
-            base_grid_df=abg_df, 
-            base_grid_x_col='longitude', 
-            base_grid_y_col='latitude'
+            base_grid_df=abg_prj_df, 
+            base_grid_x_col='prj_x', 
+            base_grid_y_col='prj_y'
         )
 
-        curr_x_grid = abg_df['longitude'].iloc[curr_dtm]
-        curr_y_grid = abg_df['latitude'].iloc[curr_dtm]
+        curr_x_grid = abg_prj_df['prj_x'].iloc[curr_dtm]
+        curr_y_grid = abg_prj_df['prj_y'].iloc[curr_dtm]
         curr_z_grid = dtm_df['elevation'].iloc[curr_dtm]
         sp_x_from_grid = pick_point_from_1d_idx(raster=curr_x_grid, idx_1d=curr_1d_idx)
         sp_y_from_grid = pick_point_from_1d_idx(raster=curr_y_grid, idx_1d=curr_1d_idx)
         sp_z_from_grid = pick_point_from_1d_idx(raster=curr_z_grid, idx_1d=curr_1d_idx)
 
         start_idx = get_2d_idx_from_1d_idx(indices=curr_1d_idx, shape=curr_z_grid.shape)
-        start_coords = (sp_x_from_grid, sp_y_from_grid, sp_z_from_grid)  # Tuple for consistency
+        start_prj_coords = (sp_x_from_grid, sp_y_from_grid, sp_z_from_grid)  # Tuple for consistency
         
         logger.info(f"Generating path(s) for starting point [id: {sp_id}] (x: {sp_x}, y: {sp_y})")
         if method in ['gradient', 'd8-flow']:
-            path_coords, path_idx, steps_count, stop_reason = generate_path(
+            path_prj_coords, path_idx, steps_count, stop_reason = generate_path(
                 start_idx=start_idx, 
-                start_coords=start_coords, 
+                start_coords=start_prj_coords, 
                 x_grid=curr_x_grid, 
                 y_grid=curr_y_grid, 
                 z_grid=curr_z_grid,
@@ -325,41 +325,41 @@ def main(
                 flow=flow_sense, 
                 step_size=step_size, 
                 max_steps=max_steps, 
-                min_slope=min_slope_degrees, 
+                min_slope=np.tan(np.deg2rad(min_slope_degrees)), 
                 invalid_steps_tolerance=invalid_steps_tolerance
             )
             if steps_count >= min_steps:
                 paths_data.append({
                     'path_id': path_id,
                     'starting_point_id': sp_id,
-                    'starting_coords': start_coords,
+                    'starting_coords': start_prj_coords,
                     'starting_idx': start_idx,
                     'starting_source': starting_source,
                     'method': method,
                     'flow_sense': flow_sense,
                     'steps_count': steps_count,
                     'stop_reason': stop_reason,
-                    'path_coords': path_coords,
+                    'path_coords': path_prj_coords,
                     'path_idx': path_idx
                 })
                 path_id += 1
         elif method == 'slope-compatible':
             compatible_paths = generate_slope_compatible_paths(
-                start_idx, start_coords, curr_z_grid, curr_x_grid, curr_y_grid,
+                start_idx, start_prj_coords, curr_z_grid, curr_x_grid, curr_y_grid,
                 flow_sense, step_size, max_steps, min_slope_degrees, invalid_steps_tolerance, min_steps
             )
-            for path_coords, path_idx, steps_count, stop_reason in compatible_paths:
+            for path_prj_coords, path_idx, steps_count, stop_reason in compatible_paths:
                 paths_data.append({
                     'path_id': path_id,
                     'starting_point_id': sp_id,
-                    'starting_coords': start_coords,
+                    'starting_coords': start_prj_coords,
                     'starting_idx': start_idx,
                     'starting_source': starting_source,
                     'method': method,
                     'flow_sense': flow_sense,
                     'steps_count': steps_count,
                     'stop_reason': stop_reason,
-                    'path_coords': path_coords,
+                    'path_coords': path_prj_coords,
                     'path_idx': path_idx
                 })
                 path_id += 1
