@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
-from .coordinates import convert_grids_and_profile_to_prj, are_coords_geographic, get_xy_grids_from_profile
+from .coordinates import convert_grids_and_profile_to_prj, are_coords_geographic, get_xy_grids_from_profile, are_grids_ordered
 from .manage_raster import get_2d_mask_from_1d_idx
 from ..utilities.pandas_utils import get_list_of_values_from_dataframe
 
@@ -225,6 +225,10 @@ def generate_gradient_rasters( # TODO: Check this function
         # Already in projected coordinates
         x_proj, y_proj = lon, lat
     
+    # Check if grids are ordered
+    if not are_grids_ordered(x_proj, y_proj):
+        raise ValueError("x_proj and y_proj grids must be monotonically ordered along their axes.")
+    
     # Calculate pixel sizes in x and y directions
     dx = np.abs(np.mean(x_proj[:, 1:] - x_proj[:, :-1]))
     dy = np.abs(np.mean(y_proj[1:, :] - y_proj[:-1, :]))
@@ -292,6 +296,10 @@ def generate_slope_and_aspect_rasters( # TODO: Check this function
     else:
         # Already in projected coordinates
         x_proj, y_proj = lon, lat
+    
+    # Check if grids are ordered
+    if not are_grids_ordered(x_proj, y_proj):
+        raise ValueError("x_proj and y_proj grids must be monotonically ordered along their axes.")
     
     # Calculate pixel sizes in x and y directions
     dx = np.abs(np.mean(x_proj[:, 1:] - x_proj[:, :-1]))
@@ -371,6 +379,10 @@ def generate_curvature_rasters( # TODO: Check this function
     else:
         # Already in projected coordinates
         x_proj, y_proj = lon, lat
+    
+    # Check if grids are ordered
+    if not are_grids_ordered(x_proj, y_proj):
+        raise ValueError("x_proj and y_proj grids must be monotonically ordered along their axes.")
     
     # Calculate pixel sizes in x and y directions
     dx = np.abs(np.mean(x_proj[:, 1:] - x_proj[:, :-1]))

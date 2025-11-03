@@ -34,10 +34,12 @@ logger.info("=== Module ===")
 def main(
         base_dir: str=None,
         gui_mode: bool=False
-    ) -> None:
+    ) -> dict[str, object]:
     """Main function to ..."""
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
+
+    return out_vars
 
 # %% === Command line interface
 if __name__ == "__main__":
@@ -47,7 +49,7 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    time_sensitive_vars = main(
+    out_vars = main(
         base_dir=args.base_dir,
         gui_mode=args.gui_mode
     )

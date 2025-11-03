@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import warnings
 import mayavi.mlab as mlab
 import shapely
-from .coordinates import convert_grids_and_profile_to_prj, get_closest_pixel_idx, convert_coords, get_projected_epsg_code_from_bbox
+from .coordinates import convert_grids_and_profile_to_prj, get_closest_1d_pixel_idx, convert_coords, get_projected_epsg_code_from_bbox
 from .manage_raster import mask_raster_with_1d_idx, get_2d_mask_from_1d_idx, get_2d_idx_from_1d_idx
 
 # %% === Function to create a fake base grid
@@ -247,7 +247,7 @@ def get_elevation_from_coord_list(
     for coord in coord_list:
         idx_matrix, dst_matrix = np.zeros([coord[0].size, len(elevation)]), np.zeros([coord[0].size, len(elevation)])
         for i, (x, y) in enumerate(zip(x_grid, y_grid)):
-            idx_temp, dst_temp = get_closest_pixel_idx(coord[0], coord[1], x_grid=x, y_grid=y)
+            idx_temp, dst_temp = get_closest_1d_pixel_idx(coord[0], coord[1], x_grid=x, y_grid=y)
             idx_matrix[:, i] = idx_temp
             dst_matrix[:, i] = dst_temp
         

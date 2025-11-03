@@ -75,9 +75,9 @@ def _check_and_convert_coords(
         tuple[np.ndarray, np.ndarray]: The x and y coordinates as numpy arrays.
     """
     if isinstance(x_coords, (float, list, pd.Series)):
-        x_coords = np.array(x_coords)
+        x_coords = np.atleast_1d(x_coords)
     if isinstance(y_coords, (float, list, pd.Series)):
-        y_coords = np.array(y_coords)
+        y_coords = np.atleast_1d(y_coords)
     
     if not isinstance(x_coords, np.ndarray) or not isinstance(y_coords, np.ndarray):
         raise ValueError("x_coords and y_coords must be of type float, list, np.ndarray or pd.Series.")
@@ -293,6 +293,35 @@ def are_coords_geographic(
     lon, lat = _check_and_convert_coords(lon, lat)
 
     return np.all(lon >= -180) and np.all(lon <= 180) and np.all(lat >= -90) and np.all(lat <= 90)
+
+# %% === Function to check if grids are ordered
+def are_grids_ordered(
+        x_grid: np.ndarray,
+        y_grid: np.ndarray
+    ) -> bool:
+    """
+    Check if x_grid and y_grid are ordered (monotonically increasing or decreasing along their axes).
+    
+    Args:
+        x_grid (np.ndarray): 2D array of x coordinates.
+        y_grid (np.ndarray): 2D array of y coordinates.
+    
+    Returns:
+        bool: True if both grids are ordered (monotonically increasing or decreasing along their axes), False otherwise.
+    """
+    # Check x_grid along columns (axis=1): should be monotonic
+    x_diff = np.diff(x_grid, axis=1)
+    x_increasing = np.all(x_diff >= 0)
+    x_decreasing = np.all(x_diff <= 0)
+    x_ordered = x_increasing or x_decreasing
+    
+    # Check y_grid along rows (axis=0): should be monotonic
+    y_diff = np.diff(y_grid, axis=0)
+    y_increasing = np.all(y_diff >= 0)
+    y_decreasing = np.all(y_diff <= 0)
+    y_ordered = y_increasing or y_decreasing
+    
+    return x_ordered and y_ordered
 
 # %% === Function to create bounding box from coordinates
 def create_bbox_from_grids(
@@ -671,15 +700,95 @@ def raster_within_polygon(
 
     return np.any(mask), mask
 
+# %% === Helper function to get a subset of a raster where all given coordinates are within
+def _get_raster_subset_indices(
+        x: float | list | np.ndarray | pd.Series,
+        y: float| list | np.ndarray | pd.Series,
+        x_grid: np.ndarray=None,
+        y_grid: np.ndarray=None,
+        smallest_size: int = 50
+    ) -> tuple[int, int, int, int]:
+    """
+    Get a the indices of a subset of a raster where all given coordinates are within.
+
+    Args:
+        x (float | list | np.ndarray | pd.Series): The x coordinates of the points.
+        y (float | list | np.ndarray | pd.Series): The y coordinates of the points.
+        x_grid (np.ndarray, optional): The x coordinates of the grid (default is None).
+        y_grid (np.ndarray, optional): The y coordinates of the grid (default is None).
+        smallest_size (int, optional): The smallest size of the subset (default is 50).
+
+    Returns:
+        tuple[int, int, int, int]: The start and end row and column indices of the subset.
+    """
+    frag_start_row, frag_start_col = 0, 0
+    frag_end_row, frag_end_col = x_grid.shape[0], x_grid.shape[1]
+    if are_grids_ordered(x_grid, y_grid):
+        grid_bbox = create_bbox_from_grids(coords_x=x_grid, coords_y=y_grid)
+
+        center_x = (grid_bbox[2] + grid_bbox[0]) / 2
+        center_y = (grid_bbox[3] + grid_bbox[1]) / 2
+
+        if x_grid.shape[1] > smallest_size:
+            left_to_right = x_grid[0, 0] < x_grid[0, -1]
+
+            use_1st_half_cols = (
+                (x.max() < center_x) and (left_to_right)
+            ) or (
+                (x.min() > center_x) and (not left_to_right)
+            )
+
+            use_2nd_half_cols = (
+                (x.min() > center_x) and (left_to_right)
+            ) or (
+                (x.max() < center_x) and (not left_to_right)
+            )
+
+            if use_1st_half_cols:
+                frag_start_col = 0
+                frag_end_col = int(np.ceil(x_grid.shape[1] / 2))
+            elif use_2nd_half_cols:
+                frag_start_col = int(np.floor(x_grid.shape[1] / 2))
+                frag_end_col = x_grid.shape[1]
+            else:
+                pass # use the whole raster
+        
+        if x_grid.shape[0] > smallest_size:
+            top_to_bottom = y_grid[0, 0] < y_grid[-1, 0]
+
+            use_1st_half_rows = (
+                (y.max() < center_y) and (top_to_bottom)
+            ) or (
+                (y.min() > center_y) and (not top_to_bottom)
+            )
+
+            use_2nd_half_rows = (
+                (y.min() > center_y) and (top_to_bottom)
+            ) or (
+                (y.max() < center_y) and (not top_to_bottom)
+            )
+
+            if use_1st_half_rows:
+                frag_start_row = 0
+                frag_end_row = int(np.ceil(x_grid.shape[0] / 2))
+            elif use_2nd_half_rows:
+                frag_start_row = int(np.floor(x_grid.shape[0] / 2))
+                frag_end_row = x_grid.shape[0]
+            else:
+                pass # use the whole raster
+    
+    return frag_start_row, frag_start_col, frag_end_row, frag_end_col
+
 # %% === Function to obtain the 1d index of the pixel that is closest to a given coordinate
-def get_closest_pixel_idx(
+def get_closest_1d_pixel_idx(
         x: float | list | np.ndarray | pd.Series,
         y: float| list | np.ndarray | pd.Series,
         x_grid: np.ndarray=None,
         y_grid: np.ndarray=None,
         raster_profile: dict=None,
         skip_out_of_bbox: bool = True,
-        fill_value: float = np.nan
+        fill_value: float = np.nan,
+        par_grid_ref: tuple[int, int, int, int] = (0, 0, 0, 0)
     ) -> tuple[np.ndarray, np.ndarray]:
     """
     Get the 1d index of the pixel that is closest to a given coordinate.
@@ -692,6 +801,7 @@ def get_closest_pixel_idx(
         raster_profile (dict, optional): The raster profile dictionary. If not provided, x_grid and y_grid must be provided.
         skip_out_of_bbox (bool, optional): Whether to skip pixels that are outside of the raster bbox (placing fill_value in all the outputs) (default is True).
         fill_value (float, optional): The value to fill instead of the index if it is outside of the raster (default is np.nan).
+        par_grid_ref (tuple[int, int, int, int], optional): The referencing of the parent grid (default is (0, 0, 0, 0)). First two elements are the starting row and column of the parent grid, and the last two elements are the number of rows and columns of the parent grid.
 
     Returns:
         tuple(np.ndarray, np.ndarray): A tuple containing the 1d index of the pixel that is closest to the coordinate and the distance to the pixel.
@@ -699,17 +809,21 @@ def get_closest_pixel_idx(
     if (x_grid is None or y_grid is None) and raster_profile is None:
         raise ValueError('x_grid + y_grid or raster_profile must be provided!')
     
+    par_grid_ref = np.atleast_1d(par_grid_ref)
+    if par_grid_ref.size != 4 or par_grid_ref.dtype != int or par_grid_ref.ndim != 1:
+        raise ValueError('par_grid_ref must be a tuple or 1D array of 4 integers!')
+    
+    if par_grid_ref.sum() != 0 and (par_grid_ref[2:] == 0).any():
+        raise ValueError('The last two elements of par_grid_ref (the parenty grid size) can not be 0 if the first two are not 0 (sub-grids were given as input for sure)!')
+    
     if raster_profile:
-        ref_grid_x, ref_grid_y = get_xy_grids_from_profile(raster_profile)
-    else:
-        ref_grid_x = x_grid
-        ref_grid_y = y_grid
+        x_grid, y_grid = get_xy_grids_from_profile(raster_profile)
 
     x, y = _check_and_convert_coords(x, y)
     
     if not (
-        (are_coords_geographic(x, y) and are_coords_geographic(ref_grid_x, ref_grid_y)) or \
-        (not are_coords_geographic(x, y) and not are_coords_geographic(ref_grid_x, ref_grid_y))
+        (are_coords_geographic(x, y) and are_coords_geographic(x_grid, y_grid)) or \
+        (not are_coords_geographic(x, y) and not are_coords_geographic(x_grid, y_grid))
         ):
         raise ValueError("The provided grids are not in the same coordinate system. Please convert them to the same coordinate system before using them.")
     
@@ -718,21 +832,74 @@ def get_closest_pixel_idx(
     if x.size != y.size:
         raise ValueError('x and y must have the same size!')
     
-    idx_1d, dst_1d = np.full(x.size, fill_value), np.full(x.size, fill_value) # initialize with fill_value
+    # --- Try to fragment the raster (if raster is too big, performances will be bad)
+    frag_start_row, frag_start_col, frag_end_row, frag_end_col = _get_raster_subset_indices(
+        x=x, 
+        y=y, 
+        x_grid=x_grid, 
+        y_grid=y_grid, 
+        smallest_size=60
+    )
+    
+    raster_can_be_fragmented = (
+        frag_start_col != 0 or \
+        frag_end_col != x_grid.shape[1] or \
+        frag_start_row != 0 or \
+        frag_end_row != x_grid.shape[0]
+    )
 
-    # === Filter points to be evaluated
+    grid_bbox = create_bbox_from_grids(coords_x=x_grid, coords_y=y_grid)
+    curr_bbox_mask = (x >= grid_bbox[0]) & (x <= grid_bbox[2]) & (y >= grid_bbox[1]) & (y <= grid_bbox[3])
+
+    # --- Filter points to be evaluated
     if skip_out_of_bbox:
-        grid_bbox = create_bbox_from_grids(coords_x=ref_grid_x, coords_y=ref_grid_y)
-        eval_mask = (x >= grid_bbox[0]) & (x <= grid_bbox[2]) & (y >= grid_bbox[1]) & (y <= grid_bbox[3])
+        eval_mask = curr_bbox_mask
     else:
         eval_mask = np.full(x.size, True)
+
+    if raster_can_be_fragmented and eval_mask.any():
+        sub_x_grid = x_grid[frag_start_row:frag_end_row, frag_start_col:frag_end_col]
+        sub_y_grid = y_grid[frag_start_row:frag_end_row, frag_start_col:frag_end_col]
+        sub_grid_bbox = create_bbox_from_grids(coords_x=sub_x_grid, coords_y=sub_y_grid)
+        sub_eval_mask = (x >= sub_grid_bbox[0]) & (x <= sub_grid_bbox[2]) & (y >= sub_grid_bbox[1]) & (y <= sub_grid_bbox[3])
+        if (curr_bbox_mask == sub_eval_mask).all():
+            par_grid_ref[0] = par_grid_ref[0] + frag_start_row
+            par_grid_ref[1] = par_grid_ref[1] + frag_start_col
+            if par_grid_ref[2:].sum() == 0: # Only if this is the first fragmentation, raw parent sizes must be written
+                par_grid_ref[2] = x_grid.shape[0]
+                par_grid_ref[3] = y_grid.shape[1]
+
+            return get_closest_1d_pixel_idx(
+                x=x, 
+                y=y, 
+                x_grid=sub_x_grid, 
+                y_grid=sub_y_grid, 
+                raster_profile=None, 
+                skip_out_of_bbox=skip_out_of_bbox, 
+                fill_value=fill_value, 
+                par_grid_ref=par_grid_ref
+            )
+    
+    idx_1d, dst_1d = np.full(x.size, fill_value), np.full(x.size, fill_value) # initialize with fill_value
     
     if eval_mask.any():
         # === Fast KDTree method
-        grid_points = np.column_stack((ref_grid_x.flatten(), ref_grid_y.flatten()))
+        grid_points = np.column_stack((x_grid.flatten(), y_grid.flatten())) # This is C order
         query_points = np.column_stack((x[eval_mask], y[eval_mask]))
         kdtree = scipy.spatial.cKDTree(grid_points)
         dst_1d_sel, idx_1d_sel = kdtree.query(query_points, k=1)
+
+        if par_grid_ref.sum() != 0:
+            sub_idx_2d_r, sub_idx_2d_c = np.unravel_index(idx_1d_sel, x_grid.shape, order='C') # Local indices (x_grid and y_grid are sub-grids of a reference parent grid)
+            par_idx_2d_r, par_idx_2d_c = par_grid_ref[0] + sub_idx_2d_r, par_grid_ref[1] + sub_idx_2d_c # Parent indices
+            idx_1d_sel = np.ravel_multi_index(
+                (
+                    par_idx_2d_r, 
+                    par_idx_2d_c
+                ), 
+                par_grid_ref[2:], # Original parent grid shape
+                order='C'
+            )
 
         idx_1d[eval_mask] = idx_1d_sel
         dst_1d[eval_mask] = dst_1d_sel

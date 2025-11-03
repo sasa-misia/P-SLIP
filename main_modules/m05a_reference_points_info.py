@@ -20,7 +20,7 @@ from psliptools.rasters import (
     create_bbox_from_grids,
     get_projected_epsg_code_from_bbox,
     convert_coords,
-    get_closest_pixel_idx,
+    get_closest_1d_pixel_idx,
     generate_grids_from_indices,
     pick_point_from_1d_idx
 )
@@ -234,16 +234,19 @@ def get_closest_dtm_point(
     point_idxs, points_dists = np.zeros(base_grid_df.shape[0]), np.zeros(base_grid_df.shape[0])
     for n, (_, row_abg) in enumerate(base_grid_df.iterrows()): # _ because I don't care about the actual index (different if reordered based on priority), but just the current order of rows
         curr_idx, curr_dst = \
-            get_closest_pixel_idx(x=x, y=y, x_grid=row_abg[base_grid_x_col], y_grid=row_abg[base_grid_y_col])
+            get_closest_1d_pixel_idx(x=x, y=y, x_grid=row_abg[base_grid_x_col], y_grid=row_abg[base_grid_y_col])
         
         if curr_idx.size == 1 and curr_dst.size == 1:
             point_idxs[n], points_dists[n] = curr_idx.item(), curr_dst.item()
         else:
             raise ValueError(f"Not unique match found for point: [x={x}; y={y}] in DTM n. {n}")
     
-    nearest_dtm = int(np.nanargmin(points_dists))
-    nearest_1d_idx = int(point_idxs[nearest_dtm])
-    dist_to_grid_pixel = points_dists[nearest_dtm]
+    if np.isnan(points_dists).all():
+        nearest_dtm, nearest_1d_idx, dist_to_grid_pixel = np.nan, np.nan, np.nan
+    else:
+        nearest_dtm = int(np.nanargmin(points_dists))
+        nearest_1d_idx = int(point_idxs[nearest_dtm])
+        dist_to_grid_pixel = points_dists[nearest_dtm]
 
     return nearest_dtm, nearest_1d_idx, dist_to_grid_pixel
 

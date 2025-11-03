@@ -22,7 +22,8 @@ from psliptools.rasters import (
     get_d8_neighbors_row_col,
     get_d8_neighbors_slope,
     get_point_gradients,
-    get_closest_pixel_idx
+    get_closest_1d_pixel_idx,
+    convert_coords
 )
 
 from psliptools.utilities import (
@@ -72,15 +73,7 @@ def calculate_slope(elev1, elev2, step_size):
         return 0
     return np.degrees(np.arctan((elev2 - elev1) / step_size))
 
-def find_nearest_grid_idx(x, y, x_grid, y_grid): # TODO: Compare with your implementation from psliptools (get_closest_pixel_idx)
-    """Find the nearest (row, col) index to given (x, y) coordinates."""
-    coords = np.column_stack((x_grid.ravel(), y_grid.ravel()))
-    target = np.array([[x, y]])
-    distances = cdist(target, coords)
-    min_idx = np.argmin(distances)
-    return np.unravel_index(min_idx, x_grid.shape)
-
-def generate_path(
+def generate_steepsets_path(
         start_idx: tuple[int, int],
         start_coords: tuple[float, float, float], # x, y, z 
         x_grid: np.ndarray, 
@@ -92,10 +85,10 @@ def generate_path(
         max_steps: int, 
         min_slope: float, 
         invalid_steps_tolerance: int
-    ) -> tuple[list[tuple[float, float, float]], list[tuple[int, int]], int, str]:
+    ) -> tuple[np.ndarray, np.ndarray, int, str]:
     """Generate a single path from start point."""
-    path_coords = [start_coords]
-    path_idx = [start_idx]
+    path_coord_list = [start_coords]
+    path_2D_idx_list = [start_idx]
     steps_count = 0
     invalid_steps = 0
     stop_reason = None
@@ -107,7 +100,7 @@ def generate_path(
     curr_x, curr_y = start_coords[0].copy(), start_coords[1].copy()
     
     while steps_count < max_steps:
-        if method == 'gradient': # TODO: Check this method
+        if method == 'gradient':
             # Compute gradient at current position
             grad_x, grad_y = get_point_gradients(
                 row=curr_row, 
@@ -123,9 +116,11 @@ def generate_path(
             if flow == 'downstream':
                 direction_x = -grad_x
                 direction_y = -grad_y
-            else:  # upstream
+            elif flow == 'upstream':
                 direction_x = grad_x
                 direction_y = grad_y
+            else:
+                raise ValueError(f"Unknown flow type: {flow}")
             
             # Update position with learning rate (step_size)
             curr_x = curr_x + 10 * dx * step_size * direction_x # 10 is just a learning rate to speed up the process
@@ -137,9 +132,30 @@ def generate_path(
             if not (x_min <= curr_x <= x_max and y_min <= curr_y <= y_max):
                 stop_reason = 'edge_reached'
                 break
+
+            # Obtain a subset of the grid that contains the new position
+            x_cells_margin = np.ceil(abs(curr_x - x_grid[curr_row, curr_col]) / dx).astype(int) + 1
+            y_cells_margin = np.ceil(abs(curr_y - y_grid[curr_row, curr_col]) / dy).astype(int) + 1
+            sub_row_start = curr_row - y_cells_margin
+            sub_row_end = curr_row + y_cells_margin
+            sub_col_start = curr_col - x_cells_margin
+            sub_col_end = curr_col + x_cells_margin
+            sub_x_grid = x_grid[sub_row_start : sub_row_end, sub_col_start : sub_col_end]
+            sub_y_grid = y_grid[sub_row_start : sub_row_end, sub_col_start : sub_col_end]
             
             # Find nearest grid index to new position
-            next_1d_idx, _ = get_closest_pixel_idx(x=curr_x, y=curr_y, x_grid=x_grid, y_grid=y_grid)
+            next_1d_idx, _ = get_closest_1d_pixel_idx(
+                x=curr_x, 
+                y=curr_y, 
+                x_grid=sub_x_grid, 
+                y_grid=sub_y_grid, 
+                par_grid_ref=(
+                    sub_row_start, 
+                    sub_col_start, 
+                    x_grid.shape[0], 
+                    x_grid.shape[1]
+                )
+            )
             next_row, next_col = get_2d_idx_from_1d_idx(indices=next_1d_idx, shape=z_grid.shape)
 
             if grad_magnitude < min_slope:  # Use gradient magnitude as slope proxy
@@ -181,19 +197,19 @@ def generate_path(
             raise ValueError(f"Unknown method: {method}")
         
         # Check for loop (bouncing back and forth)
-        if (next_row, next_col) in path_idx:
+        if (next_row, next_col) in path_2D_idx_list:
             stop_reason = 'loop_detected'
             break
         
         # Check slope tolerance
         if invalid_steps > invalid_steps_tolerance:
-            stop_reason = 'slope_tolerance_exceeded'
+            stop_reason = 'invalid_steps_tolerance_exceeded'
             break
         
         # Move to next point
         curr_row, curr_col = next_row, next_col
-        path_coords.append((x_grid[curr_row, curr_col], y_grid[curr_row, curr_col], z_grid[curr_row, curr_col]))
-        path_idx.append((curr_row, curr_col))
+        path_coord_list.append((x_grid[curr_row, curr_col], y_grid[curr_row, curr_col], z_grid[curr_row, curr_col]))
+        path_2D_idx_list.append((curr_row, curr_col))
         steps_count += 1
     
     # Check max runout
@@ -202,11 +218,15 @@ def generate_path(
 
     if stop_reason is None:
         stop_reason = 'completed'
+
+    path_coords = np.array(path_coord_list)
+    path_2D_idx = np.array(path_2D_idx_list)
     
-    return np.array(path_coords), np.array(path_idx), steps_count, stop_reason
+    return path_coords, path_2D_idx, steps_count, stop_reason
 
 def generate_slope_compatible_paths(start_idx, start_coords, grid, lon_grid, lat_grid, flow_sense, step_size, max_steps, min_slope_degrees, invalid_steps_tolerance, min_steps):
     """Generate multiple slope-compatible paths (recursive branching)."""
+    # TODO: Check this function!
     paths = []
     def explore(current_row, current_col, current_path_coords, current_path_idx, steps_count, invalid_steps):
         if steps_count >= max_steps or invalid_steps > invalid_steps_tolerance:
@@ -285,9 +305,10 @@ def main(
     
     # Generate paths
     logger.info("Generating paths...")
-    paths_data = []
-    path_id = 0
+    generated_paths = []
+    path_count = 0
     for sp_row_idx, sp_row in starting_points_df.iterrows():
+        logger.info(f"Processing starting point {sp_row_idx} of {len(starting_points_df)}")
         sp_id = sp_row['id']
         sp_lon = sp_row['lon']
         sp_lat = sp_row['lat']
@@ -303,6 +324,10 @@ def main(
             base_grid_y_col='prj_y'
         )
 
+        if np.isnan(curr_1d_idx):
+            logger.warning(f"No DTM point found for starting point {sp_id} ({sp_lon}, {sp_lat})")
+            continue
+
         curr_x_grid = abg_prj_df['prj_x'].iloc[curr_dtm]
         curr_y_grid = abg_prj_df['prj_y'].iloc[curr_dtm]
         curr_z_grid = dtm_df['elevation'].iloc[curr_dtm]
@@ -315,7 +340,7 @@ def main(
         
         logger.info(f"Generating path(s) for starting point [id: {sp_id}] (x: {sp_x}, y: {sp_y})")
         if method in ['gradient', 'd8-flow']:
-            path_prj_coords, path_idx, steps_count, stop_reason = generate_path(
+            path_prj_coords, path_idx, steps_count, stop_reason = generate_steepsets_path(
                 start_idx=start_idx, 
                 start_coords=start_prj_coords, 
                 x_grid=curr_x_grid, 
@@ -328,54 +353,60 @@ def main(
                 min_slope=np.tan(np.deg2rad(min_slope_degrees)), 
                 invalid_steps_tolerance=invalid_steps_tolerance
             )
-            if steps_count >= min_steps:
-                paths_data.append({
-                    'path_id': path_id,
-                    'starting_point_id': sp_id,
-                    'starting_coords': start_prj_coords,
-                    'starting_idx': start_idx,
-                    'starting_source': starting_source,
-                    'method': method,
-                    'flow_sense': flow_sense,
-                    'steps_count': steps_count,
-                    'stop_reason': stop_reason,
-                    'path_coords': path_prj_coords,
-                    'path_idx': path_idx
-                })
-                path_id += 1
-        elif method == 'slope-compatible':
+            compatible_paths = [(path_prj_coords, path_idx, steps_count, stop_reason)]
+        elif method == 'slope-compatible': # TODO: Check this method!
             compatible_paths = generate_slope_compatible_paths(
                 start_idx, start_prj_coords, curr_z_grid, curr_x_grid, curr_y_grid,
                 flow_sense, step_size, max_steps, min_slope_degrees, invalid_steps_tolerance, min_steps
             )
-            for path_prj_coords, path_idx, steps_count, stop_reason in compatible_paths:
-                paths_data.append({
-                    'path_id': path_id,
+        
+        for path_prj_coords, path_idx, steps_count, stop_reason in compatible_paths:
+            if steps_count >= min_steps:
+                path_lon, path_lat = convert_coords(crs_in=prj_epsg_code, crs_out=4326, in_coords_x=path_prj_coords[:, 0], in_coords_y=path_prj_coords[:, 1])
+                path_geo_coords = path_prj_coords.copy()
+                path_geo_coords[:, 0] = path_lon
+                path_geo_coords[:, 1] = path_lat
+                generated_paths.append({
+                    'path_id': f"PLP_{path_count}", # Potential Landslide Path PLP
                     'starting_point_id': sp_id,
-                    'starting_coords': start_prj_coords,
-                    'starting_idx': start_idx,
                     'starting_source': starting_source,
                     'method': method,
                     'flow_sense': flow_sense,
                     'steps_count': steps_count,
                     'stop_reason': stop_reason,
-                    'path_coords': path_prj_coords,
-                    'path_idx': path_idx
+                    'path_dtm': curr_dtm,
+                    'start_snap_offset_meters': curr_dist_to_grid_point,
+                    'path_2D_idx': path_idx,
+                    'path_geo_coords': path_geo_coords
                 })
-                path_id += 1
+                path_count += 1
     
-    paths_df = pd.DataFrame(paths_data)
-    return {'paths_df': paths_df}
+    landslide_paths_vars = {'paths_df': pd.DataFrame(generated_paths)}
+    return landslide_paths_vars
 
 # %% === Command line interface
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="**********Summary of the module**********")
     parser.add_argument("--base_dir", type=str, help="Base directory for analysis")
     parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode")
+    parser.add_argument("--method", type=str, default='gradient', help="Path generation method (gradient, d8-flow, slope-compatible)")
+    parser.add_argument("--flow_sense", type=str, default='upstream', help="Flow sense (upstream, downstream)")
+    parser.add_argument("--step_size", type=float, default=1, help="Step size in meters")
+    parser.add_argument("--max_steps", type=int, default=1000, help="Maximum number of steps for the generated path")
+    parser.add_argument("--min_steps", type=int, default=2, help="Minimum number of steps for the generated path")
+    parser.add_argument("--min_slope_degrees", type=float, default=5, help="Minimum slope in degrees for the generated path")
+    parser.add_argument("--invalid_steps_tolerance", type=float, default=0.5, help="Tolerance for invalid steps in meters")
     
     args = parser.parse_args()
     
-    time_sensitive_vars = main(
+    landslide_paths_vars = main(
         base_dir=args.base_dir,
-        gui_mode=args.gui_mode
+        gui_mode=args.gui_mode,
+        method=args.method,
+        flow_sense=args.flow_sense,
+        step_size=args.step_size,
+        max_steps=args.max_steps,
+        min_steps=args.min_steps,
+        min_slope_degrees=args.min_slope_degrees,
+        invalid_steps_tolerance=args.invalid_steps_tolerance
     )

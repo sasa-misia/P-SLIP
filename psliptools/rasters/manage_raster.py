@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from .coordinates import generate_fake_xy_grids
+from .coordinates import generate_fake_xy_grids, are_grids_ordered
 
 # %% === Defaults
 DEFAULT_ORDER_C = 'C' # C style (row-major)
@@ -343,6 +343,10 @@ def get_point_gradients(
     """
     if x_grid is None or y_grid is None:
         x_grid, y_grid = generate_fake_xy_grids(z_grid.shape) # Fake base grid with size 1x1
+    
+    # Check if grids are ordered
+    if not are_grids_ordered(x_grid, y_grid):
+        raise ValueError("x_grid and y_grid must be monotonically ordered along their axes.")
     
     rows, cols = z_grid.shape
     search_size = np.int64(search_size)
