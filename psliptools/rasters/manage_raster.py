@@ -264,7 +264,9 @@ def get_d8_neighbors_slope(
             - if numpy, returns just the array of the D8 neighbors slopes.
 
     Returns:
-        (pd.DataFrame | np.ndarray): The slope of the D8 neighbors (slope is just the elevation difference divided by the distance between the current pixel and the neighbor, not the slope in degrees!).
+        (pd.DataFrame | np.ndarray): The slope of the D8 neighbors: if positive, the neighbor is uphill. 
+            PLEASE NOTE: slope is just the elevation difference divided by the distance between the current pixel 
+                         and the neighbor, thus it is the "gradient" and not the slope in degrees!.
     """
     if x_grid is None or y_grid is None:
         x_grid, y_grid = generate_fake_xy_grids(z_grid.shape) # Fake base grid with size 1x1
