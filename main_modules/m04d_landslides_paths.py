@@ -2,8 +2,11 @@
 import os
 import sys
 import argparse
+import warnings
 import numpy as np
 import pandas as pd
+from functools import lru_cache
+from collections import deque
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -16,9 +19,7 @@ from config import (
 
 # Importing necessary modules from psliptools
 from psliptools.rasters import (
-    pick_point_from_1d_idx,
     get_2d_idx_from_1d_idx,
-    get_d8_neighbors_row_col,
     get_d8_neighbors_slope,
     get_point_gradients,
     get_closest_1d_pixel_idx,
@@ -36,7 +37,8 @@ from main_modules.m05a_reference_points_info import convert_abg_and_ref_points_t
 logger = setup_logger(__name__)
 logger.info("=== Landslide paths creation ===")
 
-# %% === Helper functions
+# %% === Helper functions and global variables
+MAXIMUM_COMPATIBLE_PATHS = 2000000
 def get_starting_points(
         env: AnalysisEnvironment,
         starting_source: str,
@@ -67,11 +69,11 @@ def generate_steepsets_path(
         z_grid: np.ndarray, 
         method: str, 
         flow: str, 
-        step_size: float, 
+        step_size: int, 
         max_steps: int, 
         min_slope: float, 
         invalid_steps_tolerance: int
-    ) -> tuple[np.ndarray, np.ndarray, int, str]:
+    ) -> tuple[np.ndarray, np.ndarray, int, str, np.ndarray, np.ndarray]:
     """Generate a single path from start point."""
     path_coord_list = [( # x, y, z
         x_grid[start_idx[0], start_idx[1]],
@@ -83,6 +85,8 @@ def generate_steepsets_path(
     invalid_steps = 0
     stop_reason = None
     curr_row, curr_col = start_idx
+    step_deviation_list = []
+    step_validity_list = []
 
     dx = np.abs(np.mean(x_grid[curr_row, 1:] - x_grid[curr_row, :-1]))
     dy = np.abs(np.mean(y_grid[1:, curr_col] - y_grid[:-1, curr_col]))
@@ -149,10 +153,18 @@ def generate_steepsets_path(
             )
             next_row, next_col = get_2d_idx_from_1d_idx(indices=next_1d_idx, shape=z_grid.shape)
 
-            if grad_magnitude < min_slope:  # Use gradient magnitude as slope proxy
+            # Calculate deviation: angle difference from max slope direction
+            max_slope_direction = np.arctan2(direction_y, direction_x)
+            actual_direction = np.arctan2(curr_y - y_grid[curr_row, curr_col], curr_x - x_grid[curr_row, curr_col])
+            angle_diff = np.abs(np.arctan2(np.sin(max_slope_direction - actual_direction), np.cos(max_slope_direction - actual_direction)))
+            step_deviation_list.append(angle_diff / np.deg2rad(45))
+
+            if grad_magnitude < min_slope:  # Use gradient magnitude as slope proxy. Just < and not <= because the min slope is included in valid steps
                 invalid_steps += 1
+                step_validity_list.append(False)
             else:
                 invalid_steps = 0
+                step_validity_list.append(True)
         elif method == 'd8-flow':
             # D8: Choose direction with steepest drop/rise
             slopes_df = get_d8_neighbors_slope(
@@ -182,11 +194,15 @@ def generate_steepsets_path(
             next_row, next_col = neighbors[best_idx]
             slope = slopes[best_idx]
 
-            if abs(slope) < min_slope:
+            step_deviation_list.append(0.0) # For d8-flow, deviation is 0 since we always choose the max / min slope
+
+            if abs(slope) < min_slope: # Just < and not <= because the min slope is included in valid steps
                 invalid_steps += 1
+                step_validity_list.append(False)
             else:
                 if flow == 'downstream' and slope < 0 or flow == 'upstream' and slope > 0:
                     invalid_steps = 0
+                    step_validity_list.append(True)
                 else: # Sometimes it can happen that the argmin or argmax finds the opposite direction and exceeds the tolerance
                     stop_reason = 'slope_greater_than_tolerance_in_opposite_direction'
                     break
@@ -218,140 +234,180 @@ def generate_steepsets_path(
     # --- Convert lists to arrays
     path_coords = np.array(path_coord_list)
     path_2D_idx = np.array(path_2D_idx_list)
+    path_step_deviation = np.array(step_deviation_list)
+    path_step_validity = np.array(step_validity_list)
     
-    return path_coords, path_2D_idx, steps_count, stop_reason
+    return path_coords, path_2D_idx, steps_count, stop_reason, path_step_deviation, path_step_validity
 
 def generate_slope_compatible_paths(
-        start_idx: tuple[int, int], 
-        x_grid: np.ndarray, 
-        y_grid: np.ndarray, 
-        z_grid: np.ndarray, 
-        flow: str, 
-        step_size: float, 
-        max_steps: int, 
-        min_slope: float, 
+        start_idx: tuple[int, int],
+        x_grid: np.ndarray,
+        y_grid: np.ndarray,
+        z_grid: np.ndarray,
+        flow: str,
+        step_size: int,
+        max_steps: int,
+        min_slope: float,
         invalid_steps_tolerance: int,
-        verbose: bool=False
-    ) -> list[tuple[np.ndarray, np.ndarray, int, str]]:
-    """Generate multiple slope-compatible paths (recursive branching)."""
-    paths = []
-    start_coords = ( # x, y, z
-        x_grid[start_idx[0], start_idx[1]],
-        y_grid[start_idx[0], start_idx[1]],
-        z_grid[start_idx[0], start_idx[1]]
-    )
+        maximum_paths: int = 50000,
+        allow_low_slope_opposite_flow: bool = False,
+        verbose: bool = False
+    ) -> list[tuple[np.ndarray, np.ndarray, int, str, np.ndarray, np.ndarray]]:
+    """
+    Generate paths that are compatible with the slope of the terrain.
 
-    def _explore_possible_paths(
-            curr_path_coords: list[tuple[float, float, float]], # This is not a tuple but list of tuples
-            curr_path_idx: list[tuple[int, int]], # This is not a tuple but list of tuples
-            steps_count: int, 
-            invalid_steps: int
-        ) -> None:
-        if verbose:
-            print(f"exploring slope path n. {len(paths) + 1}; steps_count: {steps_count}; invalid_steps: {invalid_steps} ...")
+    Args:
+        start_idx (tuple[int, int]): The starting index of the path.
+        x_grid (np.ndarray): The x coordinates of the grid.
+        y_grid (np.ndarray): The y coordinates of the grid.
+        z_grid (np.ndarray): The z coordinates of the grid.
+        flow (str): The flow direction of the path. Can be 'downstream' or 'upstream'.
+        step_size (int): The step size of the path.
+        max_steps (int): The maximum number of steps in the path.
+        min_slope (float): The minimum slope of the path.
+        invalid_steps_tolerance (int): The maximum number of invalid steps in the path.
+        maximum_paths (int, optional): The maximum number of paths to generate. Defaults to 50000.
+        allow_low_slope_opposite_flow (bool, optional): Whether to allow low slope in opposite flow direction. Defaults to False.
+        verbose (bool, optional): Whether to print progress updates. Defaults to False.
 
-        if steps_count >= max_steps: # >= and not > because the last point has been already added
-            stop_reason = 'max_runout'
-            paths.append(
-                (
-                    np.array(curr_path_coords),
-                    np.array(curr_path_idx), 
-                    steps_count, 
-                    stop_reason
-                )
-            )
-            if verbose:
-                print(f"path n. {len(paths)} has reached max runout ...")
-            return
-        
-        slopes_df = get_d8_neighbors_slope(
-            row=curr_path_idx[-1][0], 
-            col=curr_path_idx[-1][1], 
+    Returns:
+        list[tuple[np.ndarray, np.ndarray, int, str, np.ndarray, np.ndarray]]: A list of tuples containing the path coordinates, path 2D index, number of steps, stop reason, deviation array, valid steps array.
+    """
+
+    @lru_cache(maxsize=None)
+    def _cached_neighbors(row: int, col: int, step_size: int):
+        """Cache wrapper for get_d8_neighbors_slope."""
+        return get_d8_neighbors_slope(
+            row=row,
+            col=col,
             z_grid=z_grid,
             x_grid=x_grid,
             y_grid=y_grid,
             search_size=step_size,
             output_format='pandas'
         )
+    
+    paths = []
+    start_coords = (
+        x_grid[start_idx[0], start_idx[1]],
+        y_grid[start_idx[0], start_idx[1]],
+        z_grid[start_idx[0], start_idx[1]]
+    )
 
+    # Use deque for more efficient stack operations (O(1) append/pop)
+    stack = deque([([start_coords], [start_idx], 0, 0, [], [])])  # (coords, idx, steps, invalid_steps_count, deviation_list, valid_steps_list)
+
+    while stack:
+        curr_coords, curr_idx, steps, invalid, curr_deviation, curr_valid = stack.pop()
+
+        # Early check for max paths to avoid unnecessary computations
+        if len(paths) + len(stack) >= maximum_paths:
+            warnings.warn(f"Maximum paths limit exceeded! Completed paths: {len(paths)}, remaining paths to explore: {len(stack)}. Stopping exploration...", stacklevel=2)
+            for coord, idx, steps, _, dev, valid in stack:
+                paths.append((np.array(coord), np.array(idx), steps, 'partial_because_max_paths_exceeded', np.array(dev), np.array(valid)))
+            if verbose:
+                print(
+                    f"Exploration was stopped because the maximum number of paths was exceeded. Completed paths: {len(paths) - len(stack)}, remaining paths to explore: {len(stack)}."
+                )
+            break
+
+        # --- early termination: max runout ----------
+        if steps >= max_steps:
+            paths.append((np.array(curr_coords), np.array(curr_idx), steps, 'max_runout', np.array(curr_deviation), np.array(curr_valid)))
+            if verbose:
+                print(f"Path n. {len(paths)} has reached max runout; stopped at step: {steps} ...")
+            continue
+        # --------------------------------------------
+
+        slopes_df = _cached_neighbors(curr_idx[-1][0], curr_idx[-1][1], step_size)
         neighbors = slopes_df[['row_end', 'col_end']].values
         slopes = slopes_df['slope'].values
 
+        # --- early termination: edge reached --------
+        if np.isnan(slopes).any():
+            paths.append((np.array(curr_coords), np.array(curr_idx), steps, 'edge_reached', np.array(curr_deviation), np.array(curr_valid)))
+            if verbose:
+                print(f"Path n. {len(paths)} has reached an edge; stopped at step: {steps} ...")
+            continue
+        # --------------------------------------------
+
+        # Vectorized slope masks for efficiency
         if flow == 'downstream':
-            valid_slope_mask = slopes <= -min_slope
-        elif flow == 'upstream':
-            valid_slope_mask = slopes >= min_slope
-        else:
-            raise ValueError(f"Unknown flow direction: {flow}")
-        
-        low_slope_mask = abs(slopes) < min_slope
-
-        # NOTE: low_slope_mask + valid_slope_mask is not all elements True!
-
-        if low_slope_mask.all() and invalid_steps == invalid_steps_tolerance: # All neighbors would be other invalid points, thus exceeding tolerance
-            stop_reason = 'invalid_steps_tolerance_exceeded'
-            paths.append(
-                (
-                    np.array(curr_path_coords), 
-                    np.array(curr_path_idx), 
-                    steps_count, 
-                    stop_reason
-                )
-            )
-            if verbose:
-                print(f"path n. {len(paths) + 1} has reached invalid steps tolerance; stopped at step: {steps_count} ...")
-            return
-        
-        if not (valid_slope_mask | low_slope_mask).any():
-            stop_reason = 'no_valid_neighbors'
-            paths.append(
-                (
-                    np.array(curr_path_coords), 
-                    np.array(curr_path_idx), 
-                    steps_count, 
-                    stop_reason
-                )
-            )
-            if verbose:
-                print(f"path n. {len(paths) + 1} has no valid neighbors; stopped at step: {steps_count} ...")
-            return
-        
-        for i, (nr, nc) in enumerate(neighbors):
-            is_valid_slope = valid_slope_mask[i]
-            is_low_slope = low_slope_mask[i]
-
-            if not (is_valid_slope or is_low_slope): # Skip because this branch would have an invalid last point
-                continue
-
-            if (nr, nc) in curr_path_idx: # Skip because this branch would be a loop
-                continue
-
-            new_path_coords = curr_path_coords + [(x_grid[nr, nc], y_grid[nr, nc], z_grid[nr, nc])] # Add new point coordinates to the list
-            new_path_idx = curr_path_idx + [(nr, nc)] # Add new indices to the list
-
-            if is_low_slope:
-                new_inv_steps = invalid_steps + 1 # Increment invalid_steps
+            valid_mask = slopes <= -min_slope
+            if allow_low_slope_opposite_flow:
+                low_mask = np.abs(slopes) < min_slope
             else:
-                new_inv_steps = 0
+                low_mask = (slopes > -min_slope) & (slopes <= 0)
+        elif flow == 'upstream':
+            valid_mask = slopes >= min_slope
+            if allow_low_slope_opposite_flow:
+                low_mask = np.abs(slopes) < min_slope
+            else:
+                low_mask = (slopes < min_slope) & (slopes >= 0)
+        else:
+            raise ValueError(f"Invalid flow sense: {flow}")
 
-            if new_inv_steps > invalid_steps_tolerance: # Skip because this branch would exceed tolerance of invalid consecutive steps
-                continue
+        compatible_mask = valid_mask | low_mask # NOTE: not compatible_mask represents neighbors with the opposite flow with sloped terrain (greater than min_slope and in opposite flow direction)
+
+        # --- early termination: all neighbors with opposite flow ----------
+        if not compatible_mask.any():
+            paths.append((np.array(curr_coords), np.array(curr_idx), steps, 'all_neighbors_with_opposite_flow', np.array(curr_deviation), np.array(curr_valid)))
+            if verbose:
+                print(f"Path n. {len(paths)} has reached all neighbors with opposite flow; stopped at step: {steps} ...")
+            continue
+        # ------------------------------------------------------------------
+
+        # --- early termination: invalid steps tolerance exceeded with all compatible neighbors ----------
+        if not valid_mask.any() and low_mask.any() and (invalid == invalid_steps_tolerance): # All compatible neighbors would be other invalid points, thus exceeding tolerance
+            paths.append((np.array(curr_coords), np.array(curr_idx), steps, 'invalid_steps_tolerance_exceeded', np.array(curr_deviation), np.array(curr_valid)))
+            if verbose:
+                print(f"path n. {len(paths)} has reached all compatible neighbors with consecutive invalid steps tolerance; stopped at step: {steps} ...")
+            continue
+        # ------------------------------------------------------------------------------------------------
+
+
+        # Directions: 0=E, 45=SE, 90=S, 135=SW, 180=W, 225=NW, 270=N, 315=NE
+        if (slopes_df.index == ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']).all():
+            directions = np.array([0, 45, 90, 135, 180, 225, 270, 315])
+        else:
+            raise ValueError(f"Invalid slope directions: {slopes_df.index}")
+
+        curr_row_col_set = set(curr_idx)  # Faster lookup for loops
+        for i in np.where(compatible_mask)[0]: # Only iterate over compatible neighbors
+            nr, nc = neighbors[i]
+            if (nr, nc) in curr_row_col_set:
+                continue # Skip because this neighbor has already been visited and it would be a loop
+
+            is_valid = valid_mask[i]
+            is_low = low_mask[i]
+            new_invalid = invalid + 1 if is_low else 0
+            if new_invalid > invalid_steps_tolerance:
+                continue # Skip because this branch would exceed tolerance of invalid consecutive steps
+
+            # Calculate deviation: angular distance from max slope direction
+            if flow == 'downstream':
+                max_slope_idx = np.argmin(slopes)
+            elif flow == 'upstream':
+                max_slope_idx = np.argmax(slopes)
             
-            # --- Recursive call
-            _explore_possible_paths(
-                curr_path_coords=new_path_coords, 
-                curr_path_idx=new_path_idx, 
-                steps_count=steps_count+1, 
-                invalid_steps=new_inv_steps
-            )
+            angle_i = directions[i]
+            angle_max = directions[max_slope_idx]
+            angle_diff = min(np.abs(angle_i - angle_max), 360 - np.abs(angle_i - angle_max))
+            new_deviation = curr_deviation + [angle_diff / 45]  # Append per step
 
-    # --- Start exploration
-    _explore_possible_paths(
-        curr_path_coords=[start_coords], 
-        curr_path_idx=[start_idx], 
-        steps_count=0, 
-        invalid_steps=0
-    )
+            # Update valid for this step
+            new_valid = curr_valid + [is_valid]
+
+            new_coords = curr_coords + [(x_grid[nr, nc], y_grid[nr, nc], z_grid[nr, nc])] # Append new coordinates to list
+            new_idx    = curr_idx + [(nr, nc)] # Append new indices to list
+            new_steps  = steps + 1
+            
+            stack.append((new_coords, new_idx, new_steps, new_invalid, new_deviation, new_valid)) # Push new node to paths stack
+
+            if verbose:
+                print(
+                    f"Pushed node ({nr},{nc}) in paths stack. Current stacks are {len(stack)} and current branch has {new_steps} steps and {new_invalid} consecutive invalid steps ..."
+                )
 
     return paths
 
@@ -362,8 +418,8 @@ def main(
         method: str='gradient', # 'gradient', 'd8-flow', 'slope-compatible'
         flow_sense: str='upstream', # 'upstream', 'downstream'
         starting_source: str='reference_points', # 'reference_points', 'landslides_dataset', 'potential_landslides'
-        step_size: float=1.0,
-        max_steps: int=500, # Maximum number of steps
+        step_size: int=1, # How many cells to use for each step
+        max_steps: int=50, # Maximum number of steps
         min_steps: int=1, # Minimum number of steps
         min_slope_degrees: float=7, # Minimum slope for flow direction
         invalid_steps_tolerance: int=1 # Consecutive number of invalid steps allowed in path
@@ -398,6 +454,7 @@ def main(
     logger.info(f"Loading starting points from {source_path}")
     starting_points_df = get_starting_points(env=env, starting_source=starting_source, file_path=source_path)
 
+    logger.info("Converting ABG and reference points to projected...")
     abg_prj_df, starting_points_prj_df, prj_epsg_code = convert_abg_and_ref_points_to_prj( # Both DataFrames are now projected and contain prj_x and prj_y columns
         abg_df=abg_df,
         ref_points_df=starting_points_df
@@ -405,7 +462,7 @@ def main(
     
     # Generate paths
     logger.info("Generating paths...")
-    gen_paths_dict = []
+    gen_paths_dict_list = []
     for sp_row_idx, sp_row in starting_points_df.iterrows():
         logger.info(f"Processing starting point {sp_row_idx} of {len(starting_points_df)}")
         sp_id = sp_row['id']
@@ -435,7 +492,7 @@ def main(
         
         logger.info(f"Generating path(s) for starting point [id: {sp_id}] (x: {sp_x}, y: {sp_y})")
         if method in ['gradient', 'd8-flow']:
-            path_prj_coords, path_idx, steps_count, stop_reason = generate_steepsets_path(
+            path_prj_coords, path_idx, steps_count, stop_reason, step_deviation, step_validity = generate_steepsets_path(
                 start_idx=start_idx, 
                 x_grid=curr_x_grid, 
                 y_grid=curr_y_grid, 
@@ -447,7 +504,7 @@ def main(
                 min_slope=np.tan(np.deg2rad(min_slope_degrees)), # Slope is a percentage (tg(a)), not degrees, not radians
                 invalid_steps_tolerance=invalid_steps_tolerance
             )
-            compatible_paths = [(path_prj_coords, path_idx, steps_count, stop_reason)]
+            compatible_paths = [(path_prj_coords, path_idx, steps_count, stop_reason, step_deviation, step_validity)]
         elif method == 'slope-compatible':
             # NOTE 1: This function returns a list of all compatible paths, but it can be extremely slow. 
             #         This is in case of large max_steps, large invalid_steps_tolerance, or small min_slope_degrees.
@@ -465,49 +522,77 @@ def main(
                 max_steps=max_steps, 
                 min_slope=np.tan(np.deg2rad(min_slope_degrees)), # min_slope is a percentage (tg(a)), not degrees, not radians
                 invalid_steps_tolerance=invalid_steps_tolerance,
-                verbose=True
+                maximum_paths=MAXIMUM_COMPATIBLE_PATHS,
+                allow_low_slope_opposite_flow=False,
+                verbose=False
             )
+
+            if len(compatible_paths) >= MAXIMUM_COMPATIBLE_PATHS:
+                logger.warning(f"Number of paths for starting point [id: {sp_id}] (x: {sp_x}, y: {sp_y}) is greater than maximum allowed. Paths exploration was stopped and only the first {MAXIMUM_COMPATIBLE_PATHS} paths will be used.")
         
-        for path_prj_coords, path_idx, steps_count, stop_reason in compatible_paths:
-            if steps_count >= min_steps:
-                path_plane_progressive_length = np.concatenate([
-                    [0], # Progressive length starts from 0
-                    np.cumsum(
-                        np.sqrt(
-                            np.sum(
-                                np.diff(
-                                    path_prj_coords[:, 0:2], 
-                                    axis=0
-                                ) ** 2, 
-                                axis=1
-                            )
-                        )
-                    )
-                ])
+        logger.info(f"Filtering paths and extracting more information for starting point [id: {sp_id}] (x: {sp_x}, y: {sp_y})")
 
-                path_tridim_progressive_length = np.concatenate([
-                    [0], # Progressive length starts from 0
-                    np.cumsum(
-                        np.sqrt(
-                            np.sum(
-                                np.diff(
-                                    path_prj_coords, 
-                                    axis=0
-                                ) ** 2, 
-                                axis=1
-                            )
-                        )
-                    )
-                ])
-
-                path_lon, path_lat = convert_coords(crs_in=prj_epsg_code, crs_out=4326, in_coords_x=path_prj_coords[:, 0], in_coords_y=path_prj_coords[:, 1])
+        # Collect all path_prj_coords for batch conversion
+        all_path_prj_coords = []
+        path_indices = []  # To track start/end indices for each path
+        start_idx = 0
+        for path_prj_coords, path_idx, steps_count, stop_reason, step_deviation, step_validity in compatible_paths:
+            if steps_count >= min_steps: # Maintain this condition here and below
+                all_path_prj_coords.append(path_prj_coords)
+                path_indices.append((start_idx, start_idx + len(path_prj_coords)))
+                start_idx += len(path_prj_coords)
+        
+        if len(all_path_prj_coords) == 0:
+            logger.warning(f"No compatible paths remaining for starting point [id: {sp_id}] (x: {sp_x}, y: {sp_y})")
+            continue
+        elif len(all_path_prj_coords) < len(compatible_paths):
+            logger.info(f"Remaining paths are {len(all_path_prj_coords)} and {len(compatible_paths) - len(all_path_prj_coords)} paths containing less than {min_steps} steps were filtered out for starting point [id: {sp_id}] (x: {sp_x}, y: {sp_y})")
+        else:
+            logger.info(f"Remaining paths are {len(all_path_prj_coords)} for starting point [id: {sp_id}] (x: {sp_x}, y: {sp_y}). No paths were filtered out.")
+        
+        # Concatenate all coords for batch conversion
+        all_coords = np.concatenate(all_path_prj_coords, axis=0)
+        all_lon, all_lat = convert_coords(crs_in=prj_epsg_code, crs_out=4326, in_coords_x=all_coords[:, 0], in_coords_y=all_coords[:, 1])
+        
+        # Reset for processing
+        path_counter = 0
+        for path_prj_coords, path_idx, steps_count, stop_reason, step_deviation, step_validity in compatible_paths:
+            if steps_count >= min_steps: # Maintain this condition here and above
+                # Pre-calculate diffs once
+                diff_xy = np.diff(path_prj_coords[:, 0:2], axis=0)
+                diff_xyz = np.diff(path_prj_coords, axis=0)
+                diff_z = np.diff(path_prj_coords[:, 2], axis=0)
+                
+                path_step_plane_length = np.sqrt(np.sum(diff_xy ** 2, axis=1))
+                path_step_tridim_length = np.sqrt(np.sum(diff_xyz ** 2, axis=1))
+                
+                path_plane_progressive_length = np.concatenate([[0], np.cumsum(path_step_plane_length)])
+                path_tridim_progressive_length = np.concatenate([[0], np.cumsum(path_step_tridim_length)])
+                
+                path_step_slope_degrees = np.rad2deg(np.arctan2(diff_z, path_step_plane_length))
+                
+                # Calculate realism score: higher is more realistic
+                valid_steps_ratio = np.mean(step_validity) if len(step_validity) > 0 else 0
+                path_length = path_plane_progressive_length[-1]
+                penalty = 5 if stop_reason in ['loop_detected', 'edge_reached', 'slope_greater_than_tolerance_in_opposite_direction'] else 0
+                avg_slope = np.mean(path_step_slope_degrees) if len(path_step_slope_degrees) > 0 else 0
+                average_slope_penalty = max(0, (min_slope_degrees - abs(avg_slope)) * 5)  # Penalize if average slope is below min
+                avg_deviation = np.mean(step_deviation) if len(step_deviation) > 0 else 0
+                realism_score = (valid_steps_ratio * 100) + min(path_length / 100, 10) - penalty - (avg_deviation * 2) - average_slope_penalty
+                
+                # Extract geo coords from batch conversion
+                start, end = path_indices[path_counter]
+                path_lon = all_lon[start:end]
+                path_lat = all_lat[start:end]
                 path_geo_coords = path_prj_coords.copy()
                 path_geo_coords[:, 0] = path_lon
                 path_geo_coords[:, 1] = path_lat
-                gen_paths_dict.append({
-                    'path_id': f"PLP_{len(gen_paths_dict)}", # Potential Landslide Path PLP
+                
+                gen_paths_dict_list.append({
+                    'path_id': f"PLP_{len(gen_paths_dict_list)}", # Potential Landslide Path PLP
                     'starting_source': starting_source,
                     'starting_point_id': sp_id,
+                    'path_realism_score': realism_score,
                     'steps_count': steps_count,
                     'stop_reason': stop_reason,
                     'path_dtm': curr_dtm,
@@ -515,9 +600,19 @@ def main(
                     'path_2D_idx': path_idx,
                     'path_geo_coords': path_geo_coords,
                     'path_2D_progr_len_meters': path_plane_progressive_length,
-                    'path_3D_progr_len_meters': path_tridim_progressive_length
+                    'path_3D_progr_len_meters': path_tridim_progressive_length,
+                    'path_step_slope_degrees': path_step_slope_degrees,
+                    'path_step_deviation': step_deviation,
+                    'path_step_validity': step_validity
                 })
+
+                path_counter += 1
     
+    landslide_paths_df = pd.DataFrame(gen_paths_dict_list)
+
+    # Sort by realism score descending (higher realism first)
+    landslide_paths_df = landslide_paths_df.sort_values(by='realism_score', ascending=False).reset_index(drop=True)
+
     landslide_paths_settings = {
         'method': method,
         'flow_sense': flow_sense,
@@ -528,9 +623,11 @@ def main(
         'invalid_steps_tolerance': invalid_steps_tolerance
     }
 
-    landslide_paths_vars = {'paths_df': pd.DataFrame(gen_paths_dict), 'settings': landslide_paths_settings}
+    logger.info(f"Generated {len(landslide_paths_df)} potential landslide paths (PLPs)")
 
-    env.save_variable(variable_to_save=landslide_paths_vars, variable_filename="landslide_paths_vars.pkl")
+    landslide_paths_vars = {'paths_df': landslide_paths_df, 'settings': landslide_paths_settings}
+
+    env.save_variable(variable_to_save=landslide_paths_vars, variable_filename="landslide_paths_vars.pkl", compression='gzip')
 
     return landslide_paths_vars
 
@@ -541,11 +638,11 @@ if __name__ == "__main__":
     parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode")
     parser.add_argument("--method", type=str, default='gradient', help="Path generation method (gradient, d8-flow, slope-compatible)")
     parser.add_argument("--flow_sense", type=str, default='upstream', help="Flow sense (upstream, downstream)")
-    parser.add_argument("--step_size", type=float, default=1, help="Step size in meters")
-    parser.add_argument("--max_steps", type=int, default=1000, help="Maximum number of steps for the generated path")
+    parser.add_argument("--step_size", type=int, default=1, help="How many cells to move at each step")
+    parser.add_argument("--max_steps", type=int, default=50, help="Maximum number of steps for the generated path")
     parser.add_argument("--min_steps", type=int, default=2, help="Minimum number of steps for the generated path")
     parser.add_argument("--min_slope_degrees", type=float, default=5, help="Minimum slope in degrees for the generated path")
-    parser.add_argument("--invalid_steps_tolerance", type=float, default=0.5, help="Tolerance for invalid steps in meters")
+    parser.add_argument("--invalid_steps_tolerance", type=int, default=1, help="Tolerance for invalid consecutive steps in the generated path")
     
     args = parser.parse_args()
     
