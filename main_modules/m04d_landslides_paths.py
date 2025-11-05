@@ -39,6 +39,8 @@ logger.info("=== Landslide paths creation ===")
 
 # %% === Helper functions and global variables
 MAXIMUM_COMPATIBLE_PATHS = 2000000
+VARIABLE_FILENAME = "landslide_paths_vars.pkl"
+
 def get_starting_points(
         env: AnalysisEnvironment,
         starting_source: str,
@@ -422,7 +424,8 @@ def main(
         max_steps: int=50, # Maximum number of steps
         min_steps: int=1, # Minimum number of steps
         min_slope_degrees: float=7, # Minimum slope for flow direction
-        invalid_steps_tolerance: int=1 # Consecutive number of invalid steps allowed in path
+        invalid_steps_tolerance: int=1, # Consecutive number of invalid steps allowed in path
+        add_to_existing_paths: bool=True # Add to existing paths (file in variables folder)
     ) -> dict[str, object]:
     """Main function to create landslide paths."""
     # Get the analysis environment
@@ -432,6 +435,14 @@ def main(
 
     abg_df = dtm_vars['abg']
     dtm_df = dtm_vars['dtm']
+
+    if VARIABLE_FILENAME in env.config['variables'].keys() and add_to_existing_paths:
+        lands_vars = env.load_variable(variable_filename=VARIABLE_FILENAME)
+        landslide_paths_df = lands_vars['paths_df']
+        landslide_paths_settings = lands_vars['settings']
+    else:
+        landslide_paths_df = pd.DataFrame()
+        landslide_paths_settings = {}
 
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
@@ -589,7 +600,7 @@ def main(
                 path_geo_coords[:, 1] = path_lat
                 
                 gen_paths_dict_list.append({
-                    'path_id': f"PLP_{len(gen_paths_dict_list)}", # Potential Landslide Path PLP
+                    'path_id': f"PLP_{len(landslide_paths_df) + len(gen_paths_dict_list)}", # Potential Landslide Path PLP
                     'starting_source': starting_source,
                     'starting_point_id': sp_id,
                     'path_realism_score': realism_score,
@@ -608,12 +619,9 @@ def main(
 
                 path_counter += 1
     
-    landslide_paths_df = pd.DataFrame(gen_paths_dict_list)
+    curr_paths_df = pd.DataFrame(gen_paths_dict_list)
 
-    # Sort by realism score descending (higher realism first)
-    landslide_paths_df = landslide_paths_df.sort_values(by='realism_score', ascending=False).reset_index(drop=True)
-
-    landslide_paths_settings = {
+    curr_lnd_paths_settings = {
         'method': method,
         'flow_sense': flow_sense,
         'min_steps': min_steps,
@@ -623,11 +631,24 @@ def main(
         'invalid_steps_tolerance': invalid_steps_tolerance
     }
 
-    logger.info(f"Generated {len(landslide_paths_df)} potential landslide paths (PLPs)")
+    if curr_lnd_paths_settings not in landslide_paths_settings.values():
+        curr_sett_id = f"lps_{len(landslide_paths_settings) + 1}"
+        landslide_paths_settings[curr_sett_id] = curr_lnd_paths_settings
+    else:
+        curr_sett_id = list(landslide_paths_settings.keys())[list(landslide_paths_settings.values()).index(curr_lnd_paths_settings)]
+    
+    curr_paths_df['setting_id'] = curr_sett_id
+
+    logger.info(f"Generated {len(curr_paths_df)} potential landslide paths (PLPs)")
+
+    landslide_paths_df = pd.concat([landslide_paths_df, curr_paths_df], ignore_index=True)
+
+    # Sort by realism score descending (higher realism first)
+    landslide_paths_df = landslide_paths_df.sort_values(by='path_realism_score', ascending=False).reset_index(drop=True)
 
     landslide_paths_vars = {'paths_df': landslide_paths_df, 'settings': landslide_paths_settings}
 
-    env.save_variable(variable_to_save=landslide_paths_vars, variable_filename="landslide_paths_vars.pkl", compression='gzip')
+    env.save_variable(variable_to_save=landslide_paths_vars, variable_filename=VARIABLE_FILENAME, compression='gzip')
 
     return landslide_paths_vars
 
@@ -643,6 +664,7 @@ if __name__ == "__main__":
     parser.add_argument("--min_steps", type=int, default=2, help="Minimum number of steps for the generated path")
     parser.add_argument("--min_slope_degrees", type=float, default=5, help="Minimum slope in degrees for the generated path")
     parser.add_argument("--invalid_steps_tolerance", type=int, default=1, help="Tolerance for invalid consecutive steps in the generated path")
+    parser.add_argument("--add_to_existing_paths", action="store_true", help="Add generated paths to existing landslide paths")
     
     args = parser.parse_args()
     
@@ -655,5 +677,6 @@ if __name__ == "__main__":
         max_steps=args.max_steps,
         min_steps=args.min_steps,
         min_slope_degrees=args.min_slope_degrees,
-        invalid_steps_tolerance=args.invalid_steps_tolerance
+        invalid_steps_tolerance=args.invalid_steps_tolerance,
+        add_to_existing_paths=args.add_to_existing_paths
     )
