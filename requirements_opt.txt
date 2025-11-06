@@ -5,3 +5,4 @@ xarray
 opencv-python
 scipy.interpolate
 open3d
+pyarrow
