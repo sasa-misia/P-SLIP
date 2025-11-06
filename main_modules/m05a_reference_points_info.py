@@ -20,7 +20,7 @@ from psliptools.rasters import (
     create_bbox_from_grids,
     get_projected_epsg_code_from_bbox,
     convert_coords,
-    get_closest_1d_pixel_idx,
+    get_closest_grid_and_1d_pixel_idx,
     generate_grids_from_indices,
     pick_point_from_1d_idx
 )
@@ -223,33 +223,6 @@ def convert_time_sens_dict_to_prj(
     
     return ts_prj_dict
 
-def get_closest_dtm_point(
-        x: float,
-        y: float,
-        base_grid_df: pd.DataFrame,
-        base_grid_x_col: str='prj_x',
-        base_grid_y_col: str='prj_y'
-    ) -> tuple[int, int, float]:
-    """Helper function to get closest DTM point"""
-    point_idxs, points_dists = np.zeros(base_grid_df.shape[0]), np.zeros(base_grid_df.shape[0])
-    for n, (_, row_abg) in enumerate(base_grid_df.iterrows()): # _ because I don't care about the actual index (different if reordered based on priority), but just the current order of rows
-        curr_idx, curr_dst = \
-            get_closest_1d_pixel_idx(x=x, y=y, x_grid=row_abg[base_grid_x_col], y_grid=row_abg[base_grid_y_col])
-        
-        if curr_idx.size == 1 and curr_dst.size == 1:
-            point_idxs[n], points_dists[n] = curr_idx.item(), curr_dst.item()
-        else:
-            raise ValueError(f"Not unique match found for point: [x={x}; y={y}] in DTM n. {n}")
-    
-    if np.isnan(points_dists).all():
-        nearest_dtm, nearest_1d_idx, dist_to_grid_pixel = np.nan, np.nan, np.nan
-    else:
-        nearest_dtm = int(np.nanargmin(points_dists))
-        nearest_1d_idx = int(point_idxs[nearest_dtm])
-        dist_to_grid_pixel = points_dists[nearest_dtm]
-
-    return nearest_dtm, nearest_1d_idx, dist_to_grid_pixel
-
 def update_reference_points_csv(
         abg_df: pd.DataFrame,
         ref_points_csv_path: str,
@@ -272,18 +245,23 @@ def update_reference_points_csv(
         ts_dict=ts_dict
     )
 
+    sel_dtm, sel_1d_idx, dist_to_grid_point = get_closest_grid_and_1d_pixel_idx(
+        x=ref_points_prj_df['prj_x'], 
+        y=ref_points_prj_df['prj_y'], 
+        x_grids=abg_prj_df['prj_x'],
+        y_grids=abg_prj_df['prj_y'],
+        skip_out_of_bbox=True,
+        fill_value=np.nan
+    )
+
     for i, row_ref_prj_pnt in ref_points_prj_df.iterrows():
-        curr_sel_dtm, curr_sel_1d_idx, curr_dist_to_grid_point = get_closest_dtm_point(
-            x=row_ref_prj_pnt['prj_x'], 
-            y=row_ref_prj_pnt['prj_y'], 
-            base_grid_df=abg_prj_df, 
-            base_grid_x_col='prj_x', 
-            base_grid_y_col='prj_y'
-        )
-        
+        curr_sel_dtm, curr_sel_1d_idx, curr_dist_to_grid_point = sel_dtm[i], sel_1d_idx[i], dist_to_grid_point[i]
         if np.isnan(curr_sel_1d_idx):
             warnings.warn(f"No match found for point {i} (lon={ref_points_df.loc[i,'lon']}, lat={ref_points_df.loc[i,'lat']}). Nearest DTM is {curr_sel_dtm}.", stacklevel=2)
             continue
+        else:
+            curr_sel_dtm = int(curr_sel_dtm)
+            curr_sel_1d_idx = int(curr_sel_1d_idx)
 
         ref_points_df.loc[i, 'dtm'] = curr_sel_dtm
         ref_points_df.loc[i, 'idx_1d'] = curr_sel_1d_idx

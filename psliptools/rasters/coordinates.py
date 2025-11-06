@@ -779,7 +779,7 @@ def _get_raster_subset_indices(
     
     return frag_start_row, frag_start_col, frag_end_row, frag_end_col
 
-# %% === Function to obtain the 1d index of the pixel that is closest to a given coordinate
+# %% === Function to obtain the 1d index of the pixel that is closest to a given coordinate(s)
 def get_closest_1d_pixel_idx(
         x: float | list | np.ndarray | pd.Series,
         y: float| list | np.ndarray | pd.Series,
@@ -832,22 +832,6 @@ def get_closest_1d_pixel_idx(
     if x.size != y.size:
         raise ValueError('x and y must have the same size!')
     
-    # --- Try to fragment the raster (if raster is too big, performances will be bad)
-    frag_start_row, frag_start_col, frag_end_row, frag_end_col = _get_raster_subset_indices(
-        x=x, 
-        y=y, 
-        x_grid=x_grid, 
-        y_grid=y_grid, 
-        smallest_size=60
-    )
-    
-    raster_can_be_fragmented = (
-        frag_start_col != 0 or \
-        frag_end_col != x_grid.shape[1] or \
-        frag_start_row != 0 or \
-        frag_end_row != x_grid.shape[0]
-    )
-
     grid_bbox = create_bbox_from_grids(coords_x=x_grid, coords_y=y_grid)
     curr_bbox_mask = (x >= grid_bbox[0]) & (x <= grid_bbox[2]) & (y >= grid_bbox[1]) & (y <= grid_bbox[3])
 
@@ -856,29 +840,46 @@ def get_closest_1d_pixel_idx(
         eval_mask = curr_bbox_mask
     else:
         eval_mask = np.full(x.size, True)
+    
+    if eval_mask.any():
+        # --- Try to fragment the raster (if raster is too big, performances will be bad)
+        frag_start_row, frag_start_col, frag_end_row, frag_end_col = _get_raster_subset_indices(
+            x=x[eval_mask], # Not entire x because otherwise fragmentation will not work (no error, just slower)
+            y=y[eval_mask], # Not entire y because otherwise fragmentation will not work (no error, just slower)
+            x_grid=x_grid, 
+            y_grid=y_grid, 
+            smallest_size=60
+        )
+        
+        raster_can_be_fragmented = (
+            frag_start_col != 0 or \
+            frag_end_col != x_grid.shape[1] or \
+            frag_start_row != 0 or \
+            frag_end_row != x_grid.shape[0]
+        )
 
-    if raster_can_be_fragmented and eval_mask.any():
-        sub_x_grid = x_grid[frag_start_row:frag_end_row, frag_start_col:frag_end_col]
-        sub_y_grid = y_grid[frag_start_row:frag_end_row, frag_start_col:frag_end_col]
-        sub_grid_bbox = create_bbox_from_grids(coords_x=sub_x_grid, coords_y=sub_y_grid)
-        sub_eval_mask = (x >= sub_grid_bbox[0]) & (x <= sub_grid_bbox[2]) & (y >= sub_grid_bbox[1]) & (y <= sub_grid_bbox[3])
-        if (curr_bbox_mask == sub_eval_mask).all():
-            par_grid_ref[0] = par_grid_ref[0] + frag_start_row
-            par_grid_ref[1] = par_grid_ref[1] + frag_start_col
-            if par_grid_ref[2:].sum() == 0: # Only if this is the first fragmentation, raw parent sizes must be written
-                par_grid_ref[2] = x_grid.shape[0]
-                par_grid_ref[3] = y_grid.shape[1]
+        if raster_can_be_fragmented and eval_mask.any():
+            sub_x_grid = x_grid[frag_start_row:frag_end_row, frag_start_col:frag_end_col]
+            sub_y_grid = y_grid[frag_start_row:frag_end_row, frag_start_col:frag_end_col]
+            sub_grid_bbox = create_bbox_from_grids(coords_x=sub_x_grid, coords_y=sub_y_grid)
+            sub_eval_mask = (x >= sub_grid_bbox[0]) & (x <= sub_grid_bbox[2]) & (y >= sub_grid_bbox[1]) & (y <= sub_grid_bbox[3])
+            if (curr_bbox_mask == sub_eval_mask).all():
+                par_grid_ref[0] = par_grid_ref[0] + frag_start_row
+                par_grid_ref[1] = par_grid_ref[1] + frag_start_col
+                if par_grid_ref[2:].sum() == 0: # Only if this is the first fragmentation, raw parent sizes must be written
+                    par_grid_ref[2] = x_grid.shape[0]
+                    par_grid_ref[3] = y_grid.shape[1]
 
-            return get_closest_1d_pixel_idx(
-                x=x, 
-                y=y, 
-                x_grid=sub_x_grid, 
-                y_grid=sub_y_grid, 
-                raster_profile=None, 
-                skip_out_of_bbox=skip_out_of_bbox, 
-                fill_value=fill_value, 
-                par_grid_ref=par_grid_ref
-            )
+                return get_closest_1d_pixel_idx(
+                    x=x, 
+                    y=y, 
+                    x_grid=sub_x_grid, 
+                    y_grid=sub_y_grid, 
+                    raster_profile=None, 
+                    skip_out_of_bbox=skip_out_of_bbox, 
+                    fill_value=fill_value, 
+                    par_grid_ref=par_grid_ref
+                )
     
     idx_1d, dst_1d = np.full(x.size, fill_value), np.full(x.size, fill_value) # initialize with fill_value
     
@@ -905,5 +906,59 @@ def get_closest_1d_pixel_idx(
         dst_1d[eval_mask] = dst_1d_sel
     
     return idx_1d, dst_1d
+
+# %% === Function to obtain closest grid, closest 1D index and distance to a given coordinate(s)
+def get_closest_grid_and_1d_pixel_idx(
+        x: float | list | np.ndarray | pd.Series,
+        y: float | list | np.ndarray | pd.Series,
+        x_grids: list[np.ndarray] | pd.Series,
+        y_grids: list[np.ndarray] | pd.Series,
+        skip_out_of_bbox: bool = True,
+        fill_value: float = np.nan
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Obtain closest grid, closest 1D index and distance to a given coordinate(s).
+
+    Args:
+        x (float | list | np.ndarray | pd.Series): The x coordinates.
+        y (float | list | np.ndarray | pd.Series): The y coordinates.
+        x_grids (list[np.ndarray] | pd.Series[np.ndarray]): The x grids (should be multiple grids, otherwise use get_closest_1d_pixel_idx).
+        y_grids (list[np.ndarray] | pd.Series[np.ndarray]): The y grids (should be multiple grids, otherwise use get_closest_1d_pixel_idx).
+        skip_out_of_bbox (bool, optional): Whether to skip points that are out of the bounding box of the grid. Defaults to True.
+        fill_value (float, optional): The fill value for the output arrays. Defaults to np.nan.
+
+    Returns:
+        tuple(np.ndarray, np.ndarray, np.ndarray): A tuple containing for each coordinate the closest grid, closest 1D index and distance to the grid pixel (with same input unit).
+    """
+    x = np.atleast_1d(x)
+    y = np.atleast_1d(y)
+    if x.size != y.size:
+        raise ValueError("x and y must be the same size")
+    
+    if not isinstance(x_grids, list):
+        x_grids = x_grids.to_list()
+    if not isinstance(y_grids, list):
+        y_grids = y_grids.to_list()
+    if len(x_grids) != len(y_grids):
+        raise ValueError("x_grids and y_grids must have the same length")
+
+    points_idxs, points_dists = np.zeros([x.size, len(x_grids)]), np.zeros([x.size, len(x_grids)])
+    for n, (x_grd, y_grd) in enumerate(zip(x_grids, y_grids)): # _ because I don't care about the actual index (different if reordered based on priority), but just the current order of rows
+        curr_idx, curr_dst = \
+            get_closest_1d_pixel_idx(x=x, y=y, x_grid=x_grd, y_grid=y_grd, skip_out_of_bbox=skip_out_of_bbox, fill_value=fill_value)
+        
+        if curr_idx.size == x.size and curr_dst.size == x.size:
+            points_idxs[:, n], points_dists[:, n] = curr_idx, curr_dst
+        else:
+            raise ValueError(f"Not unique match found for each point: [x={x}; y={y}] in DTM n. {n}")
+    
+    nearest_grid, nearest_1d_idx, dist_to_grid_pixel = np.full([x.size], fill_value), np.full([x.size], fill_value), np.full([x.size], fill_value)
+    for r, (row_dists, row_idxs) in enumerate(zip(points_dists, points_idxs)):
+        if not np.isnan(row_dists).all() or (row_dists == fill_value).all():
+            nearest_grid[r] = np.nanargmin(row_dists)
+            nearest_1d_idx[r] = row_idxs[int(nearest_grid[r])]
+            dist_to_grid_pixel[r] = row_dists[int(nearest_grid[r])]
+
+    return nearest_grid, nearest_1d_idx, dist_to_grid_pixel
 
 # %%

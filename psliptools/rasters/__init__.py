@@ -23,7 +23,8 @@ from .coordinates import (
     convert_bbox,
     get_pixels_inside_polygon,
     raster_within_polygon,
-    get_closest_1d_pixel_idx
+    get_closest_1d_pixel_idx,
+    get_closest_grid_and_1d_pixel_idx
 )
 
 from .manage_raster import (
@@ -72,6 +73,7 @@ __all__ = [
     "get_pixels_inside_polygon",
     "raster_within_polygon",
     "get_closest_1d_pixel_idx",
+    "get_closest_grid_and_1d_pixel_idx",
     "get_1d_idx_from_2d_mask",
     "get_1d_idx_from_2d_idx",
     "get_2d_idx_from_1d_idx",
