@@ -23,7 +23,7 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename, setup_logger, log_and_error
 logger = setup_logger(__name__)
 logger.info("=== Import polygons with main properties ===")
 
@@ -37,7 +37,7 @@ def main(
         source_subtype: str=None
     ) -> dict[str, object]:
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
-        raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
+        log_and_error("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES), ValueError, logger)
     
     source_mode = 'shapefile'
 
@@ -48,7 +48,7 @@ def main(
     study_area_polygon = env.load_variable(variable_filename='study_area_vars.pkl')['study_area_polygon']
 
     if gui_mode:
-        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
     else:
         print("\n=== Shapefile selection ===")
         src_path = select_file_prompt(
@@ -76,6 +76,7 @@ def main(
         allow_only_polygons=True
     )
 
+    logger.info(f"Properties loaded for {source_type}.")
     prop_df['label'] = prop_df['class_name']
     prop_df['standard_class'] = None
     prop_df['parameter_class'] = None

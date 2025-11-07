@@ -21,7 +21,7 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error
 logger = setup_logger(__name__)
 logger.info("=== Refine study area ===")
 
@@ -39,8 +39,7 @@ def subtract_polygons_from_study_area(
 
     study_area_subtracted_poly_list = subtract_polygons(study_area_dict['study_area_cln_poly'], polygons_to_remove)
     if len(study_area_subtracted_poly_list) != 1:
-        logger.error("Polygon subtraction resulted in multiple or no polygons.")
-        raise ValueError("Polygon subtraction resulted in multiple or no polygons.")
+        log_and_error("Polygon subtraction resulted in multiple or no polygons.", ValueError, logger)
 
     study_area_dict['study_area_cln_poly'] = study_area_subtracted_poly_list[0]
     for class_name, geometry in zip(labels, polygons_to_remove):
@@ -49,8 +48,7 @@ def subtract_polygons_from_study_area(
                         (study_area_dict['study_area_rem_poly']['subtype'] == subtype) # It is a pandas series
         
         if replace_index.sum() > 1:
-            logger.error("Multiple polygon matches found for replace_index in study_area_rem_poly.")
-            raise ValueError("Multiple polygon matches found for replace_index in study_area_rem_poly.")
+            log_and_error("Multiple polygon matches found for replace_index in study_area_rem_poly.", ValueError, logger)
         elif replace_index.sum() == 1:
             study_area_dict['study_area_rem_poly'].loc[replace_index, 'geometry'] = geometry
             logger.info(f"Replaced existing polygon for class '{class_name}' in study_area_rem_poly DataFrame.")
@@ -76,7 +74,7 @@ def main(
         source_subtype: str=None
     ) -> dict[str, object]:
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
-        raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
+        log_and_error("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES), ValueError, logger)
     
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
 
@@ -90,14 +88,13 @@ def main(
     if not os.path.exists(os.path.join(env.folders['variables']['path'], rem_filename)):
         matching_files = [f for f in os.listdir(env.folders['variables']['path']) if f.startswith(f"{source_type}")]
         if len(matching_files) == 0:
-            logger.error(f"No existing variable files found for source type '{source_type}' in the variables directory.")
-            raise FileNotFoundError(f"No existing variable files found for source type '{source_type}' in the variables directory.")
+            log_and_error(f"No existing variable files found for source type '{source_type}' in the variables directory.", FileNotFoundError, logger)
         elif len(matching_files) == 1:
             rem_filename = matching_files[0]
             logger.info(f"Only one matching file found: {rem_filename}. Using this file.")
         elif len(matching_files) > 1:
             if gui_mode:
-                raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+                log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
             else:
                 rem_filename = select_from_list_prompt(matching_files, "Select the file containing polygons to remove from study area:")[0]
                 logger.info(f"Multiple matching files found. Selected file: {rem_filename}")
@@ -105,7 +102,7 @@ def main(
     rem_poly_vars = env.load_variable(variable_filename=rem_filename)
 
     if gui_mode:
-        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
     else:
         poly_labels_to_remove = select_from_list_prompt(rem_poly_vars['prop_df']['class_name'].to_list(), usr_prompt="Select the classes to remove:", allow_multiple=True)
     
@@ -121,6 +118,8 @@ def main(
 
     env.config['inputs']['study_area'][0]['settings']['source_refined'] = True
     env.save_variable(variable_to_save=study_area_vars, variable_filename='study_area_vars.pkl') # It also updates the environment file
+
+    logger.info("Study area refined.")
 
     return study_area_vars
 

@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import sys
 import argparse
-import warnings
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -33,7 +32,7 @@ from psliptools.geometries import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, log_and_warning
 logger = setup_logger(__name__)
 logger.info("=== Indexing of polygons with parameters ===")
 
@@ -51,35 +50,35 @@ def get_raw_associated_df(
             else:
                 curr_par_subtype = None
 
-            if not "parameter_filename" in curr_par['settings']:
-                warnings.warn(f"No parameter association found for type:{curr_par_type}; subtype: {curr_par_subtype}. Skipping...")
-                continue # Skip to the next parameter
+            if "parameter_filename" in curr_par['settings']:
+                association_filepath = os.path.join(env.folders['user_control']['path'], curr_par['settings']['association_filename'])
 
-            association_filepath = os.path.join(env.folders['user_control']['path'], curr_par['settings']['association_filename'])
+                if curr_par_subtype:
+                    rel_filename = f"{curr_par_type}_{curr_par_subtype}"
+                else:
+                    rel_filename = f"{curr_par_type}"
 
-            if curr_par_subtype:
-                rel_filename = f"{curr_par_type}_{curr_par_subtype}"
+                curr_prop_df = env.load_variable(variable_filename=f"{rel_filename}_vars.pkl")['prop_df']
+                association_df = pd.read_csv(association_filepath)
+
+                is_prop_df_in_association_df = compare_dataframes_columns(
+                    dataframe1=curr_prop_df,
+                    dataframe2=association_df,
+                    columns_df1=['class_name', 'parameter_class'],
+                    columns_df2=['class_name', 'parameter_class'],
+                    row_order=False
+                )
+
+                if not is_prop_df_in_association_df.all():
+                    log_and_error(f"Property dataframe must be updated to match the association dataframe. Please run the association script first.", ValueError, logger)
+                
+                curr_associated_df = curr_prop_df.loc[curr_prop_df['parameter_class'].notna(), :].loc[:, ['class_name', 'geometry', 'parameter_class']]
+                curr_associated_df['type'] = curr_par_type
+                curr_associated_df['subtype'] = curr_par_subtype
+                raw_associated_df = pd.concat([raw_associated_df, curr_associated_df], axis=0, ignore_index=True)
             else:
-                rel_filename = f"{curr_par_type}"
-
-            curr_prop_df = env.load_variable(variable_filename=f"{rel_filename}_vars.pkl")['prop_df']
-            association_df = pd.read_csv(association_filepath)
-
-            is_prop_df_in_association_df = compare_dataframes_columns(
-                dataframe1=curr_prop_df,
-                dataframe2=association_df,
-                columns_df1=['class_name', 'parameter_class'],
-                columns_df2=['class_name', 'parameter_class'],
-                row_order=False
-            )
-
-            if not is_prop_df_in_association_df.all():
-                raise ValueError(f"Property dataframe must be updated to match the association dataframe. Please run the association script first.")
-            
-            curr_associated_df = curr_prop_df.loc[curr_prop_df['parameter_class'].notna(), :].loc[:, ['class_name', 'geometry', 'parameter_class']]
-            curr_associated_df['type'] = curr_par_type
-            curr_associated_df['subtype'] = curr_par_subtype
-            raw_associated_df = pd.concat([raw_associated_df, curr_associated_df], axis=0, ignore_index=True)
+                log_and_warning(f"No parameter association found for type:{curr_par_type}; subtype: {curr_par_subtype}. Skipping...", stacklevel=2, logger=logger)
+                continue # Skip to the next parameter
     
     return raw_associated_df
 
@@ -165,6 +164,7 @@ def main(
     raw_associated_df = get_raw_associated_df(env)
 
     associated_df = group_associated_df(raw_associated_df)
+    logger.info("Associated DataFrame grouped.")
 
     polygons_alignment_report = check_and_report_polygons_alignment(associated_df['geometry'])
     if not polygons_alignment_report['aligned']:
@@ -172,7 +172,7 @@ def main(
         classes_str = [str(x).replace('[', '').replace(']', '').replace("'", '') for x in associated_df["class_name"]]
         type_and_subtype_str = [f'{x} ({y})' for x, y in zip(associated_df["type"], associated_df["subtype"])]
         if gui_mode:
-            raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+            log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", ValueError, logger)
         else:
             print(f'\n=== Polygon intersection detected ===')
             for p, poly_intersections in enumerate(poly_intersections_list):
@@ -186,6 +186,7 @@ def main(
         associated_df = associated_df.iloc[priority_order]
 
     associated_df = align_and_index_associated_df(associated_df, abg_df)
+    logger.info("Associated DataFrame aligned and indexed.")
 
     parameter_vars = {'association_df': associated_df, 'originally_aligned': polygons_alignment_report['aligned']}
 

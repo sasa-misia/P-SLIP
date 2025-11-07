@@ -3,7 +3,6 @@ import os
 import sys
 import argparse
 import pandas as pd
-import warnings
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -30,7 +29,7 @@ from psliptools.scattered import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename, setup_logger, log_and_error, log_and_warning, memory_report
 logger = setup_logger(__name__)
 logger.info("=== Importing time-sensitive data ===") # This script must be putted after m03, because with satellite you need dtm and abg grids
 
@@ -48,7 +47,7 @@ def get_numeric_data_ranges(
     elif source_type == 'temperature':
         ts_possible_range = (-50, 50)
     else:
-        raise ValueError(f"Invalid source type [{source_type}]. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES))
+        log_and_error(f"Invalid source type [{source_type}]. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES), ValueError, logger)
     return ts_possible_range
 
 def get_fill_and_aggregation_methods(
@@ -78,7 +77,7 @@ def rename_csv_data_headers(
     for csv_pth in csv_paths:
         old_datetime_and_numeric_col_names = get_csv_column_names(csv_path=csv_pth, data_type=['datetime', 'number'])
         if gui_mode:
-            raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+            log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
         else:
             print("\n=== Renaming of data files columns ===")
             new_datetime_and_numeric_col_names = label_list_elements_prompt(
@@ -102,19 +101,19 @@ def associate_csv_files_with_gauges(
     for data_pth in csv_paths:
         station_matches = [x for x in station_names if x in os.path.basename(data_pth).lower()]
         if len(station_matches) != 1:
-            warnings.warn(f"No single data-station association found for {data_pth}", stacklevel=2)
+            log_and_warning(f"No single data-station association found for {data_pth}", stacklevel=2, logger=logger)
             csv_associated_stations.append(None)
         else:
             new_association = station_names[station_matches[0]]
             if new_association in csv_associated_stations:
-                warnings.warn(f"Duplicate data-station association found for {data_pth}", stacklevel=2)
+                log_and_warning(f"Duplicate data-station association found for {data_pth}", stacklevel=2, logger=logger)
                 csv_associated_stations.append(None)
             else:
                 csv_associated_stations.append(new_association)
     
     if any(x is None for x in csv_associated_stations):
         if gui_mode:
-            raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+            log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
         else:
             print("\n=== Association of data files with gauges ===")
             csv_associated_stations = label_list_elements_prompt(
@@ -123,11 +122,11 @@ def associate_csv_files_with_gauges(
             )
 
         if len(set(csv_associated_stations)) != len(csv_associated_stations):
-            raise ValueError("Duplicate data-station association found. Please check your association names.")
+            log_and_error("Duplicate data-station association found. Please check your association names.", ValueError, logger)
         
         for sta in csv_associated_stations:
             if sta not in station_names.values():
-                raise ValueError(f"Invalid data-station association found. Must be one of: {'; '.join(station_names.values())}")
+                log_and_error(f"Invalid data-station association found. Must be one of: {'; '.join(station_names.values())}", ValueError, logger)
     return csv_associated_stations
 
 # %% === Main function
@@ -146,17 +145,17 @@ def main(
     ) -> dict[str, pd.DataFrame]:
     """Main function to import time sensitive data"""
     if not source_mode in SOURCE_MODES:
-        raise ValueError("Invalid source mode. Must be one of: " + ", ".join(SOURCE_MODES))
+        log_and_error("Invalid source mode. Must be one of: " + ", ".join(SOURCE_MODES), ValueError, logger)
     if not source_type in KNOWN_DYNAMIC_INPUT_TYPES:
-        raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES))
+        log_and_error("Invalid source type. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES), ValueError, logger)
     if not source_subtype in DYNAMIC_SUBFOLDERS:
-        raise ValueError("Invalid source subtype. Must be one of: " + ", ".join(DYNAMIC_SUBFOLDERS))
+        log_and_error("Invalid source subtype. Must be one of: " + ", ".join(DYNAMIC_SUBFOLDERS), ValueError, logger)
     if aggregation_method is not None and not aggregation_method in AGGREGATION_METHODS:
-        raise ValueError("Invalid aggregation method. Must be one of:" + ", ".join(AGGREGATION_METHODS))
+        log_and_error("Invalid aggregation method. Must be one of:" + ", ".join(AGGREGATION_METHODS), ValueError, logger)
     if isinstance(last_date, str):
         last_date = pd.to_datetime(last_date)
     if last_date is not None and not isinstance(last_date, pd.Timestamp):
-        raise TypeError("last_date must be a datetime object or None")
+        log_and_error("last_date must be a datetime object or None", TypeError, logger)
     
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
@@ -165,7 +164,7 @@ def main(
 
     logger.info(f"Importing time-sensitive data [{source_type}] from [{source_subtype}] in [{source_mode}] mode...")
     if gui_mode:
-        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
     else:
         print("\n=== Directory selection ===")
         data_fold = select_dir_prompt(
@@ -230,6 +229,8 @@ def main(
             _, cust_id = env.add_input_file(file_path=data_pth, file_type=source_type, file_subtype=f"rec{idx+1}")
             station_df.loc[station_df['station'] == data_sta, 'file_id'] = cust_id
             cust_ids.append(cust_id)
+            
+            memory_report(logger)
 
         logger.info("Merging time-sensitive data files with gauges info...")
         time_sensitive_vars = merge_time_sensitive_data_and_stations(
@@ -238,7 +239,7 @@ def main(
         )
 
     else:
-        raise NotImplementedError("Satellite mode is not supported in this script yet. Please contact the developer.")
+        log_and_error("Satellite mode is not supported in this script yet. Please contact the developer.", NotImplementedError, logger)
     
     common_start_date = time_sensitive_vars['datetimes']['start_date'].iloc[0].strftime("%Y-%b-%d %H:%M:%S")
     common_end_date = time_sensitive_vars['datetimes']['end_date'].iloc[-1].strftime("%Y-%b-%d %H:%M:%S")

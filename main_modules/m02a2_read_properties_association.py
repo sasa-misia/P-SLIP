@@ -20,7 +20,7 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error
 logger = setup_logger(__name__)
 logger.info("=== Associate properties to polygons ===")
 
@@ -39,12 +39,12 @@ def class_association(
             for _, row in only_associated_df.iterrows():
                 idx_to_replace = prop_df['class_name'] == row['class_name']
                 if idx_to_replace.sum() > 1:
-                    raise ValueError(f"Multiple rows with the same class name: {row['class_name']}")
+                    log_and_error(f"Multiple rows with the same class name: {row['class_name']}", ValueError, logger)
                 elif idx_to_replace.sum() == 0:
-                    raise ValueError(f"No rows with the class name: {row['class_name']}")
+                    log_and_error(f"No rows with the class name: {row['class_name']}", ValueError, logger)
                 
                 if not row[association_class_id_column] in reference_classes_df['class_id'].values:
-                    raise ValueError(f"Invalid {association_class_id_column}: {row[association_class_id_column]}. Possible values: {list(reference_classes_df['class_id'].values)}")
+                    log_and_error(f"Invalid {association_class_id_column}: {row[association_class_id_column]}. Possible values: {list(reference_classes_df['class_id'].values)}", ValueError, logger)
                 
                 prop_df.loc[idx_to_replace, prop_class_id_column] = row[association_class_id_column]
 
@@ -62,14 +62,14 @@ def main(
         parameter_classes_filepath: str=None
     ) -> dict[str, object]: 
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
-        raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES))
+        log_and_error("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES), ValueError, logger)
     
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
 
     possible_subtypes = [x['settings']['source_subtype'] for x in env.config['inputs'][source_type]]
 
     if gui_mode:
-        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
     else:
         if not standard_classes_filepath:
             print("\n=== Association file for standard classes ===")
@@ -122,6 +122,8 @@ def main(
         env.config['inputs'][source_type][curr_idx]['settings']['parameter_filename'] = os.path.basename(parameter_classes_filepath)
         
     env.save_variable(variable_to_save=prop_vars, variable_filename=f"{rel_filename}_vars.pkl")
+
+    logger.info(f"Associations processed for {source_type}.")
 
     return prop_vars
 

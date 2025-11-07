@@ -29,7 +29,7 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, memory_report
 logger = setup_logger(__name__)
 logger.info("=== Import DTM ===")
 
@@ -64,8 +64,8 @@ def import_dtm_files(
             continue
 
         if raster_data.ndim != 2:
-            raise ValueError(f"Raster data has {raster_data.ndim} dimensions, but expected 2.")
-
+            log_and_error(f"Raster data has {raster_data.ndim} dimensions, but expected 2.", ValueError, logger)
+        
         _, curr_cust_id = env.add_input_file(file_path=dtm_path, file_type=file_type, file_subtype=f'dtm{idx+1}')
         if resample_size:
             raster_data, raster_profile, raster_x, raster_y, mask_matrix = resample_raster(
@@ -101,6 +101,8 @@ def import_dtm_files(
         })
 
         cust_id.append(curr_cust_id)
+        
+        memory_report(logger)
     
     dtm_df = pd.DataFrame(dtm_data) # Convert the list of dictionaries to a DataFrame
     abg_df = pd.DataFrame(abg_data) # Convert the list of dictionaries to a DataFrame
@@ -127,7 +129,7 @@ def main(
     study_area_cln_poly = env.load_variable(variable_filename='study_area_vars.pkl')['study_area_cln_poly']
 
     if gui_mode:
-        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
     else:
         print("\n=== Directory selection ===")
         dtm_fold = select_dir_prompt(

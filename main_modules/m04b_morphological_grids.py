@@ -17,7 +17,7 @@ from psliptools.rasters import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, memory_report
 logger = setup_logger(__name__)
 logger.info("=== Create morphological grids ===")
 
@@ -62,6 +62,8 @@ def get_angles_and_curvatures(
     angles_df = pd.DataFrame(angles_dict)
     curvatures_df = pd.DataFrame(curvatures_dict)
 
+    memory_report(logger)
+
     return angles_df, curvatures_df
 
 # %% === Main function
@@ -86,6 +88,7 @@ def main(
         'curvatures': curvatures_df
     }
 
+    logger.info("Morphological grids created.")
     env.save_variable(variable_to_save=morphology_vars, variable_filename='morphology_vars.pkl')
 
     return morphology_vars

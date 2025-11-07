@@ -1,7 +1,6 @@
 # %% === Import necessary modules
 import os
 import sys
-import warnings
 import argparse
 import pandas as pd
 import numpy as np
@@ -20,7 +19,7 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, obtain_config_idx_and_rel_filename
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, obtain_config_idx_and_rel_filename, log_and_error, memory_report, log_and_warning
 from main_modules.m04c_import_time_sensitive_data import get_numeric_data_ranges
 logger = setup_logger(__name__)
 logger.info("=== Analyzing time-sensitive data patterns ===")
@@ -46,7 +45,7 @@ def get_time_sensitive_statistics(
     """
     delta_time = time_sensitive_vars['datetimes']['start_date'].diff().mean()
     if delta_time > pd.Timedelta(days=31):
-        raise ValueError("Invalid delta time. Must be less than 31 days")
+        log_and_error("Invalid delta time. Must be less than 31 days", ValueError, logger)
     
     ts_stats = {
         'data_delta_time': delta_time, 
@@ -163,13 +162,13 @@ def get_mobile_averages(
     # Validate window vs. data delta
     delta_time = time_sensitive_vars['datetimes']['start_date'].diff().mean()
     if delta_time > moving_average_window:
-        raise ValueError(f"Invalid moving_average_window [{moving_average_window}]. Must be greater than data delta_time: [{delta_time}]")
+        log_and_error(f"Invalid moving_average_window [{moving_average_window}]. Must be greater than data delta_time: [{delta_time}]", ValueError, logger)
     if abs((moving_average_window % delta_time).total_seconds()) > 0.01:
-        raise ValueError(f"Invalid moving_average_window [{moving_average_window}]. Must be a multiple of data delta_time: [{delta_time}]")
+        log_and_error(f"Invalid moving_average_window [{moving_average_window}]. Must be a multiple of data delta_time: [{delta_time}]", ValueError, logger)
     rows_window = int(moving_average_window / delta_time)
 
     if rows_window < 2:
-        warnings.warn("Hull moving average will not be calculated: the moving_average_window is smaller than twice the data delta_time.", stacklevel=2)
+        log_and_warning("Hull moving average will not be calculated: the moving_average_window is smaller than twice the data delta_time.", stacklevel=2, logger=logger)
 
     # Validate weights
     if weights is None:
@@ -178,7 +177,7 @@ def get_mobile_averages(
         weights_arr = np.array(weights, dtype=np.float64)
     
     if weights_arr.size != time_sensitive_vars['datetimes'].shape[0]:
-        raise ValueError(f"Invalid weights length [{weights_arr.size}]. Must match data length: [{time_sensitive_vars['datetimes'].shape[0]}]")
+        log_and_error(f"Invalid weights length [{weights_arr.size}]. Must match data length: [{time_sensitive_vars['datetimes'].shape[0]}]", ValueError, logger)
     
     # Hull weights
     hull_fast = 2 / (2 + 1)
@@ -311,12 +310,14 @@ def get_mobile_averages(
                     ma_adaptive.iloc[i] = ma_adaptive.iloc[i-1] + corrective_term # ma_adaptive can be seen as a corrected version of ma_simple
             
             ts_mobile_averages['adaptive'][ts_label][col], out_of_range_mask['adaptive'][ts_label][col] = _filter_series(ma_adaptive)
+        
+        memory_report(logger)
     
     warn_msg = "Out of range values were detected and automatically cut" if cut_outside_range else "Out of range values detected (please check it!)"
     for ma_key, ma_dict in out_of_range_mask.items():
         for ts_label, out_of_range_mask in ma_dict.items():
             if out_of_range_mask.any(axis=None):
-                warnings.warn(f"{warn_msg} in {ma_key} MA for {ts_label}", stacklevel=2)
+                log_and_warning(f"{warn_msg} in {ma_key} MA for {ts_label}", stacklevel=2, logger=logger)
 
     return ts_mobile_averages
 
@@ -334,17 +335,17 @@ def main(
     ) -> dict[str, object]:
     """Main function to obtain statistical information of time-sensitive data."""
     if not source_type in KNOWN_DYNAMIC_INPUT_TYPES:
-        raise ValueError("Invalid source type. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES))
+        log_and_error("Invalid source type. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES), ValueError, logger)
     if not source_subtype in DYNAMIC_SUBFOLDERS:
-        raise ValueError("Invalid source subtype. Must be one of: " + ", ".join(DYNAMIC_SUBFOLDERS))
+        log_and_error("Invalid source subtype. Must be one of: " + ", ".join(DYNAMIC_SUBFOLDERS), ValueError, logger)
     if not isinstance(quantiles, list):
         quantiles = [quantiles]
     if not all([isinstance(quantile, float) and 0 <= quantile <= 1 for quantile in quantiles]):
-        raise TypeError("quantiles must be a list of floats and all values must be between 0 and 1")
+        log_and_error("quantiles must be a list of floats and all values must be between 0 and 1", TypeError, logger)
     if not isinstance(numeric_range, list) or len(numeric_range) != 2:
-        raise TypeError("numeric_range must be a list of length 2")
+        log_and_error("numeric_range must be a list of length 2", TypeError, logger)
     if not all([isinstance(numeric, (float, type(None))) for numeric in numeric_range]):
-        raise TypeError("numeric_range must be a list of floats")
+        log_and_error("numeric_range must be a list of floats", TypeError, logger)
     
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
@@ -353,7 +354,7 @@ def main(
 
     source_mode = env.config['inputs'][source_type][idx_config]['settings']['source_mode']
     if not source_mode == 'station':
-        raise ValueError("Invalid source mode. Must be 'station'")
+        log_and_error("Invalid source mode. Must be 'station'", ValueError, logger)
     
     ts_vars = env.load_variable(variable_filename=f"{rel_filename}_vars.pkl")
 

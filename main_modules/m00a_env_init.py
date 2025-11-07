@@ -3,6 +3,13 @@ import argparse
 import logging
 import os
 import sys
+import warnings
+
+try:
+    import psutil
+    SYSTEM_MONITORING = True
+except ImportError:
+    SYSTEM_MONITORING = False
 
 # Add the parent directory to the system path (temporarily)
 # This allows importing modules from the parent directory (like config and psliptools)
@@ -36,6 +43,120 @@ def setup_logger(
     else:
         logger = logging.getLogger(__name__)
     return logger
+
+# This will log warnings and raise warnings, using the given logger or creating a new one
+def log_and_warning(
+        warning_msg: str, 
+        stacklevel: int=2,
+        logger: logging.Logger=None
+    ) -> None:
+    """
+    Log a warning message and raise a warning.
+
+    Args:
+        warning_msg: Warning message to log.
+        logger: Logger object. If None, a new logger is created.
+    """
+    if logger is None:
+        logger = setup_logger()
+    
+    logger.warning(warning_msg)
+
+    warnings.warn(warning_msg, stacklevel=stacklevel)
+
+# This will log errors and raise exceptions, using the given logger or creating a new one
+def log_and_error(
+        error_msg: str, 
+        exception_type: type=ValueError, 
+        logger: logging.Logger=None
+    ) -> None:
+    """
+    Log an error message and raise the specified exception.
+
+    Args:
+        error_msg: Error message to log.
+        exception_type: Exception type to raise.
+        logger: Logger object. If None, a new logger is created.
+    """
+    if logger is None:
+        logger = setup_logger()
+    
+    logger.error(error_msg)
+
+    raise exception_type(error_msg)
+
+# This will log memory usage, using the given logger or creating a new one
+def memory_report(
+        logger: logging.Logger=None
+    ) -> None:
+    """
+    Report memory usage.
+
+    Args:
+        logger: Logger object. If None, a new logger is created.
+    """
+    if logger is None:
+        logger = setup_logger()
+    
+    if SYSTEM_MONITORING:
+        mem = psutil.virtual_memory()
+        logger.info(f"Memory usage: {mem.percent}% ({mem.used / 1024**3:.2f} GB used) ...")
+    else:
+        logger.info("Memory monitoring not available...")
+
+# This will return hardware information
+def get_hardware_info() -> dict[str, int | float]:
+    """
+    Report hardware information.
+
+    Returns:
+        dict(str, int | float): Dictionary with hardware information (if available). Keys are 'cores', 'threads', 'ram', 'disk', 'free_disk', 'free_ram'.
+    """
+    if SYSTEM_MONITORING:
+        try:
+            disk_usage = psutil.disk_usage(os.getcwd())
+            disk_total = disk_usage.total / 1024**3
+            disk_free = disk_usage.free / 1024**3
+        except Exception:
+            disk_total = 0
+            disk_free = 0
+        
+        hardware_info = {
+            'cores': psutil.cpu_count(logical=False),
+            'threads': psutil.cpu_count(logical=True),
+            'ram': psutil.virtual_memory().total / 1024**3,
+            'disk': disk_total,
+            'free_disk': disk_free,
+            'free_ram': psutil.virtual_memory().available / 1024**3
+        }
+    else:
+        hardware_info = { # If SYSTEM_MONITORING is False, return fake default values (zero)
+            'cores': 0,
+            'threads': 0,
+            'ram': 0,
+            'disk': 0,
+            'free_disk': 0,
+            'free_ram': 0
+        }
+
+    return hardware_info
+
+# This will log hardware information, using the given logger or creating a new one
+def hardware_report(
+        logger: logging.Logger=None
+    ) -> None:
+    """
+    Report hardware information.
+
+    Args:
+        logger: Logger object. If None, a new logger is created.
+    """
+    hardware_info = get_hardware_info()
+
+    if logger is None:
+        logger = setup_logger()
+    
+    logger.info(f"Hardware information: {hardware_info}")
 
 # %% === Main function to initialize or load the analysis environment
 # This function is responsible for creating or loading the analysis environment based on user input.

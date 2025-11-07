@@ -7,6 +7,7 @@ Module for creating the folder structure for the analysis.
 
 #%% Import necessary modules
 import os
+import re
 import platform
 import importlib
 import json
@@ -21,6 +22,14 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, field
+
+try:
+    import psutil
+    SYSTEM_SPECS_AVAILABLE = True
+except ImportError:
+    SYSTEM_SPECS_AVAILABLE = False
+
+GPU_SPECS_AVAILABLE = False # TODO: Implement libraries to obtain GPU specs
 
 # Import default configuration
 from .default_params import (
@@ -137,6 +146,42 @@ def _retrieve_app_version() -> str:
                 logger.warning(f"No application version found in {version_file_path}. Using default version 'unknown'.")
                 app_version = 'unknown'
     return app_version
+
+def _retrieve_system_specs() -> dict:
+    """
+    Retrieve system specs.
+
+    Returns:
+        dict: System specs.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Retrieving system specs...")
+
+    system_specs = {
+        'python': platform.python_version(),
+        'system': platform.system(),
+        'release': platform.release(),
+        'version': platform.version(),
+        'machine': platform.machine(),
+        'processor': platform.processor(),
+        'architecture': platform.architecture()[0],
+        'cores': None,
+        'threads': None,
+        'ram': None,
+        'gpu_model': None,
+        'gpu_vram': None
+    }
+
+    if SYSTEM_SPECS_AVAILABLE:
+        system_specs['cores'] = psutil.cpu_count(logical=False)
+        system_specs['threads'] = psutil.cpu_count(logical=True)
+        system_specs['ram'] = psutil.virtual_memory().total / 1024**3
+    
+    if GPU_SPECS_AVAILABLE:
+        # TODO: Implement GPU specs
+        pass
+    
+    return system_specs
 
 def _import_corrected_name(lib: str) -> str:
     """
@@ -346,12 +391,13 @@ class AnalysisEnvironment:
 
     # Metadata
     case_name: str
-    creator_user: str = 'unknown'  # Default user if not specified
+    creator_user: str = field(default_factory=lambda: _retrieve_current_user())
+    creator_specs: dict = field(default_factory=lambda: _retrieve_system_specs())
     creation_time: str = field(default_factory=lambda: pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
-    current_user: str = 'unknown'  # Placeholder for the current user
+    last_user: str = field(default_factory=lambda: _retrieve_current_user())
+    last_user_specs: dict = field(default_factory=lambda: _retrieve_system_specs())
     last_update: str = field(default_factory=lambda: pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
-    app_version: str = 'unknown' # Placeholder for the application version
-    user_platform: str = field(default_factory=lambda: platform.system())
+    app_version: str = field(default_factory=lambda: _retrieve_app_version())
     folders: dict = field(default_factory=lambda: {})
     config: dict = field(default_factory=lambda: copy.deepcopy(ANALYSIS_CONFIGURATION))
 
@@ -377,10 +423,10 @@ class AnalysisEnvironment:
         Args:
             file_path (str): The path to the JSON file.
         """
-        self.current_user = _retrieve_current_user()
+        self.last_user = _retrieve_current_user()
+        self.last_user_specs = _retrieve_system_specs()
         self.last_update = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
         self.app_version = _retrieve_app_version()
-        self.user_platform = platform.system()
         
         with open(file_path, 'w') as f:
             json.dump(self.__dict__, f, indent=4)
@@ -821,15 +867,11 @@ def create_analysis_environment(base_dir: str, case_name: str = None) -> Analysi
     if case_name is None:
         case_name = DEFAULT_CASE_NAME
     
-    user = _retrieve_current_user()
-    
-    app_version = _retrieve_app_version()
+    case_name_clean = re.sub(r'[\\/:*?"<>| ]', '_', case_name)  # Replace spaces and invalid filename characters with underscores
     
     # Create the analysis environment object
     env = AnalysisEnvironment(
-        case_name=case_name,
-        creator_user=user,
-        app_version=app_version
+        case_name=case_name_clean
     )
 
     env.create_folder_structure(base_dir)
@@ -838,7 +880,7 @@ def create_analysis_environment(base_dir: str, case_name: str = None) -> Analysi
 
     # Set up the session logger
     current_datetime = pd.Timestamp.now().strftime('%Y-%m-%d_%H-%M-%S')
-    log_file_path = os.path.join(env.folders['logs']['path'], f"{env.current_user}_{env.case_name}_session_{current_datetime}.log")
+    log_file_path = os.path.join(env.folders['logs']['path'], f"{env.last_user}_{env.case_name}_session_{current_datetime}.log")
     _setup_session_logger(log_file_path)
 
     return env
@@ -902,7 +944,7 @@ def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
 
         # Set up a session log file
         current_datetime = pd.Timestamp.now().strftime('%Y-%m-%d_%H-%M-%S')
-        log_file_path = os.path.join(env.folders['logs']['path'], f"{env.current_user}_{env.case_name}_session_{current_datetime}.log")
+        log_file_path = os.path.join(env.folders['logs']['path'], f"{env.last_user}_{env.case_name}_session_{current_datetime}.log")
         _setup_session_logger(log_file_path)
 
         return env

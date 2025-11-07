@@ -2,7 +2,6 @@
 import os
 import sys
 import argparse
-import warnings
 import pandas as pd
 import geopandas as gpd
 import shapely.geometry as geom
@@ -30,7 +29,7 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, log_and_warning
 from main_modules.m01a_study_area import get_proj_epsg_and_add_prj_coords_to_df
 logger = setup_logger(__name__)
 logger.info("=== Create landslides dataset ===")
@@ -47,10 +46,10 @@ def read_landslides_csv(
     landslides_df = read_generic_csv(csv_path=landslide_points_csv_path)
 
     if landslides_df.empty:
-        raise ValueError(f"Reference points CSV ({landslide_points_csv_path}) is empty. Please check the file.")
+        log_and_error(f"Reference points CSV ({landslide_points_csv_path}) is empty. Please check the file.", ValueError, logger)
     
     if not all(x in landslides_df.columns for x in REQUIRED_LANDSLIDES_DF_COLUMNS):
-        raise ValueError(f"Reference points CSV ({landslide_points_csv_path}) does not contain the required columns: {REQUIRED_LANDSLIDES_DF_COLUMNS}. Please check the file.")
+        log_and_error(f"Reference points CSV ({landslide_points_csv_path}) does not contain the required columns: {REQUIRED_LANDSLIDES_DF_COLUMNS}. Please check the file.", ValueError, logger)
     
     return landslides_df
 
@@ -91,10 +90,10 @@ def create_landslides_polygons(
             curr_id = row['id']
             idx_in_src_shp = source_geometries_geo[src_file][source_geometries_geo[src_file]['class_name'] == curr_id].index
             if idx_in_src_shp.empty:
-                warnings.warn(f"ID {curr_id} not found in file ({file_mapper[src_file][0]}). Fake polygon will be created but please, check the reference points CSV.")
+                log_and_warning(f"ID {curr_id} not found in file ({file_mapper[src_file][0]}). Fake polygon will be created but please, check the reference points CSV.", stacklevel=2, logger=logger)
                 create_fake_polygon = True
             elif len(idx_in_src_shp) > 1:
-                raise ValueError(f"Multiple IDs ({curr_id}) found in file ({file_mapper[src_file][0]}). Please check the reference points CSV.")
+                log_and_error(f"Multiple IDs ({curr_id}) found in file ({file_mapper[src_file][0]}). Please check the reference points CSV.", ValueError, logger)
         
         if create_fake_polygon:
             curr_proj_x = row['prj_x']
@@ -156,7 +155,7 @@ def main(
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=True)
 
     if gui_mode:
-        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
     else:
         print("\n=== Reference points file selection ===")
         if points_csv_path is None:
@@ -174,7 +173,7 @@ def main(
     lands_proj_epsg, landslides_df = get_proj_epsg_and_add_prj_coords_to_df(dataframe=landslides_df)
     
     if gui_mode:
-        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
     else:
         files_list = list(set(landslides_df['src_file'][~landslides_df['src_file'].isna()].to_list()))
         
@@ -182,7 +181,7 @@ def main(
             file_mapper = {x: [None, None] for x in files_list}
         
         if not all([x in file_mapper.keys() for x in files_list]):
-            raise ValueError("Some of the shapefiles in the reference points CSV are not in the file_mapper. Please check the file or update the file_mapper.")
+            log_and_error("Some of the shapefiles in the reference points CSV are not in the file_mapper. Please check the file or update the file_mapper.", ValueError, logger)
         
         if any([x[0] is None or x[1] is None for x in file_mapper.values()]):
             print("\n=== File mapper association ===")
@@ -192,7 +191,7 @@ def main(
                     if src_ext == '':
                         src_ext = DEFAULT_VECTORIAL_EXTENSION
                     elif src_ext not in SUPPORTED_FILE_TYPES['vectorial']:
-                        raise ValueError(f"Invalid extension for shapefile [{src_shp}]. Must be one of: {SUPPORTED_FILE_TYPES['vectorial']}.")
+                        log_and_error(f"Invalid extension for shapefile [{src_shp}]. Must be one of: {SUPPORTED_FILE_TYPES['vectorial']}.", ValueError, logger)
                     
                     src_shp_w_ext = f"{src_shp}{src_ext}" if not src_shp.endswith(src_ext) else src_shp
                     file_mapper[src_shp][0] = select_file_prompt(

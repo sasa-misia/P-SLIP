@@ -2,23 +2,16 @@
 import os
 import sys
 import argparse
-import warnings
 import numpy as np
 import pandas as pd
 from functools import lru_cache
 from collections import deque
+
 try:
-    import pyarrow.parquet as pq
-    import pyarrow as pa
-    PARQUET_AVAILABLE = True
+    import joblib
+    JOBLIB_AVAILABLE = True
 except ImportError:
-    PARQUET_AVAILABLE = False
-    warnings.warn("PyArrow not available; falling back to CSV for incremental save.", stacklevel=2)
-try:
-    import psutil
-    MEMORY_MONITORING = True
-except ImportError:
-    MEMORY_MONITORING = False
+    JOBLIB_AVAILABLE = False
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -45,13 +38,14 @@ from psliptools.utilities import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_warning, log_and_error, memory_report, get_hardware_info
 from main_modules.m05a_reference_points_info import convert_abg_and_ref_points_to_prj
 logger = setup_logger(__name__)
 logger.info("=== Landslide paths creation ===")
 
 # %% === Helper functions and global variables
-MAXIMUM_COMPATIBLE_PATHS = 2000000
+current_tot_ram = get_hardware_info()['ram']
+MAXIMUM_COMPATIBLE_PATHS = int(1700000 / 19.76 * current_tot_ram) if current_tot_ram > 0 else 1700000 # Tested on 19.76 (~24 - 4 GB for iGPU) GB RAM mini pc and handled up to 1700000 paths
 VARIABLE_FILENAME = "landslide_paths_vars.pkl"
 POSSIBLE_METHODS = ['gradient', 'd8-flow', 'slope-compatible']
 POSSIBLE_FLOW_SENSES = ['upstream', 'downstream']
@@ -79,11 +73,11 @@ def get_starting_points(
         raw_df = read_generic_csv(file_path)
     elif starting_source == 'landslides_dataset':
         raw_df = env.load_variable(variable_filename='landslides_vars.pkl')
-        raise NotImplementedError("landslides_dataset starting_source is not implemented yet.")
+        log_and_error("landslides_dataset starting_source is not implemented yet.", NotImplementedError, logger)
     elif starting_source == 'potential_landslides':
-        raise NotImplementedError("potential_landslides starting_source is not implemented yet.")
+        log_and_error("potential_landslides starting_source is not implemented yet.", NotImplementedError, logger)
     else:
-        raise ValueError(f"Unknown starting_source: {starting_source}")
+        log_and_error(f"Unknown starting_source: {starting_source}", ValueError, logger)
     
     starting_points_df = raw_df[[id_column, x_column, y_column]].copy().reset_index(drop=True)
     
@@ -142,7 +136,7 @@ def generate_steepsets_path(
                 direction_x = grad_x
                 direction_y = grad_y
             else:
-                raise ValueError(f"Unknown flow type: {flow}")
+                log_and_error(f"Unknown flow type: {flow}", ValueError, logger)
             
             # Update position with learning rate (step_size)
             curr_x = curr_x + 10 * dx * step_size * direction_x # 10 is just a learning rate to speed up the process
@@ -216,7 +210,7 @@ def generate_steepsets_path(
             elif flow == 'upstream':
                 best_idx = np.argmax(slopes)  # Steepest ascent
             else:
-                raise ValueError(f"Unknown flow type: {flow}")
+                log_and_error(f"Unknown flow type: {flow}", ValueError, logger)
             
             next_row, next_col = neighbors[best_idx]
             slope = slopes[best_idx]
@@ -234,7 +228,7 @@ def generate_steepsets_path(
                     stop_reason = STOP_REASONS['opposite']
                     break
         else:
-            raise ValueError(f"Unknown method: {method}")
+            log_and_error(f"Unknown method: {method}", ValueError, logger)
         
         # --- Check stopping criteria
         if (next_row, next_col) in path_2D_idx_list: # Check for loop (bouncing back and forth)
@@ -329,7 +323,7 @@ def generate_slope_compatible_paths(
 
         # Early check for max paths to avoid unnecessary computations
         if len(paths) + len(stack) >= maximum_paths:
-            warnings.warn(f"Maximum paths limit exceeded! Completed paths: {len(paths)}, remaining paths to explore: {len(stack)}. Stopping exploration...", stacklevel=2)
+            log_and_warning(f"Maximum paths limit exceeded! Completed paths: {len(paths)}, remaining paths to explore: {len(stack)}. Stopping exploration...", stacklevel=2, logger=logger)
             for coord, idx, steps, _, dev, valid in stack:
                 paths.append((np.array(coord), np.array(idx), steps, STOP_REASONS['max_paths'], np.array(dev), np.array(valid)))
             if verbose:
@@ -372,7 +366,7 @@ def generate_slope_compatible_paths(
             else:
                 low_mask = (slopes < min_slope) & (slopes >= 0)
         else:
-            raise ValueError(f"Invalid flow sense: {flow}")
+            log_and_error(f"Invalid flow sense: {flow}", ValueError, logger)
 
         compatible_mask = valid_mask | low_mask # NOTE: not compatible_mask represents neighbors with the opposite flow with sloped terrain (greater than min_slope and in opposite flow direction)
 
@@ -397,7 +391,7 @@ def generate_slope_compatible_paths(
         if (slopes_df.index == ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']).all():
             directions = np.array([0, 45, 90, 135, 180, 225, 270, 315])
         else:
-            raise ValueError(f"Invalid slope directions: {slopes_df.index}")
+            log_and_error(f"Invalid slope directions: {slopes_df.index}", ValueError, logger)
 
         curr_row_col_set = set(curr_idx)  # Faster lookup for loops
         for i in np.where(compatible_mask)[0]: # Only iterate over compatible neighbors
@@ -440,8 +434,8 @@ def generate_slope_compatible_paths(
 
 # %% === Main function
 def main(
-        base_dir: str=None,
-        gui_mode: bool=False,
+        base_dir: str=None, # Base directory for the analysis
+        gui_mode: bool=False, # Run in GUI mode
         method: str='gradient', # 'gradient', 'd8-flow', 'slope-compatible'
         flow_sense: str='upstream', # 'upstream', 'downstream'
         starting_source: str='reference_points', # 'reference_points', 'landslides_dataset', 'potential_landslides'
@@ -453,38 +447,40 @@ def main(
         add_to_existing_paths: bool=True, # Add to existing paths (file in variables folder)
         min_realism_score: float=None, # Optional: Minimum realism score to keep paths (filters out low-score paths early)
         max_paths_per_start: int=None, # Optional: Maximum paths per starting point (keeps top-N by score)
-        incremental_save: bool=True # Save batches to disk incrementally to reduce memory
+        incremental_save: bool=False, # Save batches to disk incrementally to reduce memory, definitely slower but helpful with memory issues
+        cleanup_temp_files: bool=False, # Delete temporary files after completion (only in case of incremental_save)
+        early_filter_paths: bool=False # Filter paths also during creation, at an early stage. It can be helpful in case of memory issues, but you loose some paths
     ) -> dict[str, object]:
     """Main function to create landslide paths."""
 
     # Input validation
     if method not in POSSIBLE_METHODS:
-        raise ValueError(f"Invalid method: {method}. Must be one of {POSSIBLE_METHODS}.")
+        log_and_error(f"Invalid method: {method}. Must be one of {POSSIBLE_METHODS}.", ValueError, logger)
     if flow_sense not in POSSIBLE_FLOW_SENSES:
-        raise ValueError(f"Invalid flow_sense: {flow_sense}. Must be one of {POSSIBLE_FLOW_SENSES}.")
+        log_and_error(f"Invalid flow_sense: {flow_sense}. Must be one of {POSSIBLE_FLOW_SENSES}.", ValueError, logger)
     if starting_source not in POSSIBLE_STARTING_SOURCES:
-        raise ValueError(f"Invalid starting_source: {starting_source}. Must be one of {POSSIBLE_STARTING_SOURCES}.")
+        log_and_error(f"Invalid starting_source: {starting_source}. Must be one of {POSSIBLE_STARTING_SOURCES}.", ValueError, logger)
     if step_size <= 0:
-        raise ValueError("step_size must be positive.")
+        log_and_error("step_size must be positive.", ValueError, logger)
     if not isinstance(max_steps, int) or max_steps < min_steps:
-        raise ValueError("max_steps must be integer and >= min_steps.")
+        log_and_error("max_steps must be integer and >= min_steps.", ValueError, logger)
     if not isinstance(min_steps, int) or min_steps <= 0:
-        raise ValueError("min_steps must be positive and integer.")
+        log_and_error("min_steps must be positive and integer.", ValueError, logger)
     if min_slope_degrees <= 0:
-        raise ValueError("min_slope_degrees must be positive.")
+        log_and_error("min_slope_degrees must be positive.", ValueError, logger)
     if not isinstance(invalid_steps_tolerance, int) or invalid_steps_tolerance < 0:
-        raise ValueError("invalid_steps_tolerance must be non-negative and integer.")
+        log_and_error("invalid_steps_tolerance must be non-negative and integer.", ValueError, logger)
     if min_realism_score is not None and (min_realism_score < 0 or min_realism_score > 100):
-        raise ValueError("min_realism_score must be between 0 and 100 if provided.")
+        log_and_error("min_realism_score must be between 0 and 100 if provided.", ValueError, logger)
     if max_paths_per_start is not None and (not isinstance(max_paths_per_start, int) or max_paths_per_start <= 0):
-        raise ValueError("max_paths_per_start must be positive and integer, if provided.")
+        log_and_error("max_paths_per_start must be positive and integer, if provided.", ValueError, logger)
+    
+    if incremental_save:
+        TEMP_DIR = os.path.join(env.folders['variables']['path'], 'temp')
+        os.makedirs(TEMP_DIR, exist_ok=True)  # Ensure temp dir exists
     
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
-
-    TEMP_DIR = os.path.join(env.folders['variables']['path'], 'temp')
-    if incremental_save:
-        os.makedirs(TEMP_DIR, exist_ok=True)  # Ensure temp dir exists
 
     dtm_vars = env.load_variable(variable_filename='dtm_vars.pkl')
 
@@ -517,7 +513,7 @@ def main(
         curr_sett_id = list(landslide_paths_settings.keys())[list(landslide_paths_settings.values()).index(curr_lnd_paths_settings)]
 
     if gui_mode:
-        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError)
     else:
         if starting_source == 'reference_points':
             print("\n=== Reference points file selection ===")
@@ -527,11 +523,11 @@ def main(
                 src_ext=SUPPORTED_FILE_TYPES['table']
             )
         elif starting_source == 'landslides_dataset':
-            raise NotImplementedError("landslides_dataset starting_source is not implemented yet.")
+            log_and_error("landslides_dataset starting_source is not implemented yet.", NotImplementedError)
         elif starting_source == 'potential_landslides':
-            raise NotImplementedError("potential_landslides starting_source is not implemented yet.")
+            log_and_error("potential_landslides starting_source is not implemented yet.", NotImplementedError)
         else:
-            raise ValueError(f"Unknown starting_source: {starting_source}")
+            log_and_error(f"Unknown starting_source: {starting_source}", ValueError)
 
     # Get starting points
     logger.info(f"Loading starting points from {source_path}")
@@ -554,11 +550,15 @@ def main(
         skip_out_of_bbox=True,
         fill_value=np.nan
     )
+
+    if incremental_save and len(starting_points_df) >= 1000:
+        log_and_error("Number of starting points exceeds 3 digits. Please disable incremental_save mode or contact the developer.", ValueError, logger)
     
     # Generate paths
     logger.info("Generating paths...")
     gen_paths_dict_list = []  # Keep small; reset per batch
     temp_file_counter = 0
+    path_id_counter = len(landslide_paths_df)  # Global counter for unique path_id
     for r, sp_row in starting_points_df.iterrows():
         sp_count_str = f"{r} of {len(starting_points_df)}"
         curr_dtm, curr_1d_idx, curr_dist_to_grid_point = ref_points_dtm[r], ref_points_1d_idx[r], ref_points_dist_to_grid[r]
@@ -622,6 +622,7 @@ def main(
             if len(compatible_paths) >= MAXIMUM_COMPATIBLE_PATHS:
                 logger.warning(f"Number of paths is greater than maximum allowed for starting point {sp_count_str} {sp_ref_str}. Paths exploration was stopped and only the first {MAXIMUM_COMPATIBLE_PATHS} paths will be used.")
         
+        memory_report(logger)
         logger.info(f"Filtering paths for starting point {sp_count_str} {sp_ref_str} ...")
 
         # Collect all path_prj_coords for batch conversion
@@ -677,14 +678,15 @@ def main(
                 elif stop_reason in [STOP_REASONS['complete']]:
                     stop_penalty = 0
                 else:
-                    raise ValueError(f"Not implemented stop reason in penalty: {stop_reason}")
+                    log_and_error(f"Not implemented stop reason in penalty: {stop_reason}", ValueError)
+                
                 avg_slope = np.mean(path_step_slope_degrees) if len(path_step_slope_degrees) > 0 else 0
                 average_slope_penalty = min(60, max(0, (min_slope_degrees - abs(avg_slope)) * 5)) # Penalize if average slope is below min. Each degree of difference (below min) is 5 points, maximum penalty is 60 points
                 avg_deviation = np.mean(step_deviation) if len(step_deviation) > 0 else 0 # it can be at max 4
                 realism_score = max(0, (valid_steps_ratio * 90) + min(path_length / 5, 10) - (stop_penalty * 2) - (avg_deviation * 5) - average_slope_penalty) # Maximum score is 100 (because (valid_steps_ratio * 90) + min(path_length / 5, 10) is at max 100), min score is 0 (if first part is below 100, then the penalties can make it below 0)
                 
                 # Early filtering: check min_realism_score and collect only if passes
-                if min_realism_score is not None and realism_score < min_realism_score:
+                if early_filter_paths and min_realism_score is not None and realism_score < min_realism_score:
                     pass # Skip to next path
                 else:
                     # Extract geo coords from batch conversion
@@ -696,7 +698,7 @@ def main(
                     path_geo_coords[:, 1] = path_lat
                     
                     filtered_paths.append({
-                        'path_id': f"PLP_{len(landslide_paths_df) + len(gen_paths_dict_list) + len(filtered_paths)}", # Potential Landslide Path PLP
+                        'path_id': f"PLP_{path_id_counter}", # Use global counter for unique path_id. PLP = Potential Landslides Path
                         'starting_source': starting_source,
                         'starting_point_id': sp_id,
                         'path_realism_score': realism_score,
@@ -713,10 +715,12 @@ def main(
                         'path_step_validity': step_validity
                     })
 
-                path_counter += 1 # Must be out of if/else block above, because it's very important in both cases (when it passes the early filtering or not) because it keeps track of the path index
+                    path_id_counter += 1  # Increment counter after adding each path to ensure unique IDs
+
+                path_counter += 1 # Must be out of if/else block above, because it's very important in both cases (wheter it passes or not the early filter) because it keeps track of the path index
         
         # Limit paths per starting point if specified
-        if max_paths_per_start is not None and len(filtered_paths) > max_paths_per_start:
+        if early_filter_paths and max_paths_per_start is not None and len(filtered_paths) > max_paths_per_start:
             filtered_paths = sorted(filtered_paths, key=lambda x: x['path_realism_score'], reverse=True)[:max_paths_per_start]
             logger.info(f"Limited to top {max_paths_per_start} paths by realism score for starting point {sp_count_str} {sp_ref_str} ...")
 
@@ -726,27 +730,59 @@ def main(
             batch_df['setting_id'] = curr_sett_id  # Add setting_id here
             gen_paths_dict_list.extend(filtered_paths)  # For final concat if not incremental
 
+            logger.info(f"Saving batch {temp_file_counter}, with {len(filtered_paths)} paths for starting point {sp_count_str} {sp_ref_str} ...")
             if incremental_save:
-                temp_file = os.path.join(TEMP_DIR, f"{VARIABLE_FILENAME}_temp_{temp_file_counter:03d}.parquet")
-                batch_df.to_parquet(temp_file, engine='pyarrow', compression='snappy')  # Snappy for speed
+                if JOBLIB_AVAILABLE and max_steps > 5000: # For large arrays, it could be better to use joblib
+                    temp_file = os.path.join(TEMP_DIR, f"{VARIABLE_FILENAME}_temp_{temp_file_counter:03d}.jbl")
+                    joblib.dump(batch_df, temp_file, compress=3) # Use joblib with compression
+                else:
+                    temp_file = os.path.join(TEMP_DIR, f"{VARIABLE_FILENAME}_temp_{temp_file_counter:03d}.pkl")
+                    batch_df.to_pickle(temp_file, compression='gzip') # Use Pandas to_pickle with gzip compression
                 temp_file_counter += 1
                 logger.info(f"Saved batch to temp file: {temp_file} ...")
-                if MEMORY_MONITORING:
-                    mem = psutil.virtual_memory()
-                    logger.info(f"Memory usage: {mem.percent}% ({mem.used / 1024**3:.2f} GB used) ...")
+                memory_report(logger)
+
+                # Clear memory-intensive variables after saving batch
+                del filtered_paths, batch_df, compatible_paths, all_path_prj_coords, path_indices, all_coords, all_lon, all_lat
+                gen_paths_dict_list.clear()  # Reset since data is saved to disk
+            else:
+                memory_report(logger)
+                pass # If not incremental save, keep gen_paths_dict_list for later concat. NOTE: High memory usage
 
     # Final concatenation
     if incremental_save:
-        # Concatenate from temp files without loading all into memory
-        temp_files = [os.path.join(TEMP_DIR, f) for f in os.listdir(TEMP_DIR) if (f.startswith(f"{VARIABLE_FILENAME}_temp_") and f.endswith('.parquet'))]
+        logger.info(f"Starting final concatenation of temp files...")
+        memory_report(logger)
+
+        temp_files_jbl = [os.path.join(TEMP_DIR, f) for f in os.listdir(TEMP_DIR) if f.startswith(f"{VARIABLE_FILENAME}_temp_") and f.endswith('.jbl')]
+        temp_files_pkl = [os.path.join(TEMP_DIR, f) for f in os.listdir(TEMP_DIR) if f.startswith(f"{VARIABLE_FILENAME}_temp_") and f.endswith('.pkl')]
+        temp_files = temp_files_jbl + temp_files_pkl
         if temp_files:
-            curr_paths_df = pd.concat((pd.read_parquet(f) for f in temp_files), ignore_index=True)
-            # Clean up temp files
-            for f in temp_files:
-                os.remove(f)
-            os.rmdir(TEMP_DIR)
-        else:
             curr_paths_df = pd.DataFrame()
+            for f in temp_files:
+                logger.info(f"Reading temp file: {f} ...")
+                if f.endswith('.jbl'):
+                    curr_loaded_df = joblib.load(f) # Load with joblib
+                elif f.endswith('.pkl'):
+                    curr_loaded_df = pd.read_pickle(f, compression='gzip')  # Load Pickle with gzip
+                else:
+                    log_and_error(f"Unknown file type for temp file: {f}", ValueError)
+                
+                # Filter paths
+                if min_realism_score is not None:
+                    curr_loaded_df = curr_loaded_df[curr_loaded_df['path_realism_score'] >= min_realism_score]
+                if max_paths_per_start is not None:
+                    curr_loaded_df.sort_values(by='path_realism_score', ascending=False, inplace=True).reset_index(drop=True, inplace=True)
+                    curr_loaded_df = curr_loaded_df[:max_paths_per_start]
+                
+                curr_paths_df = pd.concat([curr_paths_df, curr_loaded_df], ignore_index=True)
+                memory_report(logger)
+            if cleanup_temp_files: # Clean up temp files
+                for f in temp_files:
+                    os.remove(f)
+                os.rmdir(TEMP_DIR)
+        else:
+            log_and_error(f"No temp files found, please check if they exist and that names are correct (e.g. [{VARIABLE_FILENAME}_temp_*.jbl or *.pkl])", ValueError)
     else:
         curr_paths_df = pd.DataFrame(gen_paths_dict_list)
     
@@ -768,7 +804,7 @@ def main(
 
 # %% === Command line interface
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="**********Summary of the module**********")
+    parser = argparse.ArgumentParser(description="Generate landslide paths (steepests or slope-compatible).")
     parser.add_argument("--base_dir", type=str, help="Base directory for analysis")
     parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode")
     parser.add_argument("--method", type=str, default='gradient', help="Path generation method (gradient, d8-flow, slope-compatible)")
@@ -778,10 +814,12 @@ if __name__ == "__main__":
     parser.add_argument("--min_steps", type=int, default=2, help="Minimum number of steps for the generated path")
     parser.add_argument("--min_slope_degrees", type=float, default=5, help="Minimum slope in degrees for the generated path")
     parser.add_argument("--invalid_steps_tolerance", type=int, default=1, help="Tolerance for invalid consecutive steps in the generated path")
-    parser.add_argument("--add_to_existing_paths", action="store_true", help="Add generated paths to existing landslide paths")
+    parser.add_argument("--add_to_existing_paths", action="store_true", help="Add generated paths to existing landslide paths (in variables folder)")
     parser.add_argument("--min_realism_score", type=float, help="Optional: Minimum realism score to keep paths")
     parser.add_argument("--max_paths_per_start", type=int, help="Optional: Maximum paths per starting point")
     parser.add_argument("--incremental_save", action="store_true", default=True, help="Save batches to disk incrementally")
+    parser.add_argument("--cleanup_temp_files", action="store_true", default=True, help="Clean up temp files after concatenation")
+    parser.add_argument("--early_filter_paths", action="store_true", default=True, help="Early filter paths based on score or maximum paths per starting point")
     
     args = parser.parse_args()
     
@@ -798,5 +836,7 @@ if __name__ == "__main__":
         add_to_existing_paths=args.add_to_existing_paths,
         min_realism_score=args.min_realism_score,
         max_paths_per_start=args.max_paths_per_start,
-        incremental_save=args.incremental_save
+        incremental_save=args.incremental_save,
+        cleanup_temp_files=args.cleanup_temp_files,
+        early_filter_paths=args.early_filter_paths
     )

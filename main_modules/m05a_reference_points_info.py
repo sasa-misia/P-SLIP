@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import sys
 import argparse
-import warnings
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -34,7 +33,7 @@ from psliptools.scattered import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, log_and_warning
 logger = setup_logger(__name__)
 logger.info(f"=== Obtain reference points info ===")
 
@@ -56,7 +55,7 @@ def get_paths_and_shapes(
         match_indices = [i for i, setting in enumerate(env.config['inputs'][poly_type]) 
                             if setting['settings']['source_subtype'] == poly_subtype]
         if len(match_indices) > 1:
-            raise ValueError(f"Multiple matches found for poly_subtype '{poly_subtype}' in inputs configuration.")
+            log_and_error(f"Multiple matches found for poly_subtype '{poly_subtype}' in inputs configuration.", ValueError, logger)
         elif len(match_indices) == 1:
             parameters_csv_path.append(os.path.join(env.folders['user_control']['path'], 
                                                     env.config['inputs'][poly_type][match_indices[0]]['settings']['parameter_filename']))
@@ -76,7 +75,7 @@ def get_morphology_grids(
     ) -> dict[str, list[np.ndarray]]:
     """Helper function to get morphology grids"""
     if not all([x in MORPHOLOGY_NAMES for x in selected_morphology]):
-        raise ValueError(f"Please select one or more of the following morphologies: {MORPHOLOGY_NAMES}")
+        log_and_error(f"Please select one or more of the following morphologies: {MORPHOLOGY_NAMES}", ValueError, logger)
     
     dtm_df = env.load_variable(variable_filename='dtm_vars.pkl')['dtm']
     angles_df = env.load_variable(variable_filename='morphology_vars.pkl')['angles']
@@ -112,7 +111,7 @@ def get_parameters_grids(
     ) -> dict[str, list[np.ndarray]]:
     """Helper function to get parameters grids"""
     if not all([x in PARAMETER_NAMES for x in selectd_parameters]):
-        raise ValueError(f"Please select one or more of the following parameters: {PARAMETER_NAMES}")
+        log_and_error(f"Please select one or more of the following parameters: {PARAMETER_NAMES}", ValueError, logger)
     
     par_grids = {par: [] for par in selectd_parameters}
     for par in par_grids.keys():
@@ -135,7 +134,7 @@ def get_time_sensitive_dict(
     ) -> dict[str, pd.DataFrame]:
     """Helper function to get time sensitive options"""
     if not all([x in TIME_SENSITIVE_NAMES for x in sel_ts_opts]):
-        raise ValueError(f"Please select one or more of the following time sensitive options: {TIME_SENSITIVE_NAMES}")
+        log_and_error(f"Please select one or more of the following time sensitive options: {TIME_SENSITIVE_NAMES}", ValueError, logger)
     
     ts_dict = {ts: [] for ts in sel_ts_opts}
     for ts in sel_ts_opts:
@@ -143,7 +142,7 @@ def get_time_sensitive_dict(
             sta_df = env.load_variable(variable_filename='rain_recordings_vars.pkl')['stations']
             ts_dict[ts] = sta_df
         else:
-            raise ValueError(f"{ts} not recognized as a valid time sensitive option during extracion of sations.")
+            log_and_error(f"{ts} not recognized as a valid time sensitive option during extracion of sations.", ValueError, logger)
     
     return ts_dict
 
@@ -233,7 +232,7 @@ def update_reference_points_csv(
     """Helper function to update reference points csv"""
     ref_points_df = pd.read_csv(ref_points_csv_path)
     if ref_points_df.empty:
-        raise ValueError(f"Reference points CSV ({ref_points_csv_path}) is empty. Please check the file.")
+        log_and_error(f"Reference points CSV ({ref_points_csv_path}) is empty. Please check the file.", ValueError, logger)
     
     abg_prj_df, ref_points_prj_df, prj_epsg_code = convert_abg_and_ref_points_to_prj(
         abg_df=abg_df, 
@@ -257,7 +256,7 @@ def update_reference_points_csv(
     for i, row_ref_prj_pnt in ref_points_prj_df.iterrows():
         curr_sel_dtm, curr_sel_1d_idx, curr_dist_to_grid_point = sel_dtm[i], sel_1d_idx[i], dist_to_grid_point[i]
         if np.isnan(curr_sel_1d_idx):
-            warnings.warn(f"No match found for point {i} (lon={ref_points_df.loc[i,'lon']}, lat={ref_points_df.loc[i,'lat']}). Nearest DTM is {curr_sel_dtm}.", stacklevel=2)
+            log_and_warning(f"No match found for point {i} (lon={ref_points_df.loc[i,'lon']}, lat={ref_points_df.loc[i,'lat']}). Nearest DTM is {curr_sel_dtm}.", stacklevel=2, logger=logger)
             continue
         else:
             curr_sel_dtm = int(curr_sel_dtm)

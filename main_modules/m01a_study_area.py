@@ -38,7 +38,7 @@ from psliptools.rasters import (
 )
 
 # Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error
 logger = setup_logger(__name__)
 logger.info("=== Import or Create Study Area ===")
 
@@ -115,8 +115,8 @@ def get_proj_epsg_and_add_prj_coords_to_df(
     proj_epsg = get_projected_epsg_code_from_bbox(geo_bbox=landslides_bbox)
 
     if get_unit_of_measure_from_epsg(proj_epsg) != "meter":
-        raise ValueError("The projection EPSG code must be in meters.")
-
+        log_and_error("The projection EPSG code must be in meters.", ValueError, logger)
+    
     dataframe['prj_x'], dataframe['prj_y'] = convert_coords(
         crs_in=input_crs, # Because lon and lat were given
         crs_out=proj_epsg,
@@ -173,7 +173,7 @@ def main(
     ) -> dict[str, object]:
     """Main function to define the study area."""
     if not source_mode in SOURCE_MODE_ALLOWED:
-        raise ValueError("Invalid source mode. Must be one of: " + ", ".join(SOURCE_MODE_ALLOWED))
+        log_and_error("Invalid source mode. Must be one of: " + ", ".join(SOURCE_MODE_ALLOWED), ValueError, logger)
     
     source_type = 'study_area'
 
@@ -185,7 +185,7 @@ def main(
 
     # --- User choices section ---
     if gui_mode:
-        raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
+        log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
     else:
         if source_mode == 'user_bbox': # === User bounding box ===
             n_rectangles = int(input("How many bounding boxes? [1]: ") or "1")
@@ -222,24 +222,27 @@ def main(
                 src_ext=SUPPORTED_FILE_TYPES['table']
             )
         else:
-            raise ValueError(f"Invalid source mode: {source_mode}")
+            log_and_error(f"Invalid source mode: {source_mode}", ValueError, logger)
     
     if source_mode == 'user_bbox':
         study_area_vars = define_study_area_from_user_bbox(rec_polys)
+        logger.info("Study area defined from user bounding box.")
     elif source_mode == 'geo_file':
         study_area_vars = define_study_area_from_geo_file(
             file_path=source_path, 
             field=source_field, 
             attributes=source_attributes
         )
+        logger.info("Study area defined from geo file.")
     elif source_mode == 'reference_points':
         study_area_vars = define_study_area_from_reference_points(
             file_path=source_path, 
             point_buffer=point_buffer, 
             point_buffer_type=point_buffer_type
         )
+        logger.info("Study area defined from reference points.")
     else:
-        raise ValueError(f"Invalid source mode: {source_mode}")
+        log_and_error(f"Invalid source mode: {source_mode}", ValueError, logger)
 
     env.config['inputs'][source_type][0]['settings'] = {
         'source_mode': source_mode,
