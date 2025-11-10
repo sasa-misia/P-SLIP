@@ -411,6 +411,14 @@ class AnalysisEnvironment:
         # Ensure config is always a dict (deepcopy for safety)
         if not hasattr(self, 'config') or self.config is None or not isinstance(self.config, dict):
             self.config = copy.deepcopy(ANALYSIS_CONFIGURATION)
+    
+    # Method to return a string representation of the AnalysisEnvironment instance
+    def __str__(self):
+        """
+        Return a string representation of the AnalysisEnvironment instance,
+        formatted as indented JSON for readability.
+        """
+        return json.dumps(self.__dict__, indent=4, default=str)
 
     # Method to save the environment to a JSON file
     def to_json(

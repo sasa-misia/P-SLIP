@@ -475,12 +475,12 @@ def main(
     if max_paths_per_start is not None and (not isinstance(max_paths_per_start, int) or max_paths_per_start <= 0):
         log_and_error("max_paths_per_start must be positive and integer, if provided.", ValueError, logger)
     
+    # Get the analysis environment
+    env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
+
     if incremental_save:
         TEMP_DIR = os.path.join(env.folders['variables']['path'], 'temp')
         os.makedirs(TEMP_DIR, exist_ok=True)  # Ensure temp dir exists
-    
-    # Get the analysis environment
-    env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
 
     dtm_vars = env.load_variable(variable_filename='dtm_vars.pkl')
 
@@ -770,13 +770,18 @@ def main(
                 
                 # Filter paths
                 if min_realism_score is not None:
-                    curr_loaded_df = curr_loaded_df[curr_loaded_df['path_realism_score'] >= min_realism_score]
+                    min_rl_scr_mask = curr_loaded_df['path_realism_score'] >= min_realism_score
+                    curr_loaded_df = curr_loaded_df[min_rl_scr_mask]
+                    logger.info(f"Filtered out {len(curr_loaded_df) - min_rl_scr_mask.sum()} paths with realism score below {min_realism_score} in temp file {f} ...")
                 if max_paths_per_start is not None:
-                    curr_loaded_df.sort_values(by='path_realism_score', ascending=False, inplace=True).reset_index(drop=True, inplace=True)
-                    curr_loaded_df = curr_loaded_df[:max_paths_per_start]
+                    curr_loaded_df.sort_values(by='path_realism_score', ascending=False, inplace=True)
+                    curr_loaded_df.reset_index(drop=True, inplace=True)
+                    logger.info(f"Filtered out {len(curr_loaded_df) - max_paths_per_start} paths with lower realism score in temp file {f} ...")
+                    curr_loaded_df = curr_loaded_df.iloc[:max_paths_per_start]
                 
                 curr_paths_df = pd.concat([curr_paths_df, curr_loaded_df], ignore_index=True)
                 memory_report(logger)
+            
             if cleanup_temp_files: # Clean up temp files
                 for f in temp_files:
                     os.remove(f)
