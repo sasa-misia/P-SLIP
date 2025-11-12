@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-Module for creating the folder structure for the analysis.
+Module to define and initialize an analysis environment of P-SLIP platform.
+Creator and developer: Salvatore Misiano, 2025 - https://github.com/sasa-misia
 """
 
-#%% Import necessary modules
+# %% === Import necessary modules ===
 import os
 import re
 import platform
@@ -18,16 +19,21 @@ import gzip
 import bz2
 import logging
 import logging.handlers
-import numpy as np
-import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, field
 
+# Import libraries that are not part of the standard library
 try:
     import psutil
     SYSTEM_SPECS_AVAILABLE = True
 except ImportError:
     SYSTEM_SPECS_AVAILABLE = False
+
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
 
 GPU_SPECS_AVAILABLE = False # TODO: Implement libraries to obtain GPU specs
 
@@ -50,6 +56,7 @@ from .default_params import (
     LOG_CONFIG
 )
 
+# Import version writer
 from .version_writer import (
     get_app_version
 )
@@ -326,9 +333,15 @@ def _create_inputs_csv(inp_csv_base_dir: str) -> str:
         str: Path to the created CSV file.
     """
     logger = logging.getLogger(__name__)
+    logger.info(f"Creating input CSV in: {inp_csv_base_dir}")
+
+    if not PANDAS_AVAILABLE:
+        logger.error("Pandas is required but not available.")
+        raise ImportError("Pandas is required but not available.")
     if not os.path.exists(inp_csv_base_dir):
         logger.error(f"The specified input CSV base directory does not exist: {inp_csv_base_dir}")
         raise FileNotFoundError(f"The specified input CSV base directory does not exist: {inp_csv_base_dir}")
+    
     inp_csv_path = os.path.join(inp_csv_base_dir, RAW_INPUT_FILENAME)
     input_files_df = pd.DataFrame(columns=RAW_INPUT_CSV_COLUMNS)
     input_files_df.to_csv(inp_csv_path, index=False)
@@ -347,6 +360,10 @@ def _check_inputs_csv(inp_csv_path: str) -> bool:
     """
     logger = logging.getLogger(__name__)
     logger.info(f"Checking input files CSV: {inp_csv_path}")
+
+    if not PANDAS_AVAILABLE:
+        logger.error("Pandas is required but not available.")
+        raise ImportError("Pandas is required but not available.")
 
     inp_csv_base_dir = os.path.dirname(inp_csv_path)
 
@@ -709,6 +726,10 @@ class AnalysisEnvironment:
         logger = logging.getLogger(__name__)
         logger.info("Collecting input files from the input files CSV and copying them to the input directory...")
 
+        if not PANDAS_AVAILABLE:
+            logger.error("Pandas is required but not available.")
+            raise ImportError("Pandas is required but not available.")
+
         input_dir = self.folders['inputs']['path']
         inp_csv_path = os.path.join(input_dir, RAW_INPUT_FILENAME)
         if not os.path.exists(inp_csv_path):
@@ -737,7 +758,7 @@ class AnalysisEnvironment:
             
             df_filter = inp_files_df['custom_id'].isin(file_custom_id)
         else:
-            df_filter = np.ones(len(inp_files_df), dtype=bool)
+            df_filter = pd.Series([True] * len(inp_files_df), index=inp_files_df.index)
 
             if file_type:
                 if not isinstance(file_type, list):
@@ -808,6 +829,10 @@ class AnalysisEnvironment:
         logger = logging.getLogger(__name__)
         logger.info("Generating default CSV files in the user control directory...")
 
+        if not PANDAS_AVAILABLE:
+            logger.error("Pandas is required but not available.")
+            raise ImportError("Pandas is required but not available.")
+
         def_std_cls_filename = os.path.join(self.folders['user_control']['path'], STANDARD_CLASSES_FILENAME)
         pd.DataFrame(DEFAULT_STANDARD_CLASSES).to_csv(
             def_std_cls_filename,
@@ -862,6 +887,10 @@ def create_analysis_environment(base_dir: str, case_name: str = None) -> Analysi
     logger = logging.getLogger(__name__)
     logger.info(f"Start creating environment in: {base_dir}")
 
+    if not PANDAS_AVAILABLE:
+        logger.error("Pandas is required but not available.")
+        raise ImportError("Pandas is required but not available.")
+
     if not os.path.isdir(base_dir):
         raise ValueError(f"The specified base directory does not exist: {base_dir}")
 
@@ -907,6 +936,10 @@ def get_analysis_environment(base_dir: str) -> AnalysisEnvironment:
 
     logger = logging.getLogger(__name__)
     logger.info(f"Start loading environment from: {base_dir}")
+
+    if not PANDAS_AVAILABLE:
+        logger.error("Pandas is required but not available.")
+        raise ImportError("Pandas is required but not available.")
 
     if base_dir is None:
         raise ValueError("base_dir must be provided to load an existing analysis environment.")
