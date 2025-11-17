@@ -1,10 +1,11 @@
 # %% === Import necessary modules
-import os
-import sys
 import argparse
 import pandas as pd
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Importing necessary modules from main_modules
+from m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error
+logger = setup_logger(__name__)
+logger.info("=== Import or Create Study Area ===")
 
 # Importing necessary modules from config
 from config import (
@@ -36,11 +37,6 @@ from psliptools.rasters import (
     convert_coords,
     get_unit_of_measure_from_epsg
 )
-
-# Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error
-logger = setup_logger(__name__)
-logger.info("=== Import or Create Study Area ===")
 
 # %% === Helper functions and global variables
 REM_POLY_DF = pd.DataFrame(columns=['type', 'subtype', 'class_name', 'geometry']) # Empty DataFrame for removed areas

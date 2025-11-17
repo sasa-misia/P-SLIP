@@ -1,6 +1,7 @@
 # %% ===  Import necessary modules
 import os
 import chardet
+import csv
 import pandas as pd
 
 # %% === Function to check if a path is relative to a base directory
@@ -347,13 +348,61 @@ def rename_csv_header(
     
 # %% === Function to read a CSV file with the more comprehensive pandas read_csv function
 def read_generic_csv(
-        csv_path: str
+        csv_path: str,
+        sep: str=None,
+        regular: bool=True
     ) -> pd.DataFrame:
+    """
+    Read a CSV file with the more comprehensive pandas read_csv function.
+    
+    Args:
+        csv_path (str): Path to the CSV file.
+        sep (str): The separator character to use. If not provided, it will be detected.
+        regular (bool): Regular means that the csv is consistent in rows and columns (no invalid rows or rows with less columns). 
+            If True, use the regular pandas read_csv function. If False, use the more 
+            comprehensive read_csv function, but header will not be detected.
+            In case of errors, switch to False this option.
+    
+    Returns:
+        pd.DataFrame: The DataFrame read from the CSV file.
+    """
+    # Detect encoding
     with open(csv_path, 'rb') as f:
         result = chardet.detect(f.read())
         charenc = result['encoding']
+    
+    # Detect separator if not provided
+    if sep is None:
+        with open(csv_path, 'r', encoding=charenc) as f:
+            sample = f.read(1024)  # Read a sample
+            sniffer = csv.Sniffer()
+            sep = sniffer.sniff(sample, delimiters=',;\t|').delimiter
+    
+    if regular:
+        read_df = pd.read_csv(csv_path, encoding=charenc, sep=sep)
+    else:
+        # Detect max_cols and potential header in one pass
+        max_cols = 0
+        header_row = None
+        col_names = None
+        with open(csv_path, 'r', encoding=charenc) as f:
+            for i, line in enumerate(f):
+                if line.strip():
+                    cols = [c.strip().strip('"\'\'') for c in line.split(sep)]
+                    num_cols = len(cols)
+                    if num_cols > max_cols:
+                        max_cols = num_cols
+                        # Reset header if max_cols increased
+                        header_row = None
+                        col_names = None
+                    if header_row is None and num_cols == max_cols and all(c for c in cols):
+                        header_row = i
+                        col_names = cols
+        
+        if header_row is None:
+            col_names = [f'col_{i}' for i in range(max_cols)]
 
-    read_df = pd.read_csv(csv_path, encoding=charenc, sep=None, engine='python')
+        read_df = pd.read_csv(csv_path, encoding=charenc, sep=sep, engine='python', on_bad_lines='warn', names=col_names, header=None)
     
     return read_df
 

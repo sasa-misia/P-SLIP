@@ -366,4 +366,42 @@ def fill_missing_values_of_numeric_series(
     
     return column_data
 
+# %% === Function to obtain a mask with the specified data type in a dataframe
+def get_mask_with_possible_dtype(
+        df: pd.DataFrame | pd.Series, 
+        dtype: str='numeric' # It can be one of 'numeric', 'datetime'
+    ) -> pd.DataFrame:
+    if not isinstance(df, (pd.DataFrame, pd.Series)):
+        raise TypeError("df must be a pandas DataFrame or Series.")
+    if not isinstance(dtype, str):
+        raise TypeError("dtype must be a string.")
+    if dtype not in ['numeric', 'datetime', 'string']:
+        raise ValueError("dtype must be one of 'numeric', 'datetime', 'string'.")
+    
+    df = df.copy()
+    
+    mask = np.zeros(df.shape, dtype=bool)
+    
+    is_a_series = isinstance(df, pd.Series)
+
+    if is_a_series:
+        df = df.to_frame()
+
+    for i, col in enumerate(df.columns):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if dtype == 'numeric':
+                mask[:, i] = pd.to_numeric(df[col], errors='coerce').notnull()
+            elif dtype == 'datetime':
+                mask[:, i] = pd.to_datetime(df[col], errors='coerce').notnull()
+            else:
+                raise ValueError(f"Invalid dtype to search for mask: {dtype}")
+    
+    if is_a_series:
+        mask = pd.Series(mask, index=df.index)
+    else:
+        mask = pd.DataFrame(mask, columns=df.columns, index=df.index)
+    
+    return mask
+       
 # %%

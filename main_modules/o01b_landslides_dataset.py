@@ -1,12 +1,15 @@
 # %% === Import necessary modules
 import os
-import sys
 import argparse
 import pandas as pd
 import geopandas as gpd
 import shapely.geometry as geom
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Importing necessary modules from main_modules
+from m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, log_and_warning
+from m01a_study_area import get_proj_epsg_and_add_prj_coords_to_df
+logger = setup_logger(__name__)
+logger.info("=== Create landslides dataset ===")
 
 # Importing necessary modules from config
 from config import (
@@ -27,12 +30,6 @@ from psliptools.utilities import (
     select_from_list_prompt,
     read_generic_csv
 )
-
-# Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, log_and_warning
-from main_modules.m01a_study_area import get_proj_epsg_and_add_prj_coords_to_df
-logger = setup_logger(__name__)
-logger.info("=== Create landslides dataset ===")
 
 # %% === Helper functions and global variables
 INTERNAL_EPSG_CODE = 4326 # Remember that if you modify this, you should also check and possibly modify the rest of the code!

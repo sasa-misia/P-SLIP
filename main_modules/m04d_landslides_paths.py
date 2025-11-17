@@ -1,6 +1,5 @@
 # %% === Import necessary modules
 import os
-import sys
 import argparse
 import numpy as np
 import pandas as pd
@@ -13,7 +12,11 @@ try:
 except ImportError:
     JOBLIB_AVAILABLE = False
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Importing necessary modules from main_modules
+from m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_warning, log_and_error, memory_report, get_hardware_info
+from m05a_reference_points_info import convert_abg_and_ref_points_to_prj
+logger = setup_logger(__name__)
+logger.info("=== Landslide paths creation ===")
 
 # Importing necessary modules from config
 from config import (
@@ -36,12 +39,6 @@ from psliptools.utilities import (
     select_file_prompt,
     read_generic_csv
 )
-
-# Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_warning, log_and_error, memory_report, get_hardware_info
-from main_modules.m05a_reference_points_info import convert_abg_and_ref_points_to_prj
-logger = setup_logger(__name__)
-logger.info("=== Landslide paths creation ===")
 
 # %% === Helper functions and global variables
 current_tot_ram = get_hardware_info()['ram']

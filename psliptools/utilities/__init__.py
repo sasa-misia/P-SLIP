@@ -18,7 +18,8 @@ from .pandas_utils import (
     get_list_of_values_from_dataframe,
     get_mask_in_range,
     filter_numeric_series,
-    fill_missing_values_of_numeric_series
+    fill_missing_values_of_numeric_series,
+    get_mask_with_possible_dtype
 )
 
 from .user_prompts import (
@@ -61,6 +62,7 @@ __all__ = [
     "get_mask_in_range",
     "filter_numeric_series",
     "fill_missing_values_of_numeric_series",
+    "get_mask_with_possible_dtype",
     "download_wms_raster",
     "print_enumerated_list",
     "reorder_list_prompt",

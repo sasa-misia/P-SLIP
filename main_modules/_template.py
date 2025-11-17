@@ -3,7 +3,10 @@ import os
 import sys
 import argparse
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Importing necessary modules from main_modules
+from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_warning, log_and_error, memory_report
+logger = setup_logger(__name__)
+logger.info("=== Module ===")
 
 # Importing necessary modules from config
 from config import (
@@ -22,11 +25,6 @@ from config import (
 
 # from psliptools.scattered import (
 # )
-
-# Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_warning, log_and_error, memory_report
-logger = setup_logger(__name__)
-logger.info("=== Module ===")
 
 # %% === Helper functions
 

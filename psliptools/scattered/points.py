@@ -1,6 +1,4 @@
 # %% === Import necessary modules
-import os
-import warnings
 import pandas as pd
 import numpy as np
 import scipy.spatial

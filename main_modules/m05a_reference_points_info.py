@@ -1,11 +1,13 @@
 # %% === Import necessary modules
 import os
-import sys
 import argparse
 import pandas as pd
 import numpy as np
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Importing necessary modules from main_modules
+from m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, log_and_warning
+logger = setup_logger(__name__)
+logger.info(f"=== Obtain reference points info ===")
 
 # Importing necessary modules from config
 from config import (
@@ -25,17 +27,13 @@ from psliptools.rasters import (
 )
 
 from psliptools.utilities import (
-    select_file_prompt
+    select_file_prompt,
+    read_generic_csv
 )
 
 from psliptools.scattered import (
     get_closest_point_id
 )
-
-# Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, log_and_warning
-logger = setup_logger(__name__)
-logger.info(f"=== Obtain reference points info ===")
 
 # %% === Helper functions and global variables
 MORPHOLOGY_NAMES = ['elevation', 'slope', 'aspect', 'profile_curvature', 'planform_curvature', 'twisting_curvature']
@@ -230,7 +228,7 @@ def update_reference_points_csv(
         ts_dict: dict[str, pd.DataFrame]=None
     ) -> pd.DataFrame:
     """Helper function to update reference points csv"""
-    ref_points_df = pd.read_csv(ref_points_csv_path)
+    ref_points_df = read_generic_csv(ref_points_csv_path)
     if ref_points_df.empty:
         log_and_error(f"Reference points CSV ({ref_points_csv_path}) is empty. Please check the file.", ValueError, logger)
     

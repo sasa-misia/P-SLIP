@@ -1,12 +1,14 @@
 # %% === Import necessary modules
-import os
-import sys
 import argparse
 import pandas as pd
 import numpy as np
 import datetime as dt
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Importing necessary modules from main_modules
+from m00a_env_init import get_or_create_analysis_environment, setup_logger, obtain_config_idx_and_rel_filename, log_and_error, memory_report, log_and_warning
+from m04c_import_time_sensitive_data import get_numeric_data_ranges
+logger = setup_logger(__name__)
+logger.info("=== Analyzing time-sensitive data patterns ===")
 
 # Importing necessary modules from config
 from config import (
@@ -17,12 +19,6 @@ from config import (
 from psliptools.utilities import (
     get_mask_in_range
 )
-
-# Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, obtain_config_idx_and_rel_filename, log_and_error, memory_report, log_and_warning
-from main_modules.m04c_import_time_sensitive_data import get_numeric_data_ranges
-logger = setup_logger(__name__)
-logger.info("=== Analyzing time-sensitive data patterns ===")
 
 # %% === Helper functions
 def get_time_sensitive_statistics(

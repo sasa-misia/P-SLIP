@@ -5,7 +5,8 @@ import numpy as np
 import os
 
 from ..utilities.datetimes import infer_datetime_format, parse_datetime
-from ..utilities.pandas_utils import filter_numeric_series, fill_missing_values_of_numeric_series
+from ..utilities.pandas_utils import filter_numeric_series, fill_missing_values_of_numeric_series, get_mask_with_possible_dtype
+from ..utilities.csv_file_utils import read_generic_csv
 
 # %% === Helper method to parse and validate a time-sensitive dataframe
 def _parse_time_sensitive_dataframe(
@@ -340,7 +341,6 @@ def _advanced_column_detection(
     """
     series = series.copy()
     name_lower = series.name.lower()
-    sample_data = series.to_list()
     
     # Enhanced pattern matching with expected data types
     patterns = {
@@ -376,7 +376,7 @@ def _advanced_column_detection(
             'expected_type': 'datetime'
         },
         'cumulative_rain': {
-            'patterns': ['cum', 'cumul', 'tot', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia'],
+            'patterns': ['cum', 'cumul', 'tot', 'somma', 'sum', 'rain', 'pioggia', 'regen', 'lluvia', 'valor', 'valeur', 'precipitaz'],
             'expected_type': 'numeric',
             'range': (0, 1000)  # Reasonable rain values
         },
@@ -412,6 +412,7 @@ def _advanced_column_detection(
         }
     }
 
+    # Initialize the results dictionary
     results = {x: 0.0 for x in patterns.keys()}
     
     LOAD_BUFFER_SIZE = 50
@@ -424,23 +425,40 @@ def _advanced_column_detection(
     datetime_count = 0
     numeric_count = 0
     string_count = 0
+
+    # Extract first LOAD_BUFFER_SIZE values
+    series_head = series.head(LOAD_BUFFER_SIZE)
+    sample_data = series_head.to_list()
     
     # Try to convert to datetime first - only if values are strings
-    datetime_converted = []
+    datetime_mask = pd.Series([False] * LOAD_BUFFER_SIZE, index=series_head.index)
     try:
         # Only attempt datetime conversion if we have string values
-        sample_head = series.head(LOAD_BUFFER_SIZE)
-        if sample_head.dtype == 'object' or any(isinstance(x, str) for x in sample_head):
-            datetime_test = pd.to_datetime(sample_head, errors='coerce')
-            datetime_count = datetime_test.notna().sum()
-            datetime_converted = datetime_test.tolist()
+        if series_head.dtype == 'object' or any(isinstance(x, str) for x in series_head):
+            datetime_test = pd.to_datetime(series_head, errors='coerce')
+            datetime_mask = datetime_test.notna()
+            datetime_count = datetime_mask.sum()
+    except:
+        pass
+    
+    # Try to convert to numeric first - only if values are strings
+    numeric_mask = pd.Series([False] * LOAD_BUFFER_SIZE, index=series_head.index)
+    try:
+        # Only attempt numeric conversion if we have string values
+        if series_head.dtype == 'object' or any(isinstance(x, str) for x in series_head):
+            numeric_test = pd.to_numeric(series_head, errors='coerce')
+            numeric_mask = numeric_test.notna() & ~datetime_mask
+            numeric_count = numeric_mask.sum()
     except:
         pass
     
     # Count remaining types
-    for i, value in enumerate(sample_data[:LOAD_BUFFER_SIZE]):  # Check first LOAD_BUFFER_SIZE values
-        if datetime_count > 0 and i < len(datetime_converted) and not pd.isna(datetime_converted[i]):
+    for i, value in enumerate(sample_data):  # Check first LOAD_BUFFER_SIZE values
+        if datetime_mask.iloc[i]:
             # This value was successfully converted to datetime
+            continue
+        elif numeric_mask.iloc[i]:
+            # This value was successfully converted to numeric
             continue
         elif isinstance(value, (int, float)):
             numeric_count += 1
@@ -491,10 +509,10 @@ def _advanced_column_detection(
         
         # Range validation for numeric columns (only if numeric dominant)
         if expected_type == 'numeric' and is_numeric_dominant and 'range' in pattern_info:
-            # Get numeric values from the full sample (not just first 50)
-            numeric_values_full = [x for x in sample_data if isinstance(x, (int, float)) and not pd.isna(x)]
-            if numeric_values_full:
-                min_val, max_val = min(numeric_values_full), max(numeric_values_full)
+            # Get numeric values from the FULL sample (NOT just first LOAD_BUFFER_SIZE values)
+            numeric_values_full = pd.to_numeric(series, errors='coerce').dropna()
+            if numeric_values_full.size > 0:
+                min_val, max_val = numeric_values_full.min(), numeric_values_full.max()
                 range_min, range_max = pattern_info['range']
                 in_range = True
                 
@@ -771,7 +789,7 @@ def load_time_sensitive_data_from_csv(
     if len(numeric_range_filter) != 2:
         raise ValueError("numeric_range_filter must be a list or tuple with 2 elements.")
     
-    raw_data_df = pd.read_csv(file_path, sep=None, engine='python') # Sometimes separators are not just commas (,) but maybe semicolons (;) or something else
+    raw_data_df = read_generic_csv(file_path) # Sometimes separators are not just commas (,) but maybe semicolons (;) or something else. Additionally, the encoding is sometimes not utf-8. read_generic_csv handles this.
 
     try:
         _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(
@@ -881,7 +899,7 @@ def load_time_sensitive_stations_from_csv(
     if not isinstance(altitude_column, (str, int, type(None))):
         raise TypeError("altitude_column must be a string, integer or None.")
     
-    station_df = pd.read_csv(file_path, sep=None, engine='python') # Sometimes the delimiter is not comma (,)
+    station_df = read_generic_csv(file_path) # read_generic_csv handles different encodings and delimiters.
 
     auto_col_detection, _ = _smart_columns_detection(df=station_df, target_columns=['station', 'longitude', 'latitude', 'altitude'])
     
@@ -979,7 +997,7 @@ def merge_time_sensitive_data_and_stations(
     for data in data_dict.values():
         start_dates.append(data['start_date'].iloc[0])
         end_dates.append(data['end_date'].iloc[-1])
-        delta_times.append(data['start_date'].diff().mean())
+        delta_times.append(data['start_date'].diff().mean(skipna=True))
     
     delta_time_disequality = [delta_time != delta_times[0] for delta_time in delta_times]
     if any(delta_time_disequality):
@@ -1027,4 +1045,161 @@ def merge_time_sensitive_data_and_stations(
                     time_sensitive_vars['data'][col_name] = pd.concat([time_sensitive_vars['data'][col_name], curr_numeric], axis=1)
     return time_sensitive_vars
 
-# %%
+# %% === Function to unify different files containing time-sensitive data
+def get_data_based_on_station(
+        file_paths: list[str],
+        start_date_col_name: str,
+        data_col_names: list[str],
+        station_names: list[str],
+        first_start_date: pd.Timestamp | str,
+        last_start_date: pd.Timestamp | str,
+        delta_time: pd.Timedelta,
+        look_forward: bool=True,
+        out_dir: str=''
+    ) -> dict[str, pd.DataFrame]:
+    """
+    Unify station data from multiple CSV files into a dictionary of DataFrames and export each key as a csv.
+
+    Args:
+        file_paths (list[str]): List of paths to CSV files.
+        start_date_col_name (str): Name of the column containing start dates.
+        data_col_names (list[str]): List of column names containing data variables.
+        station_names (list[str]): List of station names to process.
+        first_start_date (pd.Timestamp | str): First start date for the unified timeline.
+        last_start_date (pd.Timestamp | str): Last start date for the unified timeline.
+        delta_time (pd.Timedelta): Time delta for the unified timeline.
+        look_forward (bool, optional): If True, search for data rows after the station name; if False, search before the station name.
+        out_dir (str, optional): Directory to save output CSV files for each station. If empty, no files are saved.
+
+    Returns:
+        dict[str, pd.DataFrame]: Dictionary with station names as keys and unified DataFrames as values.
+    """
+    if not isinstance(file_paths, list):
+        raise TypeError("Expected a list of file paths")
+    if not(all(x.endswith('.csv') for x in file_paths)):
+        raise ValueError("All file paths must end with .csv, because is the only supported file format")
+    if not isinstance(start_date_col_name, str):
+        raise TypeError("Expected a string for start_date_col_name")
+    if not isinstance(data_col_names, list):
+        raise TypeError("Expected a list of column names with data in data_col_names")
+    if not all(isinstance(v, str) for v in data_col_names):
+        raise TypeError("All elements of data_col_names must be strings")
+    if not isinstance(station_names, list):
+        raise TypeError("Expected a list of station names")
+    if not all(isinstance(s, str) for s in station_names):
+        raise TypeError("All elements of station_names must be strings")
+    if not isinstance(first_start_date, (pd.Timestamp, str)):
+        raise TypeError("Expected a pandas Timestamp or a string for first_start_date")
+    if not isinstance(last_start_date, (pd.Timestamp, str)):
+        raise TypeError("Expected a pandas Timestamp or a string for last_start_date")
+    if not isinstance(delta_time, pd.Timedelta):
+        raise TypeError("Expected a pandas Timedelta for delta_time")
+    if not isinstance(look_forward, bool):
+        raise TypeError("Expected a boolean for look_forward")
+    if not isinstance(out_dir, str):
+        raise TypeError("Expected a string for out_dir")
+    
+    # Parse dates
+    if isinstance(first_start_date, str):
+        first_start_date = parse_datetime(first_start_date, date_format='dateutil')
+    if isinstance(last_start_date, str):
+        last_start_date = parse_datetime(last_start_date, date_format='dateutil')
+    
+    # Get all csv files
+    files_df_list = [read_generic_csv(csv_path=f, regular=False) for f in file_paths]
+
+    unified_datetimes = pd.date_range(start=first_start_date, end=last_start_date, freq=delta_time)
+    unified_dfs = {
+        sta: pd.DataFrame(
+            {
+                start_date_col_name: unified_datetimes, 
+                **{v: None for v in data_col_names}
+            }
+        ) for sta in station_names}
+
+    for idx, curr_df in enumerate(files_df_list):
+        if curr_df.empty:
+            continue # Skip empty files
+
+        if start_date_col_name not in curr_df.columns:
+            raise ValueError(f"File {file_paths[idx]} does not contain column [{start_date_col_name}] but these columns: {curr_df.columns}.")
+        if not all(v in curr_df.columns for v in data_col_names):
+            raise ValueError(f"File {file_paths[idx]} does not contain all columns {data_col_names} but these columns: {curr_df.columns}.")
+        
+        datetime_mask = get_mask_with_possible_dtype(df=curr_df, dtype='datetime')
+        numeric_mask = get_mask_with_possible_dtype(df=curr_df, dtype='numeric') & ~datetime_mask
+
+        curr_df[numeric_mask] = curr_df[numeric_mask].apply(pd.to_numeric, errors='coerce')
+
+        start_datetimes_raw = curr_df[start_date_col_name][datetime_mask[start_date_col_name]]
+        if pd.api.types.is_datetime64_any_dtype(start_datetimes_raw):
+            start_datetimes_parsed = start_datetimes_raw
+        else:
+            datetime_format = infer_datetime_format(start_datetimes_raw)
+            start_datetimes_parsed = parse_datetime(date_str=start_datetimes_raw, date_format=datetime_format)
+        
+        curr_df['converted_start_date'] = pd.Timestamp('NaT')
+        curr_df.loc[datetime_mask[start_date_col_name], 'converted_start_date'] = start_datetimes_parsed
+        
+        for sta in station_names:
+            # Find the row where 'sta' appears exactly once in the entire DataFrame
+            station_mask = (curr_df == sta).any(axis=1)
+            station_indices = curr_df[station_mask].index
+            if len(station_indices) != 1:
+                raise ValueError(f"Station '{sta}' must appear exactly once in the DataFrame in file {file_paths[idx]}.")
+            station_index = station_indices[0]
+            
+            # Determine buffer_end based on look_forward
+            if look_forward:
+                buffer_end = min(station_index + 5, len(curr_df) - 1)
+                while buffer_end + 1 < len(curr_df) and (pd.notna(curr_df['converted_start_date'].iloc[buffer_end + 1]) or curr_df.loc[buffer_end + 1, data_col_names].notna().any()):
+                    buffer_end += 1
+            else:
+                buffer_end = max(station_index - 5, 0)
+                while buffer_end - 1 >= 0 and (pd.notna(curr_df['converted_start_date'].iloc[buffer_end - 1]) or curr_df.loc[buffer_end - 1, data_col_names].notna().any()):
+                    buffer_end -= 1
+        
+            # Collect data_indices: rows with valid datetime and numeric values within the buffer range
+            data_indices = []
+            if look_forward:
+                for i in range(station_index + 1, buffer_end + 1): # buffer_end + 1 because last is not included with range
+                    if pd.notna(curr_df['converted_start_date'].iloc[i]) and curr_df.loc[i, data_col_names].notna().any():
+                        data_indices.append(i)
+            else:
+                for i in range(buffer_end, station_index): # station_index and not station_index - 1 because the last one is not included (we do not want station_index itself)
+                    if pd.notna(curr_df['converted_start_date'].iloc[i]) and curr_df.loc[i, data_col_names].notna().any():
+                        data_indices.append(i)
+
+            if len(data_indices) == 0:
+                continue # Skip station with no data
+            
+            # Check of delta time
+            datetimes_to_check = curr_df['converted_start_date'].iloc[data_indices]
+            raw_delta_time = abs(datetimes_to_check.diff().mean())
+            if not abs(raw_delta_time - delta_time) < (delta_time / 10):
+                raise ValueError(f"Delta time for file {file_paths[idx]} is {raw_delta_time} but should be {delta_time}.")
+            
+            # For each data index, assign values to the closest unified date
+            for i in data_indices:
+                dt = curr_df['converted_start_date'].iloc[i]
+                unified_dates = unified_dfs[sta][start_date_col_name]
+                
+                # Find compatible unified dates within delta_time
+                time_diff_mask = abs(unified_dates - dt) <= delta_time/2
+                # Ensure the index is within the possible range (based on data_indices relative positions, but since unified_dates is a range, use the index condition if needed)
+                # Assuming data_indices are sequential, but to be precise, we can check if the unified index is valid
+                compatible_indices = unified_dates[time_diff_mask].index
+                if len(compatible_indices) == 1:
+                    unified_idx = compatible_indices[0]
+                    # Assign the values to the corresponding columns
+                    for col in data_col_names:
+                        if col in curr_df.columns:
+                            unified_dfs[sta].loc[unified_idx, col] = curr_df.loc[i, col]
+                else:
+                    raise ValueError(f"Multiple compatible unified dates found for data index {i} and station {sta}.")
+    
+    if out_dir:
+        for sta, df_to_write in unified_dfs.items():
+            df_to_write.to_csv(os.path.join(out_dir, f"{sta}.csv"), index=False)
+    
+    return unified_dfs

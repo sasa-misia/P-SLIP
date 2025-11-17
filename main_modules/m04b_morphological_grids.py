@@ -1,25 +1,17 @@
 # %% === Import necessary modules
-import os
-import sys
 import pandas as pd
 import argparse
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-# Importing necessary modules from config
-# from config import (
-# )
+# Importing necessary modules from main_modules
+from m00a_env_init import get_or_create_analysis_environment, setup_logger, memory_report
+logger = setup_logger(__name__)
+logger.info("=== Create morphological grids ===")
 
 # Importing necessary modules from psliptools
 from psliptools.rasters import (
     generate_slope_and_aspect_rasters,
     generate_curvature_rasters
 )
-
-# Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, memory_report
-logger = setup_logger(__name__)
-logger.info("=== Create morphological grids ===")
 
 # %% === Helper functions
 def get_angles_and_curvatures(

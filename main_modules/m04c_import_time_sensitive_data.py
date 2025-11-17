@@ -1,10 +1,12 @@
 # %% === Import necessary modules
 import os
-import sys
 import argparse
 import pandas as pd
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Importing necessary modules from main_modules
+from m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename, setup_logger, log_and_error, log_and_warning, memory_report
+logger = setup_logger(__name__)
+logger.info("=== Importing time-sensitive data ===") # This script must be putted after m03, because with satellite you need dtm and abg grids
 
 # Importing necessary modules from config
 from config import (
@@ -27,11 +29,6 @@ from psliptools.scattered import (
     load_time_sensitive_stations_from_csv,
     merge_time_sensitive_data_and_stations
 )
-
-# Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, obtain_config_idx_and_rel_filename, setup_logger, log_and_error, log_and_warning, memory_report
-logger = setup_logger(__name__)
-logger.info("=== Importing time-sensitive data ===") # This script must be putted after m03, because with satellite you need dtm and abg grids
 
 # %% === Helper functions and global variables
 SOURCE_MODES = ['station', 'satellite']

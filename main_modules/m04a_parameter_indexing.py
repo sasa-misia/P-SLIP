@@ -2,10 +2,12 @@
 import os
 import pandas as pd
 import numpy as np
-import sys
 import argparse
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Importing necessary modules from main_modules
+from m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, log_and_warning
+logger = setup_logger(__name__)
+logger.info("=== Indexing of polygons with parameters ===")
 
 # Importing necessary modules from config
 from config import (
@@ -30,11 +32,6 @@ from psliptools.geometries import (
     detect_intersections_between_polygons,
     resolve_polygons_intersections
 )
-
-# Importing necessary modules from main_modules
-from main_modules.m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, log_and_warning
-logger = setup_logger(__name__)
-logger.info("=== Indexing of polygons with parameters ===")
 
 # %% === Helper functions
 def get_raw_associated_df(

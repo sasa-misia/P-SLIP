@@ -245,7 +245,7 @@ def parse_datetime(
         pd.Timestamp: The parsed date.
     """
     if date_format == 'dateutil':
-        return parser.parse(date_str, fuzzy=fuzzy)
+        return pd.Timestamp(parser.parse(date_str, fuzzy=fuzzy))
     else:
         if fuzzy:
             date_str_clean = _clean_date_string(date_str, date_time_separator)
