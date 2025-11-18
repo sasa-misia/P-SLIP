@@ -1055,6 +1055,7 @@ def get_data_based_on_station(
         last_start_date: pd.Timestamp | str,
         delta_time: pd.Timedelta,
         look_forward: bool=True,
+        min_buffer: int=5,
         out_dir: str=''
     ) -> dict[str, pd.DataFrame]:
     """
@@ -1096,6 +1097,8 @@ def get_data_based_on_station(
         raise TypeError("Expected a pandas Timedelta for delta_time")
     if not isinstance(look_forward, bool):
         raise TypeError("Expected a boolean for look_forward")
+    if not (isinstance(min_buffer, int) and min_buffer >= 1):
+        raise TypeError("Expected an integer >= 1 for min_buffer")
     if not isinstance(out_dir, str):
         raise TypeError("Expected a string for out_dir")
     
@@ -1151,11 +1154,11 @@ def get_data_based_on_station(
             
             # Determine buffer_end based on look_forward
             if look_forward:
-                buffer_end = min(station_index + 5, len(curr_df) - 1)
+                buffer_end = min(station_index + min_buffer, len(curr_df) - 1)
                 while buffer_end + 1 < len(curr_df) and (pd.notna(curr_df['converted_start_date'].iloc[buffer_end + 1]) or curr_df.loc[buffer_end + 1, data_col_names].notna().any()):
                     buffer_end += 1
             else:
-                buffer_end = max(station_index - 5, 0)
+                buffer_end = max(station_index - min_buffer, 0)
                 while buffer_end - 1 >= 0 and (pd.notna(curr_df['converted_start_date'].iloc[buffer_end - 1]) or curr_df.loc[buffer_end - 1, data_col_names].notna().any()):
                     buffer_end -= 1
         
