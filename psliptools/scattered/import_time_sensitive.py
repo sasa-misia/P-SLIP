@@ -1045,7 +1045,7 @@ def merge_time_sensitive_data_and_stations(
                     time_sensitive_vars['data'][col_name] = pd.concat([time_sensitive_vars['data'][col_name], curr_numeric], axis=1)
     return time_sensitive_vars
 
-# %% === Function to unify different files containing time-sensitive data
+# %% === Function to unify station data from one or multiple CSV files
 def get_data_based_on_station(
         file_paths: list[str],
         start_date_col_name: str,
@@ -1070,6 +1070,8 @@ def get_data_based_on_station(
         last_start_date (pd.Timestamp | str): Last start date for the unified timeline.
         delta_time (pd.Timedelta): Time delta for the unified timeline.
         look_forward (bool, optional): If True, search for data rows after the station name; if False, search before the station name.
+        min_buffer (int, optional): Minimum number of rows to buffer at the start or end from detected station in each 
+            input file (empty or not valid rows which separate the declaration od station from its data).
         out_dir (str, optional): Directory to save output CSV files for each station. If empty, no files are saved.
 
     Returns:
@@ -1120,14 +1122,14 @@ def get_data_based_on_station(
             }
         ) for sta in station_names}
 
-    for idx, curr_df in enumerate(files_df_list):
+    for file_idx, curr_df in enumerate(files_df_list):
         if curr_df.empty:
             continue # Skip empty files
 
         if start_date_col_name not in curr_df.columns:
-            raise ValueError(f"File {file_paths[idx]} does not contain column [{start_date_col_name}] but these columns: {curr_df.columns}.")
+            raise ValueError(f"File {file_paths[file_idx]} does not contain column [{start_date_col_name}] but these columns: {curr_df.columns}.")
         if not all(v in curr_df.columns for v in data_col_names):
-            raise ValueError(f"File {file_paths[idx]} does not contain all columns {data_col_names} but these columns: {curr_df.columns}.")
+            raise ValueError(f"File {file_paths[file_idx]} does not contain all columns {data_col_names} but these columns: {curr_df.columns}.")
         
         datetime_mask = get_mask_with_possible_dtype(df=curr_df, dtype='datetime')
         numeric_mask = get_mask_with_possible_dtype(df=curr_df, dtype='numeric') & ~datetime_mask
@@ -1148,19 +1150,33 @@ def get_data_based_on_station(
             # Find the row where 'sta' appears exactly once in the entire DataFrame
             station_mask = (curr_df == sta).any(axis=1)
             station_indices = curr_df[station_mask].index
-            if len(station_indices) != 1:
-                raise ValueError(f"Station '{sta}' must appear exactly once in the DataFrame in file {file_paths[idx]}.")
-            station_index = station_indices[0]
+            if len(station_indices) == 0:
+                raise ValueError(f"Station {sta} not found in file {file_paths[file_idx]}")
             
-            # Determine buffer_end based on look_forward
-            if look_forward:
-                buffer_end = min(station_index + min_buffer, len(curr_df) - 1)
-                while buffer_end + 1 < len(curr_df) and (pd.notna(curr_df['converted_start_date'].iloc[buffer_end + 1]) or curr_df.loc[buffer_end + 1, data_col_names].notna().any()):
-                    buffer_end += 1
-            else:
-                buffer_end = max(station_index - min_buffer, 0)
-                while buffer_end - 1 >= 0 and (pd.notna(curr_df['converted_start_date'].iloc[buffer_end - 1]) or curr_df.loc[buffer_end - 1, data_col_names].notna().any()):
-                    buffer_end -= 1
+            buffer_ends = [None] * len(station_indices)
+            for i, sta_idx in enumerate(station_indices):
+                # Determine buffer_end based on look_forward
+                if look_forward:
+                    buffer_ends[i] = min(sta_idx + min_buffer, len(curr_df) - 1)
+                    while buffer_ends[i] + 1 < len(curr_df) and (pd.notna(curr_df['converted_start_date'].iloc[buffer_ends[i] + 1]) or curr_df.loc[buffer_ends[i] + 1, data_col_names].notna().any()):
+                        buffer_ends[i] += 1
+                else:
+                    buffer_ends[i] = max(sta_idx - min_buffer, 0)
+                    while buffer_ends[i] - 1 >= 0 and (pd.notna(curr_df['converted_start_date'].iloc[buffer_ends[i] - 1]) or curr_df.loc[buffer_ends[i] - 1, data_col_names].notna().any()):
+                        buffer_ends[i] -= 1
+            
+            data_len = [abs(x - y) for x, y in zip(buffer_ends, station_indices)]
+            max_data_idx = data_len.index(max(data_len))
+
+            station_index = station_indices[max_data_idx]
+            buffer_end = buffer_ends[max_data_idx]
+            
+            if len(station_indices) > 1:
+                warnings.warn(
+                    f"Station {sta} appeared {len(station_indices)} times in file [{file_paths[file_idx]}] with different data ranges {data_len}. " + \
+                    f"The occurrence with the largest data range will be used [index: [{station_indices[max_data_idx]}], appearance n. {max_data_idx + 1}].", 
+                    stacklevel=2
+                )
         
             # Collect data_indices: rows with valid datetime and numeric values within the buffer range
             data_indices = []
@@ -1176,11 +1192,20 @@ def get_data_based_on_station(
             if len(data_indices) == 0:
                 continue # Skip station with no data
             
-            # Check of delta time
-            datetimes_to_check = curr_df['converted_start_date'].iloc[data_indices]
-            raw_delta_time = abs(datetimes_to_check.diff().mean())
+            # Check of delta time, filtering out large gaps to avoid bias from missing data
+            datetimes_to_check = curr_df['converted_start_date'].iloc[data_indices].dropna().sort_values()
+            raw_delta_time = None
+            if len(datetimes_to_check) > 1:
+                diffs = datetimes_to_check.diff().dropna()
+                valid_diffs = diffs[diffs <= delta_time * 1.5] # Filter out diffs larger than 1.5 * delta_time (assuming larger gaps are missing data)
+                if len(valid_diffs) > 0:
+                    raw_delta_time = abs(valid_diffs.mean())
+            
+            if raw_delta_time is None:
+                raw_delta_time = delta_time
+            
             if not abs(raw_delta_time - delta_time) < (delta_time / 10):
-                raise ValueError(f"Delta time for file {file_paths[idx]} is {raw_delta_time} but should be {delta_time}.")
+                raise ValueError(f"Delta time for file {file_paths[file_idx]} is {raw_delta_time} but should be {delta_time}.")
             
             # For each data index, assign values to the closest unified date
             for i in data_indices:
@@ -1200,9 +1225,12 @@ def get_data_based_on_station(
                             unified_dfs[sta].loc[unified_idx, col] = curr_df.loc[i, col]
                 else:
                     raise ValueError(f"Multiple compatible unified dates found for data index {i} and station {sta}.")
-    
+
+    # Write the unified dataframes
     if out_dir:
         for sta, df_to_write in unified_dfs.items():
             df_to_write.to_csv(os.path.join(out_dir, f"{sta}.csv"), index=False)
     
     return unified_dfs
+
+# %%
