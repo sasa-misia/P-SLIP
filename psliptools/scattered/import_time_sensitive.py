@@ -11,6 +11,7 @@ from ..utilities.csv_file_utils import read_generic_csv
 # %% === Helper method to parse and validate a time-sensitive dataframe
 def _parse_time_sensitive_dataframe(
         data_df: pd.DataFrame,
+        no_data: list[float | int | str]=None,
         fill_method: str | int | float=None,
         round_datetime: bool=True,
         allow_multiple_date_formats: bool=False,
@@ -24,6 +25,7 @@ def _parse_time_sensitive_dataframe(
 
     Args:
         data_df (pd.DataFrame): The dataframe to parse and validate.
+        no_data (list[float | int | str], optional): The list of values to consider as missing data (default: None).
         fill_method (str, optional): The method to use for filling missing values (default: None).
             Possible values are
                 0. None - Do not fill missing values.
@@ -88,7 +90,11 @@ def _parse_time_sensitive_dataframe(
         if pd.api.types.is_numeric_dtype(data_df[col].dtype):
             pre_data_type = data_df[col].dtype
 
-            data_df[col] = filter_numeric_series(
+            if no_data is not None and isinstance(no_data, list):
+                for val in no_data: # Replace no_data with np.nan
+                    data_df[col] = data_df[col].replace(to_replace=val, value=np.nan)
+
+            data_df[col] = filter_numeric_series( # Filter out the out-of-range values and replace with np.nan
                 series=data_df[col],
                 min_value=numeric_range_filter[0],
                 max_value=numeric_range_filter[1],
@@ -150,6 +156,7 @@ def _parse_time_sensitive_dataframe(
                     
                     return _parse_time_sensitive_dataframe(
                         data_df=new_data_df,
+                        no_data=no_data,
                         fill_method=fill_method,
                         round_datetime=round_datetime,
                         allow_multiple_date_formats=allow_multiple_date_formats,
@@ -556,7 +563,8 @@ def _cross_columns_check(
             avg_col = type_to_column['average_temperature']
             
             # Check majority of values (at least 70% should satisfy the relationship)
-            valid_comparisons = (df[max_col] > df[avg_col]).dropna()
+            nans_mask = df[max_col].isna() | df[avg_col].isna()
+            valid_comparisons = (df[max_col] > df[avg_col])[~nans_mask]
             if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
                 # Relationship violation: max should be greater than avg for majority
                 detected[max_col] = 'average_temperature'
@@ -570,7 +578,8 @@ def _cross_columns_check(
             min_col = type_to_column['minimum_temperature']
             
             # Check majority of values
-            valid_comparisons = (df[avg_col] > df[min_col]).dropna()
+            nans_mask = df[avg_col].isna() | df[min_col].isna()
+            valid_comparisons = (df[avg_col] > df[min_col])[~nans_mask]
             if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
                 # Relationship violation: avg should be greater than min for majority
                 detected[avg_col] = 'minimum_temperature'
@@ -588,28 +597,27 @@ def _cross_columns_check(
             start_series = pd.to_datetime(df[start_col], errors='coerce')
             end_series = pd.to_datetime(df[end_col], errors='coerce')
             
-            # Only check if we have valid datetime conversions
-            valid_mask = start_series.notna() & end_series.notna()
-            if valid_mask.sum() > 0:  # At least some valid datetime pairs
-                # Check majority of valid values
-                valid_comparisons = (end_series[valid_mask] > start_series[valid_mask])
-                if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
-                    # Relationship violation: end_date should be after start_date for majority
-                    detected[start_col] = 'end_date'
-                    detected[end_col] = 'start_date'
-                    confidence_scores[start_col] = all_scores[end_col]['end_date']
-                    confidence_scores[end_col] = all_scores[start_col]['start_date']
-                    warnings.warn(f"Swapped date columns based on temporal relationships: {start_col} <-> {end_col}", stacklevel=2)
+            # Check majority of valid values
+            nans_mask = start_series.isna() | end_series.isna()
+            valid_comparisons = (end_series > start_series)[~nans_mask]
+            if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
+                # Relationship violation: end_date should be after start_date for majority
+                detected[start_col] = 'end_date'
+                detected[end_col] = 'start_date'
+                confidence_scores[start_col] = all_scores[end_col]['end_date']
+                confidence_scores[end_col] = all_scores[start_col]['start_date']
+                warnings.warn(f"Swapped date columns based on temporal relationships: {start_col} <-> {end_col}", stacklevel=2)
         
-        # Rain relationships: peak rain >= cumulative rain (check majority of values)
+        # Rain relationships: peak rain <= cumulative rain (check majority of values), because cumulative includes peak
         if 'peak_rain' in type_to_column and 'cumulative_rain' in type_to_column:
             peak_col = type_to_column['peak_rain']
             cumul_col = type_to_column['cumulative_rain']
             
             # Check majority of values
-            valid_comparisons = (df[peak_col] >= df[cumul_col]).dropna()
+            nans_mask = df[peak_col].isna() | df[cumul_col].isna()
+            valid_comparisons = (df[peak_col] <= df[cumul_col])[~nans_mask]
             if len(valid_comparisons) > 0 and valid_comparisons.mean() < 0.7:
-                # Relationship violation: peak should be >= cumulative for majority
+                # Relationship violation: peak should be <= cumulative for majority
                 detected[peak_col] = 'cumulative_rain'
                 detected[cumul_col] = 'peak_rain'
                 confidence_scores[peak_col] = all_scores[cumul_col]['cumulative_rain']
@@ -726,6 +734,7 @@ def _smart_columns_detection(
 # %% === Method to load time-sensitive scattered data in csv format
 def load_time_sensitive_data_from_csv(
         file_path: str,
+        no_data: float | int | str | list[float | int | str]=None,
         fill_method: str | int | float=None,
         round_datetime: bool=True,
         delta_time_hours: float | int=None,
@@ -742,6 +751,7 @@ def load_time_sensitive_data_from_csv(
 
     Args:
         file_path (str): The path to the CSV file.
+        no_data (float | int | str | list[float | int | str], optional): The value to use for missing data (default: None).
         fill_method (str, optional): The method to use for filling missing values (default: None).
             Possible values are
                 0. None - Do not fill missing values.
@@ -770,6 +780,10 @@ def load_time_sensitive_data_from_csv(
     """
     if not isinstance(file_path, str) or not os.path.exists(file_path):
         raise TypeError("file_path must be a string and the file must exist.")
+    if not isinstance(no_data, (float, int, str, list)):
+        raise TypeError("no_data must be a float, integer, string or list of these types.")
+    if not isinstance(no_data, list):
+        no_data = [no_data]
     if not isinstance(datetime_columns_names, (list, type(None))):
         raise TypeError("datetime_names must be a list of strings or None.")
     if not isinstance(numeric_columns_names, (list, type(None))):
@@ -794,6 +808,7 @@ def load_time_sensitive_data_from_csv(
     try:
         _, datetime_df, numeric_df = _parse_time_sensitive_dataframe(
             data_df=raw_data_df,
+            no_data=no_data,
             fill_method=fill_method, 
             round_datetime=round_datetime,
             allow_multiple_date_formats=False,
@@ -963,10 +978,49 @@ def load_time_sensitive_stations_from_csv(
     
     return station_df
 
+# %% === Function to create matrix of distances between gauges
+def create_stations_distance_matrix(
+        stations_table: pd.DataFrame,
+        station_column: str="station",
+        x_column: str="longitude",
+        y_column: str="latitude"
+    ) -> pd.DataFrame:
+    """
+    Create a matrix of distances between gauges.
+
+    Args:
+        stations_table (pd.DataFrame): A DataFrame containing the gauges table.
+        station_column (str, optional): The name of the station column (default: 'station').
+        x_column (str, optional): The name of the longitude column (default: 'longitude').
+        y_column (str, optional): The name of the latitude column (default: 'latitude').
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the distance matrix.
+    """
+    if not(isinstance(stations_table, pd.DataFrame)):
+        raise TypeError("stations_table must be a pandas DataFrame.")
+    if not(isinstance(station_column, str) and (station_column in stations_table.columns)):
+        raise TypeError("station_column must be a string and exist in the DataFrame.")
+    if not(isinstance(x_column, str) and (x_column in stations_table.columns)):
+        raise TypeError("x_column must be a string and exist in the DataFrame.")
+    if not(isinstance(y_column, str) and (y_column in stations_table.columns)):
+        raise TypeError("y_column must be a string and exist in the DataFrame.")
+    
+    stations_table = stations_table.copy()
+
+    points = stations_table[[x_column, y_column]].to_numpy()
+    
+    distance_matrix = np.sqrt(((points[:, np.newaxis, :] - points[np.newaxis, :, :]) ** 2).sum(axis=2))
+
+    return pd.DataFrame(data=distance_matrix, index=stations_table[station_column].to_list(), columns=stations_table[station_column].to_list())
+
 # %% === Method to merge and align time-sensitive data and gauges table
 def merge_time_sensitive_data_and_stations(
         data_dict: dict[str, pd.DataFrame],
-        stations_table: pd.DataFrame
+        stations_table: pd.DataFrame,
+        no_data: float | int | str | list[float | int | str]=None,
+        fill_gaps: bool=True,
+        fill_max_distance: float=None
     ) -> dict[str, pd.DataFrame]:
     """
     Merge and align time-sensitive data with gauges table.
@@ -978,6 +1032,9 @@ def merge_time_sensitive_data_and_stations(
     Returns:
         dict[str, pd.DataFrame]: A dictionary containing structured, merged, and aligned data.
     """
+
+    # TODO: Add option to fill data gaps with data from other stations, based on station distance matrix and fill maximum distance
+
     if not(isinstance(data_dict, dict)):
         raise TypeError("data_dict must be a dictionary.")
     if not(isinstance(stations_table, pd.DataFrame)):

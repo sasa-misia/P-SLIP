@@ -2,6 +2,7 @@
 import os
 import chardet
 import csv
+import warnings
 import pandas as pd
 
 # %% === Function to check if a path is relative to a base directory
@@ -345,7 +346,56 @@ def rename_csv_header(
     # Rename only the selected columns
     csv_df.rename(columns=rename_mapping, inplace=True)
     csv_df.to_csv(csv_path, index=False)
+
+# %% === Helper function to get the csv delimiter
+def _get_csv_delimiter(
+        csv_path: str,
+        encoding: str=None
+    ) -> str:
+    """
+    Get the delimiter used in a CSV file.
+
+    Args:
+        csv_path (str): Path to the CSV file.
+        encoding (str, optional): Encoding of the CSV file (default is None, which means it will be detected).
+
+    Returns:
+        str: The delimiter used in the CSV file.
+    """
+    if encoding is None:
+        # Detect encoding
+        with open(csv_path, 'rb') as f:
+            result = chardet.detect(f.read())
+            encoding = result['encoding']
     
+    # Detect separator
+    with open(csv_path, 'r', encoding=encoding) as f:
+        file_size = os.path.getsize(csv_path)
+        sample_size = min(4096, file_size) if file_size > 0 else 1024
+        sample = f.read(sample_size)
+        
+        if not sample.strip():
+            warnings.warn(f"Empty or whitespace-only file: {csv_path} -> using default separator [,]", stacklevel=2)
+            sep = ','  # Default for empty or whitespace-only files
+        else:
+            sniffer = csv.Sniffer()
+            try:
+                sep = sniffer.sniff(sample, delimiters=',;\t|').delimiter
+            except csv.Error:
+                # Manual fallback: count delimiters in sample and pick the most common
+                delimiter_counts = {}
+                for delim in ',;\t|':
+                    count = sample.count(delim)
+                    if count > 0:
+                        delimiter_counts[delim] = count
+                if delimiter_counts:
+                    sep = max(delimiter_counts, key=delimiter_counts.get)
+                else:
+                    warnings.warn(f"Unable to detect separator in file: {csv_path} -> using default separator [,]", stacklevel=2)
+                    sep = ','  # Ultimate default if no delimiters found
+    
+    return sep
+
 # %% === Function to read a CSV file with the more comprehensive pandas read_csv function
 def read_generic_csv(
         csv_path: str,
@@ -373,10 +423,7 @@ def read_generic_csv(
     
     # Detect separator if not provided
     if sep is None:
-        with open(csv_path, 'r', encoding=charenc) as f:
-            sample = f.read(1024)  # Read a sample
-            sniffer = csv.Sniffer()
-            sep = sniffer.sniff(sample, delimiters=',;\t|').delimiter
+        sep = _get_csv_delimiter(csv_path, charenc)
     
     if regular:
         read_df = pd.read_csv(csv_path, encoding=charenc, sep=sep)

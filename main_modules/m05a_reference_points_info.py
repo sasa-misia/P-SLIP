@@ -75,9 +75,14 @@ def get_morphology_grids(
     if not all([x in MORPHOLOGY_NAMES for x in selected_morphology]):
         log_and_error(f"Please select one or more of the following morphologies: {MORPHOLOGY_NAMES}", ValueError, logger)
     
-    dtm_df = env.load_variable(variable_filename='dtm_vars.pkl')['dtm']
-    angles_df = env.load_variable(variable_filename='morphology_vars.pkl')['angles']
-    curvatures_df = env.load_variable(variable_filename='morphology_vars.pkl')['curvatures']
+    if 'elevation' in selected_morphology:
+        dtm_df = env.load_variable(variable_filename='dtm_vars.pkl')['dtm']
+    
+    if any(x in selected_morphology for x in ['slope', 'aspect']):
+        angles_df = env.load_variable(variable_filename='morphology_vars.pkl')['angles']
+    
+    if any(x in selected_morphology for x in ['profile_curvature', 'planform_curvature', 'twisting_curvature']):
+        curvatures_df = env.load_variable(variable_filename='morphology_vars.pkl')['curvatures']
 
     morph_grids = {morph: [] for morph in selected_morphology}
     for morph in morph_grids.keys():
@@ -262,7 +267,7 @@ def update_reference_points_csv(
 
         ref_points_df.loc[i, 'dtm'] = curr_sel_dtm
         ref_points_df.loc[i, 'idx_1d'] = curr_sel_1d_idx
-        ref_points_df.loc[i, 'dist'] = curr_dist_to_grid_point
+        ref_points_df.loc[i, 'dist_to_pxl'] = curr_dist_to_grid_point
 
         if morph_grids is not None:
             for morph in morph_grids.keys():
@@ -282,7 +287,7 @@ def update_reference_points_csv(
                 )
 
                 ref_points_df.loc[i, ts_par] = ts_prj_dict[ts_par].loc[nearest_sta_idx.item(), 'station']
-                ref_points_df.loc[i, f"dist_{ts_par}"] = nearest_sta_dist
+                ref_points_df.loc[i, f"dist_to_{ts_par}"] = nearest_sta_dist
 
     ref_points_df.to_csv(ref_points_csv_path, index=False)
 
@@ -305,8 +310,6 @@ def main(
 
     abg_df = env.load_variable(variable_filename='dtm_vars.pkl')['abg']
 
-    association_df = env.load_variable(variable_filename='parameter_vars.pkl')['association_df']
-
     if gui_mode:
         raise NotImplementedError("GUI mode is not supported in this script yet. Please run the script without GUI mode.")
     else:
@@ -319,12 +322,10 @@ def main(
                 default_file=os.path.join(env.folders['user_control']['path'], REFERENCE_POINTS_FILENAME)
             )
 
-    logger.info("Generating reference points info about parameters...")
-    parameters_csv_path, abg_shapes = get_paths_and_shapes(env, association_df, abg_df)
-
     if morphology is None:
         morph_grids = None
     else:
+        logger.info("Extracting morphology grids...")
         morph_grids = get_morphology_grids(
             env=env,
             selected_morphology=morphology
@@ -333,6 +334,10 @@ def main(
     if parameters is None:
         par_grids = None
     else:
+        logger.info("Extracting parameters grids...")
+        association_df = env.load_variable(variable_filename='parameter_vars.pkl')['association_df']
+        parameters_csv_path, abg_shapes = get_paths_and_shapes(env, association_df, abg_df)
+
         par_grids = get_parameters_grids(
             association_df=association_df,
             selectd_parameters=parameters,
@@ -346,6 +351,7 @@ def main(
     if time_sensitive is None:
         ts_dict = None
     else:
+        logger.info("Extracting time sensitive data...")
         ts_dict = get_time_sensitive_dict(
             env=env,
             sel_ts_opts=time_sensitive
