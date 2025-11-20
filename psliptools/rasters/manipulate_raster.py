@@ -49,6 +49,7 @@ def replace_values(
     out_raster = raster.copy()  # Create a copy of the raster to avoid modifying the original
     for old, new in zip(old_value, new_value):
         out_raster[out_raster == old] = new
+    
     return out_raster
 
 # %% === Function to resample raster
@@ -125,6 +126,7 @@ def resample_raster(
     mask_matrix = np.ones((out_profile['height'], out_profile['width']), dtype=bool)
     if poly_mask is not None:
         mask_matrix = get_pixels_inside_polygon(geo_polygon=poly_mask, raster_profile=out_profile)
+    
     return out_raster, out_profile, out_grid_x, out_grid_y, mask_matrix
 
 # %% === Function to interpolate scatter data to raster
@@ -208,6 +210,7 @@ def interpolate_scatter_to_raster(
         min_dists, _ = kdtree.query(grid_coords, k=1)
         min_dists = min_dists.reshape(out_grid_x.shape)
         out_raster_data[min_dists > max_distance] = fill_value
+    
     return out_raster_data
 
 # %%

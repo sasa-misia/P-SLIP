@@ -13,7 +13,8 @@ from .import_time_sensitive import (
 )
 
 from .points import (
-    get_closest_point_id
+    get_closest_point_id,
+    interpolate_scatter_to_scatter
 )
 
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     "create_stations_distance_matrix",
     "merge_time_sensitive_data_and_stations",
     "get_data_based_on_station",
-    "get_closest_point_id"
+    "get_closest_point_id",
+    "interpolate_scatter_to_scatter"
 ]

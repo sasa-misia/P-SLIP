@@ -7,6 +7,8 @@ import os
 from ..utilities.datetimes import infer_datetime_format, parse_datetime
 from ..utilities.pandas_utils import filter_numeric_series, fill_missing_values_of_numeric_series, get_mask_with_possible_dtype
 from ..utilities.csv_file_utils import read_generic_csv
+from ..rasters.coordinates import get_projected_epsg_code_from_bbox, convert_coords
+from .points import interpolate_scatter_to_scatter
 
 # %% === Helper method to parse and validate a time-sensitive dataframe
 def _parse_time_sensitive_dataframe(
@@ -780,9 +782,9 @@ def load_time_sensitive_data_from_csv(
     """
     if not isinstance(file_path, str) or not os.path.exists(file_path):
         raise TypeError("file_path must be a string and the file must exist.")
-    if not isinstance(no_data, (float, int, str, list)):
+    if not isinstance(no_data, (float, int, str, list, type(None))):
         raise TypeError("no_data must be a float, integer, string or list of these types.")
-    if not isinstance(no_data, list):
+    if not isinstance(no_data, (list, type(None))):
         no_data = [no_data]
     if not isinstance(datetime_columns_names, (list, type(None))):
         raise TypeError("datetime_names must be a list of strings or None.")
@@ -1020,7 +1022,8 @@ def merge_time_sensitive_data_and_stations(
         stations_table: pd.DataFrame,
         no_data: float | int | str | list[float | int | str]=None,
         fill_gaps: bool=True,
-        fill_max_distance: float=None
+        fill_max_radius: float | int=None, # in meters
+        fill_method: str='nearest'
     ) -> dict[str, pd.DataFrame]:
     """
     Merge and align time-sensitive data with gauges table.
@@ -1032,13 +1035,24 @@ def merge_time_sensitive_data_and_stations(
     Returns:
         dict[str, pd.DataFrame]: A dictionary containing structured, merged, and aligned data.
     """
-
-    # TODO: Add option to fill data gaps with data from other stations, based on station distance matrix and fill maximum distance
+    ALLOWED_FILL_METHODS = ["nearest", "linear", "cubic", "rbf", "idw"]
 
     if not(isinstance(data_dict, dict)):
         raise TypeError("data_dict must be a dictionary.")
     if not(isinstance(stations_table, pd.DataFrame)):
         raise TypeError("stations_table must be a pandas DataFrame.")
+    if not isinstance(no_data, (float, int, str, list, type(None))):
+        raise TypeError("no_data must be a float, int, str or list.")
+    if not isinstance(no_data, (list, type(None))):
+        no_data = [no_data]
+    if not isinstance(fill_gaps, bool):
+        raise TypeError("fill_gaps must be a boolean.")
+    if not isinstance(fill_max_radius, (float, int, type(None))):
+        raise TypeError("fill_max_distance must be a float.")
+    if not isinstance(fill_method, (str, type(None))):
+        raise TypeError("fill_method must be a string.")
+    if not fill_method in ALLOWED_FILL_METHODS:
+        raise ValueError(f"fill_method must be one of {ALLOWED_FILL_METHODS}.")
     
     data_dict = data_dict.copy()
     stations_table = stations_table.copy()
@@ -1096,10 +1110,92 @@ def merge_time_sensitive_data_and_stations(
             if col_name in data_dict[sta].columns:
                 curr_numeric = data_dict[sta].loc[:, [col_name]]
                 curr_numeric.columns = [sta]
+                if no_data is not None and isinstance(no_data, list):
+                    for val in no_data: # Replace no_data with np.nan
+                        curr_numeric = curr_numeric.replace(to_replace=val, value=np.nan)
                 if time_sensitive_vars['data'][col_name] is None:
                     time_sensitive_vars['data'][col_name] = curr_numeric
                 else:
                     time_sensitive_vars['data'][col_name] = pd.concat([time_sensitive_vars['data'][col_name], curr_numeric], axis=1)
+    
+    if fill_gaps:
+        sta_bbox = [
+            stations_table['longitude'].min(), 
+            stations_table['latitude'].min(), 
+            stations_table['longitude'].max(), 
+            stations_table['latitude'].max()
+        ]
+        out_epsg = get_projected_epsg_code_from_bbox(geo_bbox=sta_bbox)
+        sta_prj_x, sta_prj_y = convert_coords(
+            crs_in=4326,
+            crs_out=out_epsg,
+            in_coords_x=stations_table['longitude'],
+            in_coords_y=stations_table['latitude']
+        )
+        stations_table['prj_epsg'] = out_epsg
+        stations_table['prj_x'] = sta_prj_x
+        stations_table['prj_y'] = sta_prj_y
+        
+        station_distances = create_stations_distance_matrix(stations_table, x_column='prj_x', y_column='prj_y')
+
+        time_sensitive_vars['data_source'] = {}
+        for col_name in numeric_columns_names:
+            time_sensitive_vars['data_source'][col_name] = pd.DataFrame(
+                index=time_sensitive_vars['data'][col_name].index, 
+                columns=time_sensitive_vars['data'][col_name].columns, 
+                data='no_data', 
+                dtype=str
+            )
+            data_to_fill = time_sensitive_vars['data'][col_name].isna()
+            time_sensitive_vars['data_source'][col_name][~data_to_fill] = 'current_station'
+            for sta in time_sensitive_vars['data_source'][col_name].columns:
+                if not data_to_fill.any(axis=None):
+                    continue # Data is fully filled
+
+                available_stations = station_distances[sta].sort_values()[1:].index.to_list() # [1:] to exclude the current station
+                if fill_max_radius is not None:
+                    available_stations = [x for x in available_stations if station_distances[sta][x] < fill_max_radius]
+                
+                if len(available_stations) < 1:
+                    continue # No available stations
+
+                for i, item in time_sensitive_vars['data_source'][col_name][sta][data_to_fill[sta]].items():
+                    if item != 'no_data':
+                        continue # Skip already filled data
+
+                    available_data = time_sensitive_vars['data'][col_name].loc[i, :][
+                        time_sensitive_vars['data_source'][col_name].loc[i, :].index.isin(available_stations) & \
+                        (time_sensitive_vars['data_source'][col_name].loc[i, :] == 'current_station').to_numpy()
+                    ]
+
+                    if len(available_data) < 1:
+                        continue # No data available
+
+                    if fill_method == 'nearest': # No need to call the interpolation function
+                        nearest_station = station_distances.loc[available_data.index, sta].sort_values().index[0]
+                        time_sensitive_vars['data_source'][col_name].loc[i, sta] = 'nearest_[' + nearest_station + ']'
+                        time_sensitive_vars['data'][col_name].loc[i, sta] = time_sensitive_vars['data'][col_name].loc[i, nearest_station]
+                    elif fill_method in ALLOWED_FILL_METHODS and fill_method != 'nearest':
+                        curr_val = interpolate_scatter_to_scatter(
+                            x_in=stations_table.loc[stations_table['station'].isin(available_data.index), 'prj_x'], 
+                            y_in=stations_table.loc[stations_table['station'].isin(available_data.index), 'prj_y'],
+                            data_in=available_data,
+                            x_out=stations_table.loc[stations_table['station'] == sta, 'prj_x'],
+                            y_out=stations_table.loc[stations_table['station'] == sta, 'prj_y'],
+                            interpolation_method=fill_method,
+                            fill_value=np.nan
+                        )
+
+                        if curr_val.size != 1:
+                            raise ValueError(f"Expected 1 value from interpolation of {available_data.index.to_list()} in station [{sta}] at row [{i}], got {curr_val.size}.")
+                        
+                        if not np.isnan(curr_val): # Only if interpolation was successful
+                            str_fill_tag = f'{fill_method}_[' + ', '.join(available_data.index) + ']'
+                            time_sensitive_vars['data_source'][col_name].loc[i, sta] = str_fill_tag
+                            time_sensitive_vars['data'][col_name].loc[i, sta] = curr_val.item()
+                    else:
+                        raise ValueError(f"Unknown or not implemented fill_method: {fill_method}.")
+
     return time_sensitive_vars
 
 # %% === Function to unify station data from one or multiple CSV files

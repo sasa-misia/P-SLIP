@@ -1,5 +1,6 @@
 # %% === Import necessary modules
 import os
+import re
 import argparse
 import pandas as pd
 
@@ -33,6 +34,17 @@ from psliptools.scattered import (
 # %% === Helper functions and global variables
 SOURCE_MODES = ['station', 'satellite']
 AGGREGATION_METHODS = ['mean', 'sum', 'min', 'max']
+
+def clean_station_name(name: str) -> str:
+    """
+    Replace characters not allowed in NTFS filenames with '_' 
+    ( < > : " / \\ | ? * ), keep all other characters (including accents).
+    """
+    # Replace each forbidden character with underscore
+    cleaned = re.sub(r'[<>:"/\\|?*]', '_', name)
+    # Collapse multiple underscores and strip leading/trailing underscores/spaces
+    cleaned = re.sub(r'_+', '_', cleaned).strip(' _')
+    return cleaned.lower()
 
 def get_numeric_data_ranges(
         source_type: str
@@ -95,28 +107,52 @@ def associate_csv_files_with_gauges(
     ) -> pd.DataFrame:
     """Utility function to associate the csv files with the gauges."""
     csv_associated_stations = []
+    csv_filler_stations = []
     for data_pth in csv_paths:
-        station_matches = [x for x in station_names if x in os.path.basename(data_pth).lower()]
-        if len(station_matches) != 1:
-            log_and_warning(f"No single data-station association found for {data_pth}", stacklevel=2, logger=logger)
+        station_matches = sorted(
+            [x for x in station_names if x.lower() in os.path.basename(data_pth).lower()], 
+            key=lambda x: (os.path.basename(data_pth).lower().index(x.lower()), -len(x))
+        ) # sort by the order in which the gauges appear in the filename, and then by the length of the gauge name in descending order
+        if len(station_matches) < 1:
+            log_and_warning(f"No data-station association found for {data_pth}", stacklevel=2, logger=logger)
             csv_associated_stations.append(None)
-        else:
+        elif len(station_matches) == 1:
             new_association = station_names[station_matches[0]]
             if new_association in csv_associated_stations:
                 log_and_warning(f"Duplicate data-station association found for {data_pth}", stacklevel=2, logger=logger)
                 csv_associated_stations.append(None)
             else:
                 csv_associated_stations.append(new_association)
+        else:
+            log_and_warning(f"Multiple data-station associations found for {data_pth}", stacklevel=2, logger=logger)
+            csv_associated_stations.append(None)
+            possible_stations = [station_names[x] for x in station_matches]
+            possible_valid_stations = [x for x in possible_stations if x not in csv_associated_stations]
+            if len(possible_valid_stations) >= 1:
+                csv_filler_stations.append(possible_valid_stations[0])
     
     if any(x is None for x in csv_associated_stations):
         if gui_mode:
             log_and_error("GUI mode is not supported in this script yet. Please run the script without GUI mode.", NotImplementedError, logger)
         else:
             print("\n=== Association of data files with gauges ===")
-            csv_associated_stations = label_list_elements_prompt(
-                obj_list=[os.path.basename(x) for x in csv_paths],
-                usr_prompt=f"Enter the names of the stations (possible values: {'; '.join(station_names.values())}) for each file (comma separated, same order): "
-            )
+            auto_fill = True
+            if len([x for x in csv_associated_stations if x is None]) == len(csv_filler_stations):
+                for i, x in enumerate(csv_associated_stations):
+                    if x is None:
+                        csv_associated_stations[i] = csv_filler_stations.pop(0)
+                if len(csv_filler_stations) > 0:
+                    auto_fill=False
+                else:
+                    print(f"\nAutomatically filled data-station associations with the following schema: ")
+                    print(f"{'\n'.join([f'{x} -> {y}' for x, y in zip([os.path.basename(x) for x in csv_paths], csv_associated_stations)])}\n")
+                    auto_fill = input("Are you okay with this? (y/n): ").lower() == 'y'
+            
+            if not auto_fill:
+                csv_associated_stations = label_list_elements_prompt(
+                    obj_list=[os.path.basename(x) for x in csv_paths],
+                    usr_prompt=f"Enter the names of the stations (possible values: {'; '.join(station_names.values())}) for each file (comma separated, same order): "
+                )
 
         if len(set(csv_associated_stations)) != len(csv_associated_stations):
             log_and_error("Duplicate data-station association found. Please check your association names.", ValueError, logger)
@@ -199,7 +235,10 @@ def main(
         
         logger.info("Loading gauge info file...")
         station_df = load_time_sensitive_stations_from_csv(file_path=gauge_info_path)
-        station_names ={x.lower(): x for x in station_df['station'].to_list()}
+        station_names = {
+            clean_station_name(x): x
+            for x in station_df['station'].to_list()
+        } # This is just a temporary dictionary to make association with filenames easier
 
         cust_ids = []
         _, cust_id = env.add_input_file(file_path=gauge_info_path, file_type=source_type, file_subtype=f"sta")
