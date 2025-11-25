@@ -34,6 +34,8 @@ from psliptools.scattered import (
 # %% === Helper functions and global variables
 SOURCE_MODES = ['station', 'satellite']
 AGGREGATION_METHODS = ['mean', 'sum', 'min', 'max']
+SINGLE_STATION_FILL_METHODS = ['zero', 'mean', 'nearest', 'previous', 'next', 'linear', 'quadratic', 'cubic', 'auto']
+MULTI_STATIONS_FILL_METHODS = ['nearest', 'linear', 'cubic', 'rbf', 'idw', 'auto']
 
 def clean_station_name(name: str) -> str:
     """
@@ -171,6 +173,10 @@ def main(
         source_subtype: str="recordings",
         round_datetimes_to_nearest_minute: bool=True,
         delta_time_hours: float=None,
+        numeric_data_range: tuple[float, float]=None,
+        fill_method_single: str='auto',
+        fill_method_multiple: str='auto',
+        common_datetimes_filter: bool=True,
         aggregation_method: str=None,
         last_date: pd.Timestamp | str=None,
         rename_csv_data_columns: bool=False,
@@ -183,12 +189,26 @@ def main(
         log_and_error("Invalid source type. Must be one of: " + ", ".join(KNOWN_DYNAMIC_INPUT_TYPES), ValueError, logger)
     if not source_subtype in DYNAMIC_SUBFOLDERS:
         log_and_error("Invalid source subtype. Must be one of: " + ", ".join(DYNAMIC_SUBFOLDERS), ValueError, logger)
+    if not isinstance(round_datetimes_to_nearest_minute, bool):
+        log_and_error("round_datetimes_to_nearest_minute must be a boolean", TypeError, logger)
+    if not isinstance(delta_time_hours, (float, int, type(None))):
+        log_and_error("delta_time_hours must be a float or int or None", TypeError, logger)
+    if numeric_data_range is not None and (not isinstance(numeric_data_range, (tuple, list)) or len(numeric_data_range) != 2):
+        log_and_error("numeric_data_range must be a None, tuple or list of length 2", TypeError, logger)
+    if fill_method_single is not None and not fill_method_single in SINGLE_STATION_FILL_METHODS:
+        log_and_error("fill_method_single must be a string and must be one of: " + ", ".join(SINGLE_STATION_FILL_METHODS), ValueError, logger)
+    if fill_method_multiple is not None and not fill_method_multiple in MULTI_STATIONS_FILL_METHODS:
+        log_and_error("fill_method_multiple must be a string and must be one of: " + ", ".join(MULTI_STATIONS_FILL_METHODS), ValueError, logger)
     if aggregation_method is not None and not aggregation_method in AGGREGATION_METHODS:
         log_and_error("Invalid aggregation method. Must be one of:" + ", ".join(AGGREGATION_METHODS), ValueError, logger)
     if isinstance(last_date, str):
         last_date = pd.to_datetime(last_date)
-    if last_date is not None and not isinstance(last_date, pd.Timestamp):
+    if not isinstance(last_date, (pd.Timestamp, type(None))):
         log_and_error("last_date must be a datetime object or None", TypeError, logger)
+    if not isinstance(rename_csv_data_columns, bool):
+        log_and_error("rename_csv_data_columns must be a boolean", TypeError, logger)
+    if not isinstance(force_consistency, bool):
+        log_and_error("force_consistency must be a boolean", TypeError, logger)
     
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
@@ -222,8 +242,16 @@ def main(
                 src_ext=SUPPORTED_FILE_TYPES['table']
             )
 
-    ts_numeric_data_range = get_numeric_data_ranges(source_type)
-    fill_method, aggregation_method = get_fill_and_aggregation_methods(source_type, aggregation_method)
+    if numeric_data_range is None:
+        numeric_data_range = get_numeric_data_ranges(source_type)
+    
+    auto_fill_method, aggregation_method = get_fill_and_aggregation_methods(source_type, aggregation_method)
+
+    if fill_method_single == 'auto':
+        fill_method_single = auto_fill_method
+    
+    if fill_method_multiple == 'auto':
+        fill_method_multiple = 'nearest'
     
     if source_mode == 'station':
         if gauge_info_path in data_paths:
@@ -246,11 +274,12 @@ def main(
 
         data_stations = associate_csv_files_with_gauges(csv_paths=data_paths, station_names=station_names, gui_mode=gui_mode)
 
+        logger.info("Loading time-sensitive data files...")
         data_dict = {}
         for idx, (data_pth, data_sta) in enumerate(zip(data_paths, data_stations)):
             data_dict[data_sta] = load_time_sensitive_data_from_csv(
                 file_path=data_pth,
-                fill_method=fill_method,
+                fill_method=fill_method_single,
                 round_datetime=round_datetimes_to_nearest_minute,
                 delta_time_hours=delta_time_hours,
                 aggregation_method=aggregation_method,
@@ -258,7 +287,7 @@ def main(
                 datetime_columns_names=None, # Auto-detect
                 numeric_columns_names=None, # Auto-detect
                 force_datetime_consistency=force_consistency,
-                numeric_range_filter=ts_numeric_data_range,
+                numeric_range_filter=numeric_data_range,
                 fuzzy_datetime_match=True
             )
 
@@ -266,12 +295,18 @@ def main(
             station_df.loc[station_df['station'] == data_sta, 'file_id'] = cust_id
             cust_ids.append(cust_id)
             
-            memory_report(logger)
+            if idx % 10 == 0 and idx > 0:
+                memory_report(logger)
+        
+        logger.info(f"Loaded {len(data_dict)} time-sensitive data files...")
 
         logger.info("Merging time-sensitive data files with gauges info...")
         time_sensitive_vars = merge_time_sensitive_data_and_stations(
             data_dict=data_dict,
-            stations_table=station_df
+            stations_table=station_df,
+            common_datetimes_filter=common_datetimes_filter,
+            fill_method=fill_method_multiple,
+            fill_max_radius=10000 # in meters -> 10 km (if another gauge is in less than 10 km from the current one, it can be used to fill current station data)
         )
 
     else:
@@ -283,10 +318,16 @@ def main(
     env.config['inputs'][source_type][idx_config]['settings'] = {
         'source_mode': source_mode,
         'source_subtype': source_subtype,
+        'round_datetimes_to_nearest_minute': round_datetimes_to_nearest_minute,
         'delta_time_hours': delta_time_hours,
+        'numeric_data_range': numeric_data_range,
+        'fill_method_single': fill_method_single,
+        'fill_method_multiple': fill_method_multiple,
+        'common_datetimes_filter': common_datetimes_filter,
         'aggregation_method': aggregation_method,
         'common_start_date': common_start_date,
-        'common_end_date': common_end_date
+        'common_end_date': common_end_date,
+        'force_consistency': force_consistency
     }
     env.config['inputs'][source_type][idx_config]['custom_id'] = cust_ids
 
@@ -306,6 +347,9 @@ if __name__ == "__main__":
     parser.add_argument("--source_subtype", type=str, default="recordings", help="Source subtype (recordings, forecast)")
     parser.add_argument("--round_datetimes_to_nearest_minute", action="store_true", help="Round datetimes to the nearest minute")
     parser.add_argument("--delta_time_hours", type=int, default=1, help="Delta time in hours")
+    parser.add_argument("--numeric_data_range", type=float, nargs=2, default=[None, None], help="Numeric range to consider (default: [None, None])")
+    parser.add_argument("--fill_method_single", type=str, default="auto", help=f"Fill method for single data files {SINGLE_STATION_FILL_METHODS}")
+    parser.add_argument("--fill_method_multiple", type=str, default="auto", help=f"Fill method for multiple data files {MULTI_STATIONS_FILL_METHODS}")
     parser.add_argument("--aggregation_method", type=list[str], default=None, help="Aggregation method (mean, sum, min, max)")
     parser.add_argument("--last_date", type=str, default=None, help="Last date (YYYY-MM-DD HH:mm)")
     parser.add_argument("--rename_csv_data_columns", action="store_true", help="Rename csv data files columns")

@@ -1020,10 +1020,10 @@ def create_stations_distance_matrix(
 def merge_time_sensitive_data_and_stations(
         data_dict: dict[str, pd.DataFrame],
         stations_table: pd.DataFrame,
+        common_datetimes_filter: bool=True,
         no_data: float | int | str | list[float | int | str]=None,
-        fill_gaps: bool=True,
-        fill_max_radius: float | int=None, # in meters
-        fill_method: str='nearest'
+        fill_method: str=None,
+        fill_max_radius: float | int=None # in meters
     ) -> dict[str, pd.DataFrame]:
     """
     Merge and align time-sensitive data with gauges table.
@@ -1031,6 +1031,11 @@ def merge_time_sensitive_data_and_stations(
     Args:
         data_dict (dict[str, pd.DataFrame]): A dictionary mapping gauge names to DataFrames data.
         stations_table (pd.DataFrame): A DataFrame containing the gauges table.
+        common_datetimes_filter (bool, optional): Whether to filter data to common datetimes (default: True).
+        no_data (float | int | str | list[float | int | str], optional): The value to use for missing data (default: None).
+        fill_method (str, optional): The method to use for filling missing data (default: None -> no fill with values from other gauges).
+            NOTE: fill missing values is currently slow...
+        fill_max_radius (float | int, optional): The maximum radius for filling missing data (default: None -> all gauges could be used).
 
     Returns:
         dict[str, pd.DataFrame]: A dictionary containing structured, merged, and aligned data.
@@ -1045,13 +1050,11 @@ def merge_time_sensitive_data_and_stations(
         raise TypeError("no_data must be a float, int, str or list.")
     if not isinstance(no_data, (list, type(None))):
         no_data = [no_data]
-    if not isinstance(fill_gaps, bool):
-        raise TypeError("fill_gaps must be a boolean.")
     if not isinstance(fill_max_radius, (float, int, type(None))):
         raise TypeError("fill_max_distance must be a float.")
     if not isinstance(fill_method, (str, type(None))):
         raise TypeError("fill_method must be a string.")
-    if not fill_method in ALLOWED_FILL_METHODS:
+    if fill_method is not None and not fill_method in ALLOWED_FILL_METHODS:
         raise ValueError(f"fill_method must be one of {ALLOWED_FILL_METHODS}.")
     
     data_dict = data_dict.copy()
@@ -1073,9 +1076,21 @@ def merge_time_sensitive_data_and_stations(
     delta_time_disequality = [delta_time != delta_times[0] for delta_time in delta_times]
     if any(delta_time_disequality):
         raise ValueError(f"All data must have the same delta time. Found: {delta_times} for stations: {list(data_dict.keys())}. Please force delta time to be the same for all data.")
+    
+    delta_time = delta_times[0]
 
-    shared_start_date = max(start_dates)
-    shared_end_date = min(end_dates)
+    common_start_date = max(start_dates)
+    common_end_date = min(end_dates)
+
+    min_start_date = min(start_dates)
+    max_end_date = max(end_dates)
+
+    if common_datetimes_filter:
+        shared_start_date = common_start_date
+        shared_end_date = common_end_date
+    else:
+        shared_start_date = min_start_date
+        shared_end_date = max_end_date
 
     numeric_columns_names = []
     for data_label, data_df in data_dict.items():
@@ -1089,7 +1104,34 @@ def merge_time_sensitive_data_and_stations(
         for filt_col_name in filtered_columns_names:
             if filt_col_name not in numeric_columns_names:
                 numeric_columns_names.append(filt_col_name)
-        data_dict[data_label] = filtered_data_df
+        
+        # If only_common_datetimes is False, add missing dates and fill numeric columns with NaN
+        if common_datetimes_filter:
+            data_dict[data_label] = filtered_data_df
+        else:
+            # Create full datetime range
+            full_start_dates = pd.date_range(start=shared_start_date, end=shared_end_date, freq=delta_time, inclusive='left')
+            full_end_dates = full_start_dates + delta_time
+            
+            # Create full dataframe with all dates and NaN for numeric columns
+            full_df = pd.DataFrame({
+                'start_date': full_start_dates,
+                'end_date': full_end_dates
+            })
+            for col in numeric_columns_names:
+                full_df[col] = np.nan
+            
+            # Set index to start_date for merging (just for convenience)
+            full_df = full_df.set_index('start_date')
+            filtered_data_df = filtered_data_df.set_index('start_date')
+            
+            # Update full_df with existing data from filtered_data_df
+            full_df.update(filtered_data_df)
+            
+            # Reset index
+            full_df = full_df.reset_index()
+            
+            data_dict[data_label] = full_df
     
     time_sensitive_vars = {'stations':stations_table, 'datetimes': None, 'data': {}}
     for col_name in numeric_columns_names:
@@ -1118,7 +1160,7 @@ def merge_time_sensitive_data_and_stations(
                 else:
                     time_sensitive_vars['data'][col_name] = pd.concat([time_sensitive_vars['data'][col_name], curr_numeric], axis=1)
     
-    if fill_gaps:
+    if fill_method is not None:
         sta_bbox = [
             stations_table['longitude'].min(), 
             stations_table['latitude'].min(), 
@@ -1138,6 +1180,7 @@ def merge_time_sensitive_data_and_stations(
         
         station_distances = create_stations_distance_matrix(stations_table, x_column='prj_x', y_column='prj_y')
 
+        # TODO: speed up this part (fill with value with row-by-row processing)
         time_sensitive_vars['data_source'] = {}
         for col_name in numeric_columns_names:
             time_sensitive_vars['data_source'][col_name] = pd.DataFrame(
