@@ -6,11 +6,12 @@ import pandas as pd
 import warnings
 import os
 
-from .manipulate_geom import intersect_polygons, add_buffer_to_polygons
+from .manipulate_geom import intersect_polygons, add_buffer_to_polygons, convert_polygons_crs
 
 # %% === Function to check and fix geometries in a GeoDataFrame
 def _check_and_fix_gpd_geometries(
-        shape_gdf: gpd.GeoDataFrame
+        shape_gdf: gpd.GeoDataFrame,
+        repair_buffer: float = 1e-8
     ) -> gpd.GeoDataFrame:
     """
     Check and fix invalid geometries in a GeoDataFrame.
@@ -27,8 +28,8 @@ def _check_and_fix_gpd_geometries(
     invalid_mask = ~out_shape_gdf.geometry.is_valid
     n_invalid = invalid_mask.sum()
     if n_invalid > 0:
-        out_shape_gdf.loc[invalid_mask, 'geometry'] = out_shape_gdf.loc[invalid_mask, 'geometry'].buffer(0)
-        warnings.warn(f"{n_invalid} invalid geometries found and fixed using buffer(0).", stacklevel=2)
+        out_shape_gdf.loc[invalid_mask, 'geometry'] = out_shape_gdf.loc[invalid_mask, 'geometry'].buffer(repair_buffer) # Add a small buffer
+        warnings.warn(f"{n_invalid} invalid geometries found and fixed using buffer({repair_buffer}).", stacklevel=2)
     
     return out_shape_gdf
 
@@ -235,8 +236,14 @@ def load_vectorial_file_geometry(
         shape_gdf = gpd.read_file(file_path)
 
     # Ensure all geometries are shapely polygons
-    if not shape_gdf.geometry.geom_type.isin(['Polygon', 'MultiPolygon']).all() and allow_only_polygons:
-        raise ValueError("All geometries in the shapefile must be Polygon or MultiPolygon types.")
+    if allow_only_polygons:
+        poly_mask = shape_gdf.geometry.geom_type.isin(['Polygon', 'MultiPolygon'])
+        n_non_poly = (~poly_mask).sum()
+        if n_non_poly > 0:
+            warnings.warn(f"{n_non_poly} geometries are not Polygon or MultiPolygon and will be excluded.", stacklevel=2)
+        elif n_non_poly == len(shape_gdf):
+            raise ValueError("All geometries are not Polygon or MultiPolygon.")
+        shape_gdf = shape_gdf[poly_mask]
 
     # Filter by attribute and class if needed
     if field:
@@ -297,10 +304,18 @@ def load_vectorial_file_geometry(
 
     # Mask output polygons by poly_bound if requested
     if poly_bound_geo and mask_out_poly:
+        if shape_gdf.crs is None:
+            raise ValueError("shape_gdf must have a valid CRS in order to mask polygons.")
+        
+        if shape_gdf.crs.to_epsg() != 4326:
+            poly_bound_gdf_crs = convert_polygons_crs(poly_bound_geo, crs_in=4326, crs_out=shape_gdf.crs.to_epsg())[0]
+        else:
+            poly_bound_gdf_crs = poly_bound_geo
+
         masked_polys = []
         masked_names = []
         for poly, name in zip(sel_polys, sel_names):
-            poly_intersected = intersect_polygons(poly, poly_bound_geo)
+            poly_intersected = intersect_polygons(poly, poly_bound_gdf_crs)
             if len(poly_intersected) != 1:
                 raise RuntimeError(f"Unexpected number of intersected polygons: {len(poly_intersected)}")
             if poly_intersected[0]:

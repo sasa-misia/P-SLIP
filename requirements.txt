@@ -12,3 +12,4 @@ scikit-learn
 pyproj
 mayavi
 pydantic
+chardet

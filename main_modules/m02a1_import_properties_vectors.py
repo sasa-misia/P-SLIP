@@ -31,10 +31,15 @@ def main(
         base_dir: str=None,
         gui_mode: bool=False,
         source_type: str="land_use", 
-        source_subtype: str=None
+        source_subtype: str=None,
+        points_limit: int=80000
     ) -> dict[str, object]:
     if not source_type in KNOWN_OPTIONAL_STATIC_INPUT_TYPES:
         log_and_error("Invalid source type. Must be one of: " + ", ".join(KNOWN_OPTIONAL_STATIC_INPUT_TYPES), ValueError, logger)
+    if source_subtype is not None and not isinstance(source_subtype, str):
+        log_and_error("source_subtype must be a string", ValueError, logger)
+    if not isinstance(points_limit, int) or points_limit <= 0:
+        log_and_error("points_limit must be a positive integer", ValueError, logger)
     
     source_mode = 'shapefile'
 
@@ -69,7 +74,7 @@ def main(
         poly_bound_geo=study_area_polygon,
         mask_out_poly=True,
         convert_to_geo=True,
-        points_lim=80000,
+        points_lim=points_limit,
         allow_only_polygons=True
     )
 

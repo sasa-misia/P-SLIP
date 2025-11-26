@@ -212,7 +212,6 @@ def convert_time_sens_dict_to_prj(
     if ts_dict:
         ts_prj_dict = ts_dict.copy()
         for key, ts_df in ts_prj_dict.items():
-            ts_df = ts_df.rename(columns={'longitude': 'prj_x', 'latitude': 'prj_y'})
             ts_prj_x, ts_prj_y = convert_coords(
                 crs_in=4326,
                 crs_out=out_epsg,
