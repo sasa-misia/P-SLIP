@@ -1,4 +1,5 @@
 # %% === Import necessary modules
+import os
 import argparse
 import pandas as pd
 import numpy as np
@@ -70,7 +71,10 @@ def get_time_sensitive_statistics(
 
             ts_stats['count'][ts_label].loc[['basic', 'quantiles'], col] = [num_obs_range, num_obs_range]
             ts_stats['basic'][ts_label].loc[['mean', 'std', 'min', 'max'], col] = curr_col[rows_inside_range].describe().loc[['mean', 'std', 'min', 'max']]
-            ts_stats['basic'][ts_label].loc[['median', 'mode'], col] = [curr_col[rows_inside_range].median(), curr_col[rows_inside_range].mode().iloc[0]]
+            ts_stats['basic'][ts_label].loc[['median', 'mode'], col] = [
+                curr_col[rows_inside_range].median(), 
+                curr_col[rows_inside_range].mode().iloc[0] if curr_col[rows_inside_range].mode().shape[0] > 0 else np.nan
+            ]
             ts_stats['quantiles'][ts_label][col] = curr_col[rows_inside_range].quantile(quantiles)
 
             for qnt_idx, qnt_val in ts_stats['quantiles'][ts_label][col].items():
@@ -112,13 +116,13 @@ def get_mobile_averages(
     # Helper: mask a series according to the numeric range
     def _mask_series(series):
         """Return a copy where out‑of‑range values are set to NaN."""
-        mask = get_mask_in_range(
+        in_range_mask = get_mask_in_range(
             series=series,
             min_value=numeric_data_range[0],
             max_value=numeric_data_range[1],
             include_min_max=include_range_extremes
         )
-        return series.where(mask, np.nan), mask
+        return series.where(in_range_mask, np.nan), in_range_mask # NOTE: .where(x, y) replaces values with y only where the mask (x) is False!
     
     # Helper: filter and possibly cut results of mobile average if outside range limits
     def _filter_series(series):
@@ -307,6 +311,7 @@ def get_mobile_averages(
             
             ts_mobile_averages['adaptive'][ts_label][col], out_of_range_mask['adaptive'][ts_label][col] = _filter_series(ma_adaptive)
         
+        logger.info(f"Time-sensitive mobile averages calculated for {ts_label} data...")
         memory_report(logger)
     
     warn_msg = "Out of range values were detected and automatically cut" if cut_outside_range else "Out of range values detected (please check it!)"
@@ -316,6 +321,55 @@ def get_mobile_averages(
                 log_and_warning(f"{warn_msg} in {ma_key} MA for {ts_label}", stacklevel=2, logger=logger)
 
     return ts_mobile_averages
+
+def export_time_sensitive_data_to_csv(
+        time_sensitive_vars: dict,
+        out_dir: str
+    ) -> None:
+    """
+    Export time-sensitive data to CSV files.
+
+    Args:
+        time_sensitive_vars (dict): Dictionary containing time-sensitive data variables.
+        out_dir (str): Output directory for CSV files.
+    """
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+    
+    # Writing statistics for all stations
+    for num_label in time_sensitive_vars['data'].keys():
+        out_file = os.path.join(out_dir, "_"+num_label+"_statistics.csv")
+        out_df = pd.concat([
+            time_sensitive_vars['statistics']['count'][num_label].assign(metric=lambda df: 'count-' + df.index.astype(str)).reindex(columns=['metric'] + [col for col in time_sensitive_vars['statistics']['count'][num_label].columns if col != 'metric']),
+            time_sensitive_vars['statistics']['basic'][num_label].assign(metric=lambda df: 'basic-' + df.index.astype(str)).reindex(columns=['metric'] + [col for col in time_sensitive_vars['statistics']['basic'][num_label].columns if col != 'metric']),
+            time_sensitive_vars['statistics']['quantiles'][num_label].assign(metric=lambda df: 'quantiles-' + df.index.astype(str)).reindex(columns=['metric'] + [col for col in time_sensitive_vars['statistics']['quantiles'][num_label].columns if col != 'metric']),
+            time_sensitive_vars['statistics']['noise']['mean'][num_label].assign(metric=lambda df: 'noise-mean-' + df.index.astype(str)).reindex(columns=['metric'] + [col for col in time_sensitive_vars['statistics']['noise']['mean'][num_label].columns if col != 'metric']),
+            time_sensitive_vars['statistics']['noise']['max'][num_label].assign(metric=lambda df: 'noise-max-' + df.index.astype(str)).reindex(columns=['metric'] + [col for col in time_sensitive_vars['statistics']['noise']['max'][num_label].columns if col != 'metric'])
+        ], axis=0)
+        out_df.to_csv(out_file, index=False)
+
+    # Mobile average window string
+    delta_window_str = (
+        f"{time_sensitive_vars['mobile_averages']['window_delta_time'].days}d-"
+        f"{time_sensitive_vars['mobile_averages']['window_delta_time'].seconds // 3600}h-"
+        f"{(time_sensitive_vars['mobile_averages']['window_delta_time'].seconds % 3600) // 60}m-"
+        f"{time_sensitive_vars['mobile_averages']['window_delta_time'].seconds % 60}s"
+    )
+
+    # Writing data and mobile averages for each station
+    for sta in time_sensitive_vars['stations']['station']:
+        for num_label in time_sensitive_vars['data'].keys():
+            out_file = os.path.join(out_dir, f"{sta}_{num_label}_data_and_mob_avg_window-{delta_window_str}.csv")
+            out_df = time_sensitive_vars['datetimes'].copy()
+            if sta in time_sensitive_vars['data'][num_label].columns:
+                out_df[num_label] = time_sensitive_vars['data'][num_label][sta]
+                out_df['source'] = time_sensitive_vars['data_source'][num_label][sta]
+                for ma_key, ma_dict in time_sensitive_vars['mobile_averages'].items():
+                    if ma_key in ['data_delta_time', 'window_delta_time']:
+                        continue # No need to write data delta time and window delta time
+                    out_df[f"ma_{ma_key}"] = ma_dict[num_label][sta]
+                
+                out_df.to_csv(out_file, index=False)
 
 # %% === Main function
 def main(
@@ -327,7 +381,8 @@ def main(
         numeric_range: list[float]=[None, None],
         include_range_extremes: bool=False,
         cut_outside_range: bool=True,
-        moving_average_window: pd.Timedelta=pd.Timedelta(days=31)
+        moving_average_window: pd.Timedelta=pd.Timedelta(days=31),
+        export_results_to_csv: bool=True
     ) -> dict[str, object]:
     """Main function to obtain statistical information of time-sensitive data."""
     if not source_type in KNOWN_DYNAMIC_INPUT_TYPES:
@@ -386,6 +441,13 @@ def main(
 
     env.save_variable(variable_to_save=ts_vars, variable_filename=f"{rel_filename}_vars.pkl")
 
+    if export_results_to_csv:
+        logger.info(f"Exporting results of data and statistics to CSV for {source_type} data ({source_subtype})...")
+        export_time_sensitive_data_to_csv(
+            time_sensitive_vars=ts_vars,
+            out_dir=os.path.join(env.folders['outputs']['tables']['path'], source_type+"_"+source_subtype+"_data_and_statistics")
+        )
+
     return ts_vars
 
 # %% === Command line interface
@@ -400,6 +462,7 @@ if __name__ == "__main__":
     parser.add_argument('--include_range_extremes', action='store_true', help='Include range extremes (default: False)')
     parser.add_argument('--cut_outside_range', action='store_true', help='Cut outside range (default: True)')
     parser.add_argument('--moving_average_window', type=dt.timedelta, default=dt.timedelta(days=31), help='Moving average window (default: 31 days)')
+    parser.add_argument('--export_results_to_csv', action='store_true', help='Export results to CSV (default: False)')
     args = parser.parse_args()
 
     main(
@@ -411,5 +474,6 @@ if __name__ == "__main__":
         numeric_range=args.numeric_range,
         include_range_extremes=args.include_range_extremes,
         cut_outside_range=args.cut_outside_range,
-        moving_average_window=args.moving_average_window
+        moving_average_window=args.moving_average_window,
+        export_results_to_csv=args.export_results_to_csv
     )

@@ -184,6 +184,18 @@ def get_mask_in_range(
         max_value: float=None,
         include_min_max: bool=True
     ) -> pd.Series:
+    """
+    Get the boolean indices of the series within the given range.
+
+    Args:
+        series (pd.Series): The series to get the mask for.
+        min_value (float, optional): The minimum value of the range. Defaults to None.
+        max_value (float, optional): The maximum value of the range. Defaults to None.
+        include_min_max (bool, optional): Whether to include the min and max values in the range. Defaults to True.
+
+    Returns:
+        pd.Series: The boolean mask of the series within the given range.
+    """
     if not isinstance(series, pd.Series):
         raise TypeError("series must be a pandas Series.")
     if not isinstance(min_value, (int, float)) and min_value is not None:
@@ -371,6 +383,16 @@ def get_mask_with_possible_dtype(
         df: pd.DataFrame | pd.Series, 
         dtype: str='numeric' # It can be one of 'numeric', 'datetime'
     ) -> pd.DataFrame:
+    """
+    Get a mask with the specified data type in a dataframe.
+
+    Args:
+        df (pd.DataFrame | pd.Series): The pandas DataFrame or Series to get the mask from.
+        dtype (str, optional): The data type to search for in the dataframe (default: 'numeric').
+
+    Returns:
+        pd.DataFrame: The mask with the specified data type in the dataframe.
+    """
     if not isinstance(df, (pd.DataFrame, pd.Series)):
         raise TypeError("df must be a pandas DataFrame or Series.")
     if not isinstance(dtype, str):
