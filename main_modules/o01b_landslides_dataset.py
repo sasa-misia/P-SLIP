@@ -254,7 +254,7 @@ if __name__ == "__main__":
     parser.add_argument('--out_epsg_code', type=int, default=INTERNAL_EPSG_CODE, help="Output shapefile EPSG code.")
     args = parser.parse_args()
 
-    study_area_vars = main(
+    landslides_vars = main(
         base_dir=args.base_dir, 
         gui_mode=args.gui_mode,
         landslides_points_csv_path=args.points_csv_path,
