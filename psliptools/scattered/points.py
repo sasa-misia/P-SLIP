@@ -23,7 +23,7 @@ def get_closest_point_id(
         y_ref (list | np.ndarray | pd.Series): The latitude or projected y list of points based on which the distance is calculated.
 
     Returns:
-        tuple(np.ndarray, np.ndarray): A tuple containing the index of the point that is closest to the coordinate and the distance to the point.
+        tuple(np.ndarray, np.ndarray): A tuple containing the index of the point that is closest to the coordinate and the distance to the point (same size as x and y).
     """
     # Convert input coordinates to numpy arrays
     x, y = _check_and_convert_coords(x, y)
