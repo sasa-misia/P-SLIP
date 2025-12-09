@@ -400,7 +400,8 @@ def _get_csv_delimiter(
 def read_generic_csv(
         csv_path: str,
         sep: str=None,
-        regular: bool=True
+        regular: bool=True,
+        **kwargs
     ) -> pd.DataFrame:
     """
     Read a CSV file with the more comprehensive pandas read_csv function.
@@ -412,6 +413,7 @@ def read_generic_csv(
             If True, use the regular pandas read_csv function. If False, use the more 
             comprehensive read_csv function, but header will not be detected.
             In case of errors, switch to False this option.
+        **kwargs: Additional keyword arguments to pass to the pandas read_csv function.
     
     Returns:
         pd.DataFrame: The DataFrame read from the CSV file.
@@ -426,7 +428,7 @@ def read_generic_csv(
         sep = _get_csv_delimiter(csv_path, charenc)
     
     if regular:
-        read_df = pd.read_csv(csv_path, encoding=charenc, sep=sep)
+        read_df = pd.read_csv(csv_path, encoding=charenc, sep=sep, **kwargs)
     else:
         # Detect max_cols and potential header in one pass
         max_cols = 0
@@ -449,7 +451,7 @@ def read_generic_csv(
         if header_row is None:
             col_names = [f'col_{i}' for i in range(max_cols)]
 
-        read_df = pd.read_csv(csv_path, encoding=charenc, sep=sep, engine='python', on_bad_lines='warn', names=col_names, header=None)
+        read_df = pd.read_csv(csv_path, encoding=charenc, sep=sep, engine='python', on_bad_lines='warn', names=col_names, header=None, **kwargs)
     
     return read_df
 

@@ -1,5 +1,6 @@
 # %% === Import necessary modules
 import argparse
+import os
 import numpy as np
 import pandas as pd
 
@@ -38,6 +39,13 @@ LANDSLIDE_PATHS_FILENAME = "landslide_paths_vars.pkl"
 POSSIBLE_TRIGGER_MODES = ['rainfall-threshold', 'safety-factor', 'machine-learning']
 STRAIGHT_LABEL = 'straight_'
 MA_LABEL = 'mobile_average_'
+DEFAULT_ALERT_THR_FILE = {
+    'rainfall-threshold': 'rainfall_alert_thresholds.csv', 
+    'safety-factor': 'safety_factor_alert_thresholds.csv', 
+    'machine-learning': 'machine_learning_alert_thresholds.csv'
+}
+if any([tm not in DEFAULT_ALERT_THR_FILE for tm in POSSIBLE_TRIGGER_MODES]):
+    log_and_error(f"Missing default alert threshold file for some trigger modes: [{', '.join([tm for tm in POSSIBLE_TRIGGER_MODES if tm not in DEFAULT_ALERT_THR_FILE])}].", ValueError, logger)
 
 def get_top_k_paths(
         paths_df: pd.DataFrame,
@@ -141,18 +149,75 @@ def get_rain_station_ids(
 
     return rain_station_ids
 
+def get_station_pixels_association(
+        attention_pixels_df: pd.DataFrame
+    ) -> dict[str, pd.DataFrame]:
+    """
+    Get the attention pixels associated with each rain station.
+    
+    Args:
+        attention_pixels_df (pd.DataFrame): DataFrame containing attention pixel data and their reference stations.
+
+    Returns:
+        dict[str, pd.DataFrame]: Dictionary mapping rain station names to attention pixels (one DataFrame per rain station).
+    """
+    unique_rain_station_names = sorted(list(set.union(*[set(x) for x in attention_pixels_df['stations']])))
+
+    station_pixels_association = {}
+    for curr_sta in unique_rain_station_names:
+        filtered_rows = []
+        for _, row in attention_pixels_df.iterrows():
+            if curr_sta in row['stations']:
+                # Find indices where stations match curr_sta
+                matching_indices = [i for i, sta in enumerate(row['stations']) if sta == curr_sta]
+                # Filter 2D_idx and coordinates
+                filtered_2d_idx = row['2D_idx'][matching_indices]
+                filtered_coords = row['coordinates'][matching_indices]
+                filtered_rows.append({
+                    'dtm': row['dtm'],
+                    '2D_idx': filtered_2d_idx,
+                    'coordinates': filtered_coords
+                })
+        station_pixels_association[curr_sta] = pd.DataFrame(filtered_rows)
+    
+    return station_pixels_association
+
+def _format_iterable_with_tab(
+        iterable: list | np.ndarray | pd.Series | dict,
+        prefix: str = "\t"
+    ) -> str:
+    """
+    Convert ``iterable`` (list, np.ndarray, pd.Series, dict) to a string
+    where each element/value is on its own line and prefixed with ``prefix``.
+    For a pandas Series the index is included (``index: value``) just like
+    the default ``print(series)`` output.
+    """
+    if isinstance(iterable, dict):
+        lines = [f"{prefix}{k}: {v}" for k, v in iterable.items()]
+    elif isinstance(iterable, pd.Series):
+        # Preserve the index in the output
+        lines = [f"{prefix}{idx}: {val}" for idx, val in iterable.items()]
+    else:
+        # pandas Series, list, ndarray, etc.
+        # ``list(iterable)`` works for Series, ndarray and list alike
+        lines = [f"{prefix}{v}" for v in list(iterable)]
+    
+    return "\n".join(lines)
+
 # %% === Main function
 def main(
         base_dir: str=None,
         gui_mode: bool=False,
         trigger_mode: str='rainfall-threshold', # or 'safety-factor' or 'machine-learning'
-        alert_threshold: float=None # value and measure unit depending on the trigger mode
+        alert_thresholds: float | list[float] | np.ndarray | pd.Series=None # values and measure units depend on trigger mode
     ) -> dict[str, object]:
     """Main function to analyze and alert on attention pixels."""
 
     # Input validation
     if trigger_mode not in POSSIBLE_TRIGGER_MODES:
         log_and_error(f"Invalid trigger_mode: {trigger_mode}. Must be one of {POSSIBLE_TRIGGER_MODES}.", ValueError, logger)
+    if not isinstance(alert_thresholds, (float, list, np.ndarray, pd.Series)):
+        log_and_error(f"Invalid alert_thresholds: {alert_thresholds}. Must be a float, list, np.ndarray, or pd.Series.", ValueError, logger)
 
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
@@ -173,7 +238,7 @@ def main(
     attention_pixels_df = pd.DataFrame({
         'dtm': initial_dtms,
         '2D_idx': dtm_unique_points,
-        'alert_date': None
+        'coordinates': get_attention_pixel_coordinates(env, attention_pixels_df)
     })
 
     if trigger_mode == 'rainfall-threshold':
@@ -217,22 +282,33 @@ def main(
                 allow_multiple=False
             )[0]
         
+        stations_df = rain_vars['stations']
+        rain_station_ids = get_rain_station_ids(attention_pixels_df['coordinates'], stations_df)
+        attention_pixels_df['stations'] = [stations_df.loc[curr_id_array, 'station'].tolist() for curr_id_array in rain_station_ids]
+        station_pixels_association = get_station_pixels_association(attention_pixels_df)
+        unique_rain_station_names = list(station_pixels_association.keys())
+        
         if alert_metric_mode.startswith(STRAIGHT_LABEL):
-            alert_metric_data = rain_vars[data_label][alert_metric]
+            alert_metric_data = rain_vars[data_label][alert_metric].loc[:,unique_rain_station_names]
         elif alert_metric_mode.startswith(MA_LABEL):
             ma_type = alert_metric_mode[len(MA_LABEL):]
-            alert_metric_data = rain_vars['mobile_averages'][ma_type][alert_metric]
+            alert_metric_data = rain_vars['mobile_averages'][ma_type][alert_metric].loc[:,unique_rain_station_names]
         else:
             log_and_error(f"Invalid alert metric mode: {alert_metric_mode}", ValueError, logger)
         
-        alert_metric_max = alert_metric_data.max(axis=None)
+        alert_mtr_sta_max = alert_metric_data.max(axis=0)
+        def_alert_thresholds = 0.8 * alert_mtr_sta_max
 
-        if alert_metric_max is None:
-            log_and_error("Alert metric data is empty.", ValueError, logger)
+        if alert_mtr_sta_max.isna().any():
+            log_and_error(f"Some alert metric data is empty: {alert_mtr_sta_max[alert_mtr_sta_max.isna()]}", ValueError, logger)
         
-        if alert_threshold is None:
-            alert_threshold = 0.8 * alert_metric_max
-            info_alert_threshold_prompt = f'Info for alert threshold: \n\t- max value of {alert_metric} is {alert_metric_max}; \n\t- default value for alert threshold is {alert_threshold};'
+        if alert_thresholds is None:
+            alert_thresholds = 0.8 * alert_mtr_sta_max
+            info_alert_threshold_prompt = (
+                f'Info for alert threshold: \n'
+                f'\t- max values of {alert_metric} are \n{_format_iterable_with_tab(alert_mtr_sta_max, prefix="\t\t")};\n'
+                f'\t- default values for alert thresholds are \n{_format_iterable_with_tab(def_alert_thresholds, prefix="\t\t")};'
+            )
             if alert_metric_mode.startswith(MA_LABEL):
                 info_alert_threshold_prompt += f'\n\t- m.a. delta time is {rain_vars["mobile_averages"]["window_delta_time"]};'
             
@@ -240,21 +316,75 @@ def main(
                 log_and_error("GUI mode not implemented yet.", NotImplementedError, logger)
             else:
                 print(info_alert_threshold_prompt)
-                alert_threshold_input = input(f"Enter the alert threshold for {alert_metric}: ")
-                if alert_threshold_input != '':
-                    try:
-                        alert_threshold = float(alert_threshold_input)
-                    except ValueError:
-                        log_and_warning(f"Invalid alert threshold: [{alert_threshold_input}]. Falling back to default value [{alert_threshold}].", ValueError, logger)
-        
-        alert_mask = alert_metric_data >= alert_threshold
 
-        attention_coords = get_attention_pixel_coordinates(env, attention_pixels_df)
-        stations_df = rain_vars['stations']
-        rain_station_ids = get_rain_station_ids(attention_coords, stations_df)
-        rain_station_names = [stations_df.loc[curr_id_array, 'station'].tolist() for curr_id_array in rain_station_ids]
-        # TODO: Continue with extraction of stations from alert_mask and extraction of dates and pixels (consider to apply alert threshold for each individual station extracted)
-    
+                def_alert_df = pd.DataFrame({
+                    'station': alert_mtr_sta_max.index.tolist(),
+                    f'max_{alert_metric}': alert_mtr_sta_max.tolist(),
+                    'threshold': def_alert_thresholds.tolist()
+                })
+
+                def_alert_df_path = os.path.join(env.folders['user_control']['path'], DEFAULT_ALERT_THR_FILE[trigger_mode])
+                if os.path.isfile(def_alert_df_path):
+                    overwrite = input(f"File {def_alert_df_path} already exists. Overwrite with default? [y/n]: ")
+                    if overwrite.lower() == 'y':
+                        def_alert_df.to_csv(def_alert_df_path, index=False)
+                    else:
+                        print(f"File {def_alert_df_path} not overwritten.")
+                else:
+                    def_alert_df.to_csv(def_alert_df_path, index=False)
+
+                alert_thresholds_path = select_file_prompt(
+                    base_dir=env.folders['user_control']['path'], 
+                    usr_prompt=f'Select file with alert thresholds (default: {DEFAULT_ALERT_THR_FILE[trigger_mode]}): ', 
+                    src_ext=SUPPORTED_FILE_TYPES['table'],
+                    default_file=DEFAULT_ALERT_THR_FILE[trigger_mode]
+                )
+
+                alert_thresholds = read_generic_csv(alert_thresholds_path, index_col='station').loc[:, 'threshold']
+        else:
+            if not isinstance(alert_thresholds, pd.Series):
+                alert_thresholds = pd.Series(alert_thresholds, index=unique_rain_station_names)
+        
+        if not isinstance(alert_thresholds, pd.Series):
+            log_and_error("Alert thresholds, at this point, must be a pandas Series! Please contact the developer.", ValueError, logger)
+        alert_thresholds.loc[unique_rain_station_names]
+        
+        alert_mask = alert_metric_data >= alert_thresholds
+
+        alert_datetimes_df = rain_vars['datetimes'].loc[alert_mask.any(axis=1)].copy()
+
+        activated_station_lists = [
+            alert_mask.loc[row_mask, alert_mask.loc[row_mask]].index.tolist()
+            for row_mask in alert_mask[alert_mask.any(axis=1)].index
+        ]
+        alert_datetimes_df['activated_stations'] = activated_station_lists
+        
+        alert_datetimes_df['activated_pixels'] = None
+        alert_datetimes_df['geo_coordinates'] = None
+        for idx, curr_row in alert_datetimes_df.iterrows():
+            curr_stations = curr_row['activated_stations']
+            dtm_points = {}
+            for curr_sta in curr_stations:
+                sta_df = station_pixels_association[curr_sta]
+                for _, pix_row in sta_df.iterrows():
+                    curr_dtm = pix_row['dtm']
+                    curr_2d_idx = pix_row['2D_idx']
+                    curr_coords = pix_row['coordinates']
+                    if curr_dtm not in dtm_points:
+                        dtm_points[curr_dtm] = []
+                    dtm_points[curr_dtm].append((curr_2d_idx, curr_coords))
+            # Aggregate and unique per DTM
+            activated_pixels_list = []
+            for dtm, points_list in dtm_points.items():
+                all_points = np.vstack([p for p, _ in points_list])
+                all_coords = np.vstack([c for _, c in points_list])
+                unique_indices = np.unique(all_points, axis=0, return_index=True)[1]
+                unique_points = all_points[unique_indices]
+                unique_coords = all_coords[unique_indices]
+                activated_pixels_list.append({'dtm': dtm, 'activated_points': unique_points, 'coordinates': unique_coords})
+            alert_datetimes_df.at[idx, 'activated_pixels'] = pd.DataFrame(activated_pixels_list)
+            alert_datetimes_df.at[idx, 'geo_coordinates'] = np.concatenate([x['coordinates'] for x in activated_pixels_list], axis=0)
+
     elif trigger_mode == 'safety-factor':
         log_and_error(f"Trigger mode {trigger_mode} is not implemented yet.", NotImplementedError, logger)
 
@@ -264,20 +394,40 @@ def main(
     else:
         log_and_error(f"Trigger mode not recognized or not implemented: {trigger_mode}.", ValueError, logger)
     
-    # TODO: Implement the rest of the code
-    out_vars = {}
+    OUT_ALERT_DIR = os.path.join(env.folders['outputs']['tables']['path'], 'attention_pixels_alerts')
+    if not os.path.isdir(OUT_ALERT_DIR):
+        os.makedirs(OUT_ALERT_DIR)
 
-    return out_vars
+    attention_pixels_df.to_csv(os.path.join(OUT_ALERT_DIR, 'attention_pixels.csv'), index=False)
+    alert_datetimes_df.to_csv(os.path.join(OUT_ALERT_DIR, 'activation_datetimes.csv'), index=False)
+    alert_thresholds.to_csv(os.path.join(OUT_ALERT_DIR, 'alert_thresholds.csv'), index=True)
+
+    alert_vars = {
+        'attention_pixels':attention_pixels_df, 
+        'activation_datetimes': alert_datetimes_df, 
+        'alert_thresholds': alert_thresholds,
+        'trigger_mode': trigger_mode,
+        'alert_metric': alert_metric,
+        'alert_mode': alert_metric_mode
+    }
+
+    env.save_variable(variable_to_save=alert_vars, variable_filename='alert_vars.pkl')
+
+    return alert_vars
 
 # %% === Command line interface
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze and alert on attention pixels.")
     parser.add_argument("--base_dir", type=str, help="Base directory for analysis")
     parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode")
+    parser.add_argument("--trigger_mode", type=str, default='rainfall-threshold', help="Trigger mode")
+    parser.add_argument("--alert_thresholds", type=str, default=None, help="Alert thresholds")
     
     args = parser.parse_args()
     
-    out_vars = main(
+    alert_vars = main(
         base_dir=args.base_dir,
-        gui_mode=args.gui_mode
+        gui_mode=args.gui_mode,
+        trigger_mode=args.trigger_mode,
+        alert_thresholds=args.alert_thresholds
     )
