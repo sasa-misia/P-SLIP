@@ -39,11 +39,17 @@ LANDSLIDE_PATHS_FILENAME = "landslide_paths_vars.pkl"
 POSSIBLE_TRIGGER_MODES = ['rainfall-threshold', 'safety-factor', 'machine-learning']
 STRAIGHT_LABEL = 'straight_'
 MA_LABEL = 'mobile_average_'
+DEFAULT_THRESHOLD_PERC = {
+    'quantiles': 0.9975,
+    'max-percentage': 0.75
+}
 DEFAULT_ALERT_THR_FILE = {
     'rainfall-threshold': 'rainfall_alert_thresholds.csv', 
     'safety-factor': 'safety_factor_alert_thresholds.csv', 
     'machine-learning': 'machine_learning_alert_thresholds.csv'
 }
+REMOVE_OUTLIERS_IN_THRESHOLDS = True
+
 if any([tm not in DEFAULT_ALERT_THR_FILE for tm in POSSIBLE_TRIGGER_MODES]):
     log_and_error(f"Missing default alert threshold file for some trigger modes: [{', '.join([tm for tm in POSSIBLE_TRIGGER_MODES if tm not in DEFAULT_ALERT_THR_FILE])}].", ValueError, logger)
 
@@ -209,15 +215,18 @@ def main(
         base_dir: str=None,
         gui_mode: bool=False,
         trigger_mode: str='rainfall-threshold', # or 'safety-factor' or 'machine-learning'
-        alert_thresholds: float | list[float] | np.ndarray | pd.Series=None # values and measure units depend on trigger mode
+        alert_thresholds: float | list[float] | np.ndarray | pd.Series=None, # values and measure units depend on trigger mode
+        default_thr_mode: str='quantiles' # or 'max-percentage'
     ) -> dict[str, object]:
     """Main function to analyze and alert on attention pixels."""
 
     # Input validation
     if trigger_mode not in POSSIBLE_TRIGGER_MODES:
-        log_and_error(f"Invalid trigger_mode: {trigger_mode}. Must be one of {POSSIBLE_TRIGGER_MODES}.", ValueError, logger)
-    if not isinstance(alert_thresholds, (float, list, np.ndarray, pd.Series)):
-        log_and_error(f"Invalid alert_thresholds: {alert_thresholds}. Must be a float, list, np.ndarray, or pd.Series.", ValueError, logger)
+        log_and_error(f"Invalid trigger_mode: [{trigger_mode}]. Must be one of {POSSIBLE_TRIGGER_MODES}.", ValueError, logger)
+    if not alert_thresholds is None and not isinstance(alert_thresholds, (float, list, np.ndarray, pd.Series)):
+        log_and_error(f"Invalid alert_thresholds: [{alert_thresholds}]. Must be a float, list, np.ndarray, or pd.Series.", ValueError, logger)
+    if not default_thr_mode in DEFAULT_THRESHOLD_PERC.keys():
+        log_and_error(f"Invalid default_thresholds: [{default_thr_mode}]. Must be one of {list(DEFAULT_THRESHOLD_PERC.keys())}.", ValueError, logger)
 
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
@@ -237,9 +246,10 @@ def main(
     
     attention_pixels_df = pd.DataFrame({
         'dtm': initial_dtms,
-        '2D_idx': dtm_unique_points,
-        'coordinates': get_attention_pixel_coordinates(env, attention_pixels_df)
+        '2D_idx': dtm_unique_points
     })
+
+    attention_pixels_df['coordinates'] = get_attention_pixel_coordinates(env, attention_pixels_df)
 
     if trigger_mode == 'rainfall-threshold':
         if gui_mode:
@@ -296,14 +306,28 @@ def main(
         else:
             log_and_error(f"Invalid alert metric mode: {alert_metric_mode}", ValueError, logger)
         
+        # Create mask for outliers using IQR method
+        outlier_mask = pd.DataFrame(False, index=alert_metric_data.index, columns=alert_metric_data.columns)
+        if REMOVE_OUTLIERS_IN_THRESHOLDS:
+            qlw_sta = alert_metric_data.quantile(q=0.01, axis=0)
+            qhg_sta = alert_metric_data.quantile(q=0.99, axis=0)
+            iqr_sta = qhg_sta - qlw_sta
+            lower_bound = qlw_sta - 1.5 * iqr_sta
+            upper_bound = qhg_sta + 1.5 * iqr_sta
+            outlier_mask = (alert_metric_data < lower_bound) | (alert_metric_data > upper_bound)
+        
         alert_mtr_sta_max = alert_metric_data.max(axis=0)
-        def_alert_thresholds = 0.8 * alert_mtr_sta_max
-
         if alert_mtr_sta_max.isna().any():
             log_and_error(f"Some alert metric data is empty: {alert_mtr_sta_max[alert_mtr_sta_max.isna()]}", ValueError, logger)
         
+        if default_thr_mode == 'max-percentage':
+            def_alert_thresholds = DEFAULT_THRESHOLD_PERC[default_thr_mode] * alert_metric_data.where(~outlier_mask).max(axis=0)
+        elif default_thr_mode == 'quantiles':
+            def_alert_thresholds = alert_metric_data.where(~outlier_mask).quantile(DEFAULT_THRESHOLD_PERC[default_thr_mode], axis=0)
+        else:
+            log_and_error(f"Default threshold mode not implemented: {default_thr_mode}. Contact the developer.", ValueError, logger)
+        
         if alert_thresholds is None:
-            alert_thresholds = 0.8 * alert_mtr_sta_max
             info_alert_threshold_prompt = (
                 f'Info for alert threshold: \n'
                 f'\t- max values of {alert_metric} are \n{_format_iterable_with_tab(alert_mtr_sta_max, prefix="\t\t")};\n'
@@ -319,7 +343,7 @@ def main(
 
                 def_alert_df = pd.DataFrame({
                     'station': alert_mtr_sta_max.index.tolist(),
-                    f'max_{alert_metric}': alert_mtr_sta_max.tolist(),
+                    f'max_{alert_metric}_[{alert_metric_mode}]': alert_mtr_sta_max.tolist(),
                     'threshold': def_alert_thresholds.tolist()
                 })
 
