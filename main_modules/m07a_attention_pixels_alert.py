@@ -3,6 +3,7 @@ import argparse
 import os
 import numpy as np
 import pandas as pd
+import datetime as dt
 
 # Importing necessary modules from main_modules
 from m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_warning, log_and_error, memory_report, obtain_config_idx_and_rel_filename
@@ -216,7 +217,8 @@ def main(
         gui_mode: bool=False,
         trigger_mode: str='rainfall-threshold', # or 'safety-factor' or 'machine-learning'
         alert_thresholds: float | list[float] | np.ndarray | pd.Series=None, # values and measure units depend on trigger mode
-        default_thr_mode: str='quantiles' # or 'max-percentage'
+        default_thr_mode: str='quantiles', # or 'max-percentage'
+        events_time_tolerance: dt.timedelta | pd.Timedelta=dt.timedelta(days=5)
     ) -> dict[str, object]:
     """Main function to analyze and alert on attention pixels."""
 
@@ -227,6 +229,8 @@ def main(
         log_and_error(f"Invalid alert_thresholds: [{alert_thresholds}]. Must be a float, list, np.ndarray, or pd.Series.", ValueError, logger)
     if not default_thr_mode in DEFAULT_THRESHOLD_PERC.keys():
         log_and_error(f"Invalid default_thresholds: [{default_thr_mode}]. Must be one of {list(DEFAULT_THRESHOLD_PERC.keys())}.", ValueError, logger)
+    if not isinstance(events_time_tolerance, (dt.timedelta, pd.Timedelta)):
+        log_and_error(f"Invalid events_time_tolerance: [{events_time_tolerance}]. Must be a dt.timedelta or pd.Timedelta.", ValueError, logger)
 
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
@@ -373,9 +377,36 @@ def main(
             log_and_error("Alert thresholds, at this point, must be a pandas Series! Please contact the developer.", ValueError, logger)
         alert_thresholds.loc[unique_rain_station_names]
         
-        alert_mask = alert_metric_data >= alert_thresholds
+        # Convert alert_thresholds to DataFrame with additional columns
+        alert_thr_df = pd.DataFrame({
+            'alert_metric': alert_metric,
+            'alert_metric_mode': alert_metric_mode,
+            'max': alert_mtr_sta_max,
+            'threshold': alert_thresholds
+        })
+        alert_thr_df.index.name = 'station'
+        
+        alert_mask = alert_metric_data >= alert_thr_df['threshold']
 
         alert_datetimes_df = rain_vars['datetimes'].loc[alert_mask.any(axis=1)].copy()
+        alert_datetimes_df['trigger_mode'] = trigger_mode
+        alert_datetimes_df['alert_metric'] = alert_metric
+        alert_datetimes_df['alert_metric_mode'] = alert_metric_mode
+        
+        # Group datetimes into events based on events_time_tolerance using 'start_date'
+        alert_datetimes_df = alert_datetimes_df.sort_values('start_date')
+        event_labels = []
+        current_event = 0
+        last_date = None
+        for idx, row in alert_datetimes_df.iterrows():
+            dt = row['start_date']
+            if last_date is None or (dt - last_date) > events_time_tolerance:
+                current_event += 1
+            event_labels.append(f'rt{current_event}')
+            last_date = dt
+        alert_datetimes_df['event'] = event_labels
+
+        logger.info(f"Number of events detected with tolerance [{events_time_tolerance}]: {len(alert_datetimes_df['event'].unique())}")
 
         activated_station_lists = [
             alert_mask.loc[row_mask, alert_mask.loc[row_mask]].index.tolist()
@@ -409,6 +440,10 @@ def main(
             alert_datetimes_df.at[idx, 'activated_pixels'] = pd.DataFrame(activated_pixels_list)
             alert_datetimes_df.at[idx, 'geo_coordinates'] = np.concatenate([x['coordinates'] for x in activated_pixels_list], axis=0)
 
+        alert_thr_dict = {
+            trigger_mode: alert_thr_df
+        }
+
     elif trigger_mode == 'safety-factor':
         log_and_error(f"Trigger mode {trigger_mode} is not implemented yet.", NotImplementedError, logger)
 
@@ -424,15 +459,12 @@ def main(
 
     attention_pixels_df.to_csv(os.path.join(OUT_ALERT_DIR, 'attention_pixels.csv'), index=False)
     alert_datetimes_df.to_csv(os.path.join(OUT_ALERT_DIR, 'activation_datetimes.csv'), index=False)
-    alert_thresholds.to_csv(os.path.join(OUT_ALERT_DIR, 'alert_thresholds.csv'), index=True)
+    alert_thr_df.to_csv(os.path.join(OUT_ALERT_DIR, DEFAULT_ALERT_THR_FILE[trigger_mode]), index=True)
 
     alert_vars = {
         'attention_pixels':attention_pixels_df, 
         'activation_datetimes': alert_datetimes_df, 
-        'alert_thresholds': alert_thresholds,
-        'trigger_mode': trigger_mode,
-        'alert_metric': alert_metric,
-        'alert_mode': alert_metric_mode
+        'alert_thresholds': alert_thr_dict
     }
 
     env.save_variable(variable_to_save=alert_vars, variable_filename='alert_vars.pkl')
@@ -446,6 +478,8 @@ if __name__ == "__main__":
     parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode")
     parser.add_argument("--trigger_mode", type=str, default='rainfall-threshold', help="Trigger mode")
     parser.add_argument("--alert_thresholds", type=str, default=None, help="Alert thresholds")
+    parser.add_argument("--default_thr_mode", type=str, default=None, help="Default threshold mode")
+    parser.add_argument("--events_time_tolerance", type=dt.timedelta, default=dt.timedelta(days=5), help="Events time tolerance")
     
     args = parser.parse_args()
     
@@ -453,5 +487,7 @@ if __name__ == "__main__":
         base_dir=args.base_dir,
         gui_mode=args.gui_mode,
         trigger_mode=args.trigger_mode,
-        alert_thresholds=args.alert_thresholds
+        alert_thresholds=args.alert_thresholds,
+        default_thr_mode=args.default_thr_mode,
+        events_time_tolerance=args.events_time_tolerance
     )
