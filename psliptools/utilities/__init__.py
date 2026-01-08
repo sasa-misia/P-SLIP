@@ -43,7 +43,8 @@ from .web_sources import (
 
 from .datetimes import (
     parse_datetime,
-    infer_datetime_format
+    infer_datetime_format,
+    delta_to_string
 )
 
 __all__ = [
@@ -72,5 +73,6 @@ __all__ = [
     "select_dir_prompt",
     "select_file_prompt",
     "parse_datetime",
-    "infer_datetime_format"
+    "infer_datetime_format",
+    "delta_to_string"
 ]

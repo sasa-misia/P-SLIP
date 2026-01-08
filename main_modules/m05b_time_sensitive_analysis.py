@@ -18,7 +18,8 @@ from config import (
 )
 
 from psliptools.utilities import (
-    get_mask_in_range
+    get_mask_in_range,
+    delta_to_string
 )
 
 # %% === Helper functions
@@ -349,12 +350,7 @@ def export_time_sensitive_data_to_csv(
         out_df.to_csv(out_file, index=False)
 
     # Mobile average window string
-    delta_window_str = (
-        f"{time_sensitive_vars['mobile_averages']['window_delta_time'].days}d-"
-        f"{time_sensitive_vars['mobile_averages']['window_delta_time'].seconds // 3600}h-"
-        f"{(time_sensitive_vars['mobile_averages']['window_delta_time'].seconds % 3600) // 60}m-"
-        f"{time_sensitive_vars['mobile_averages']['window_delta_time'].seconds % 60}s"
-    )
+    delta_window_str = delta_to_string(time_sensitive_vars['mobile_averages']['window_delta_time'])
 
     # Writing data and mobile averages for each station
     for sta in time_sensitive_vars['stations']['station']:

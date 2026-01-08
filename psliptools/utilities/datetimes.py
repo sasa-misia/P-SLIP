@@ -2,6 +2,7 @@
 import re
 import pandas as pd
 import numpy as np
+import datetime as dt
 from dateutil import parser
 
 # %% === Global variables
@@ -352,5 +353,48 @@ def infer_datetime_format(
     
     except Exception as e:
         raise ValueError(f"Error inferring date format: {str(e)}")
+    
+# %% === Function to convert delta time to string format
+def delta_to_string(
+        delta_time: dt.timedelta | pd.Timedelta,
+        digits: list[int] | np.ndarray=[None, None, None, None], # days, hours, minutes, seconds
+        sep: str="-"
+    ) -> str:
+    """
+    Convert delta time to string format
+    
+    :param delta_time: The input delta time
+    :type delta_time: dt.timedelta | pd.Timedelta
+    :param digits: The number of digits for each part of the string, which is [days, hours, minutes, seconds]
+    :type digits: list[int] | np.ndarray
+    :param sep: The separator between each part of the string
+    :type sep: str
+    :return: The string representation of the delta time, with the specified number of digits
+    :rtype: str
+    """
+    if not isinstance(delta_time, (dt.timedelta, pd.Timedelta)):
+        raise ValueError("delta_time must be a timedelta or a Timedelta object.")
+    digits = np.atleast_1d(digits)
+    if len(digits) != 4:
+        raise ValueError("digits must be a list or array of length 4 (days, hours, minutes, seconds).")
+    if not isinstance(sep, str):
+        raise ValueError("separator must be a string.")
+    
+    days, seconds = delta_time.days, delta_time.seconds
+    delta_window_str = ""
+    for _, (val, dgs, tag) in enumerate([
+                                        (days, digits[0], 'd'), 
+                                        (seconds // 3600, digits[1], 'h'), # seconds to hours
+                                        ((seconds % 3600) // 60, digits[2], 'm'), # remaining hours to minutes
+                                        ((seconds % 3600) % 60, digits[3], 's') # remaining minutes to seconds
+                                    ]):
+        if dgs is None:
+            delta_window_str += f"{val}{tag}{sep}"
+        else:
+            delta_window_str += f"{val:0{dgs}d}{tag}{sep}"
+    
+    delta_window_str = delta_window_str.rstrip(sep) # Remove last separator
+
+    return delta_window_str
 
 # %%

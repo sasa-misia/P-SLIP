@@ -25,7 +25,8 @@ from config import (
 from psliptools.utilities import (
     select_from_list_prompt,
     select_file_prompt,
-    read_generic_csv
+    read_generic_csv,
+    delta_to_string
 )
 
 # from psliptools.geometries import (
@@ -57,8 +58,9 @@ if any([tm not in DEFAULT_ALERT_THR_FILE for tm in POSSIBLE_TRIGGER_MODES]):
 def get_top_k_paths(
         paths_df: pd.DataFrame,
         dtm: int,
-        point_2d: tuple[int, int] | list[int] | np.ndarray,
-        k: int = 3
+        idx_2d: tuple[int, int] | list[tuple[int, int]] | np.ndarray,
+        k: int = 3,
+        separate_starting_points: bool = False
     ) -> list[str]:
     """
     Return top-k path_ids (highest path_realism_score) passing through point_2d in given dtm.
@@ -76,26 +78,39 @@ def get_top_k_paths(
         log_and_error("paths_df must be a pandas DataFrame.", ValueError, logger)
     if not isinstance(dtm, int):
         log_and_error("dtm must be an integer.", ValueError, logger)
-    if not isinstance(point_2d, (tuple, list, np.ndarray)):
+    if not isinstance(idx_2d, (tuple, list, np.ndarray)):
         log_and_error("point_2d must be a tuple, list, or numpy array.", ValueError, logger)
     if k <= 0:
         log_and_error("k must be positive.", ValueError, logger)
 
-    point_2d = np.atleast_1d(point_2d)
-    if point_2d.size != 2:
-        log_and_error("point_2d must be a tuple, list, or numpy array of length 2.", ValueError, logger)
+    idx_2d = np.atleast_1d(idx_2d)
+    if idx_2d.shape[1] != 2:
+        log_and_error("point_2d must be a tuple, list, or numpy array of shape n x 2.", ValueError, logger)
     
     curr_df = paths_df[paths_df['path_dtm'] == dtm]
 
     candidates = []
     for _, row in curr_df.iterrows():
-        if (row['path_2D_idx'] == point_2d).all(axis=1).any():
-            candidates.append((row['path_realism_score'], row['path_id']))
-    candidates.sort(reverse=True, key=lambda x: x[0])
+        path_points = row['path_2D_idx']
+        if any(np.any(np.all(path_points == point, axis=1)) for point in idx_2d):
+            candidates.append((row['path_realism_score'], row['path_id'], row['starting_point_id']))
 
-    top_paths = [pid for _, pid in candidates[:k]]
+    if separate_starting_points:
+        from collections import defaultdict
+        candidates_by_sp = defaultdict(list)
+        for score, pid, spid in candidates:
+            candidates_by_sp[spid].append((score, pid))
+        top_paths = []
+        for spid, cands in candidates_by_sp.items():
+            cands.sort(reverse=True, key=lambda x: x[0])
+            top_for_sp = [pid for _, pid in cands[:k]]
+            top_paths.extend(top_for_sp + [None] * (k - len(top_for_sp)))
+    else:
+        candidates.sort(reverse=True, key=lambda x: x[0])
+        top_paths = [pid for _, pid, _ in candidates[:k]]
+        top_paths += [None] * (k - len(top_paths))
 
-    return top_paths + [None] * (k - len(top_paths))
+    return top_paths
 
 def get_attention_pixel_coordinates(
         env: AnalysisEnvironment,
@@ -218,7 +233,8 @@ def main(
         trigger_mode: str='rainfall-threshold', # or 'safety-factor' or 'machine-learning'
         alert_thresholds: float | list[float] | np.ndarray | pd.Series=None, # values and measure units depend on trigger mode
         default_thr_mode: str='quantiles', # or 'max-percentage'
-        events_time_tolerance: dt.timedelta | pd.Timedelta=dt.timedelta(days=5)
+        events_time_tolerance: dt.timedelta | pd.Timedelta=dt.timedelta(days=5),
+        top_k_paths_per_activation: int=5
     ) -> dict[str, object]:
     """Main function to analyze and alert on attention pixels."""
 
@@ -231,6 +247,8 @@ def main(
         log_and_error(f"Invalid default_thresholds: [{default_thr_mode}]. Must be one of {list(DEFAULT_THRESHOLD_PERC.keys())}.", ValueError, logger)
     if not isinstance(events_time_tolerance, (dt.timedelta, pd.Timedelta)):
         log_and_error(f"Invalid events_time_tolerance: [{events_time_tolerance}]. Must be a dt.timedelta or pd.Timedelta.", ValueError, logger)
+    if not isinstance(top_k_paths_per_activation, int):
+        log_and_error(f"Invalid top_k_paths_per_activation: [{top_k_paths_per_activation}]. Must be an int.", ValueError, logger)
 
     # Get the analysis environment
     env = get_or_create_analysis_environment(base_dir=base_dir, gui_mode=gui_mode, allow_creation=False)
@@ -273,6 +291,8 @@ def main(
             log_and_error("Invalid source mode. Must be 'station'", ValueError, logger)
         
         rain_vars = env.load_variable(variable_filename=f"{rel_filename}_vars.pkl")
+        straight_data_dt = rain_vars['datetimes']['start_date'].diff().mean()
+        straight_data_dt_str = delta_to_string(straight_data_dt, digits=[2, 2, 2, 2])
 
         data_label = 'data'
         rain_metrics = list(rain_vars[data_label].keys())
@@ -280,6 +300,8 @@ def main(
         if 'mobile_averages' in rain_vars:
             ma_types = [key for key, value in rain_vars['mobile_averages'].items() if isinstance(value, dict) and key != 'count' and set(value.keys()).issubset(set(rain_metrics))]
             rain_modes += [f'{MA_LABEL}{lbl}' for lbl in ma_types]
+            ma_data_dt = rain_vars['mobile_averages']['window_delta_time']
+            ma_data_dt_str = delta_to_string(ma_data_dt, digits=[2, 2, 2, 2])
         
         if gui_mode:
             log_and_error("GUI mode not implemented yet.", NotImplementedError, logger)
@@ -304,9 +326,11 @@ def main(
         
         if alert_metric_mode.startswith(STRAIGHT_LABEL):
             alert_metric_data = rain_vars[data_label][alert_metric].loc[:,unique_rain_station_names]
+            alert_metric_dt_str = straight_data_dt_str
         elif alert_metric_mode.startswith(MA_LABEL):
             ma_type = alert_metric_mode[len(MA_LABEL):]
             alert_metric_data = rain_vars['mobile_averages'][ma_type][alert_metric].loc[:,unique_rain_station_names]
+            alert_metric_dt_str = ma_data_dt_str
         else:
             log_and_error(f"Invalid alert metric mode: {alert_metric_mode}", ValueError, logger)
         
@@ -381,6 +405,7 @@ def main(
         alert_thr_df = pd.DataFrame({
             'alert_metric': alert_metric,
             'alert_metric_mode': alert_metric_mode,
+            'alert_metric_delta_time': alert_metric_dt_str,
             'max': alert_mtr_sta_max,
             'threshold': alert_thresholds
         })
@@ -392,6 +417,7 @@ def main(
         alert_datetimes_df['trigger_mode'] = trigger_mode
         alert_datetimes_df['alert_metric'] = alert_metric
         alert_datetimes_df['alert_metric_mode'] = alert_metric_mode
+        alert_datetimes_df['alert_metric_delta_time'] = alert_metric_dt_str
         
         # Group datetimes into events based on events_time_tolerance using 'start_date'
         alert_datetimes_df = alert_datetimes_df.sort_values('start_date')
@@ -452,13 +478,34 @@ def main(
     
     else:
         log_and_error(f"Trigger mode not recognized or not implemented: {trigger_mode}.", ValueError, logger)
+
+    alert_datetimes_df['top_critical_landslide_path_ids'] = None
+    if top_k_paths_per_activation > 0:
+        for idx, al_row in alert_datetimes_df.iterrows():
+            active_pixels = al_row['activated_pixels']
+            curr_top_paths = []
+            for _, ap_row in active_pixels.iterrows():
+                curr_active_dtm = int(ap_row['dtm'])
+                curr_active_2d_idx = ap_row['activated_points']
+                curr_top_paths.extend(get_top_k_paths(
+                    paths_df=landslide_paths_df,
+                    dtm=curr_active_dtm,
+                    idx_2d=curr_active_2d_idx,
+                    k=top_k_paths_per_activation,
+                    separate_starting_points=True
+                ))
+            curr_top_paths = [x for x in curr_top_paths if x is not None]
+            curr_top_paths = list(set(curr_top_paths))
+            alert_datetimes_df.at[idx, 'top_critical_landslide_path_ids'] = curr_top_paths
+
     
     OUT_ALERT_DIR = os.path.join(env.folders['outputs']['tables']['path'], 'attention_pixels_alerts')
     if not os.path.isdir(OUT_ALERT_DIR):
         os.makedirs(OUT_ALERT_DIR)
 
     attention_pixels_df.to_csv(os.path.join(OUT_ALERT_DIR, 'attention_pixels.csv'), index=False)
-    alert_datetimes_df.to_csv(os.path.join(OUT_ALERT_DIR, 'activation_datetimes.csv'), index=False)
+    columns_to_export = [col for col in alert_datetimes_df.columns if col != 'activated_pixels']
+    alert_datetimes_df[columns_to_export].to_csv(os.path.join(OUT_ALERT_DIR, 'activation_datetimes.csv'), index=False)
     alert_thr_df.to_csv(os.path.join(OUT_ALERT_DIR, DEFAULT_ALERT_THR_FILE[trigger_mode]), index=True)
 
     alert_vars = {
