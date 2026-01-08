@@ -4,6 +4,7 @@ import os
 import numpy as np
 import pandas as pd
 import datetime as dt
+from collections import defaultdict
 
 # Importing necessary modules from main_modules
 from m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_warning, log_and_error, memory_report, obtain_config_idx_and_rel_filename
@@ -87,16 +88,17 @@ def get_top_k_paths(
     if idx_2d.shape[1] != 2:
         log_and_error("point_2d must be a tuple, list, or numpy array of shape n x 2.", ValueError, logger)
     
-    curr_df = paths_df[paths_df['path_dtm'] == dtm]
+    curr_df = paths_df[paths_df['path_dtm'] == dtm].copy()
 
-    candidates = []
-    for _, row in curr_df.iterrows():
-        path_points = row['path_2D_idx']
-        if any(np.any(np.all(path_points == point, axis=1)) for point in idx_2d):
-            candidates.append((row['path_realism_score'], row['path_id'], row['starting_point_id']))
+    # Precompute set of points for fast lookup
+    idx_2d_set = set(map(tuple, idx_2d))
+
+    # Vectorized check for intersection
+    curr_df['is_candidate'] = curr_df['path_2D_idx'].apply(lambda x: bool(set(map(tuple, x)) & idx_2d_set))
+    candidate_df = curr_df[curr_df['is_candidate']]
+    candidates = candidate_df[['path_realism_score', 'path_id', 'starting_point_id']].values.tolist()
 
     if separate_starting_points:
-        from collections import defaultdict
         candidates_by_sp = defaultdict(list)
         for score, pid, spid in candidates:
             candidates_by_sp[spid].append((score, pid))
@@ -413,7 +415,7 @@ def main(
         
         alert_mask = alert_metric_data >= alert_thr_df['threshold']
 
-        alert_datetimes_df = rain_vars['datetimes'].loc[alert_mask.any(axis=1)].copy()
+        alert_datetimes_df = rain_vars['datetimes'].loc[alert_mask.any(axis=1)].copy().reset_index()
         alert_datetimes_df['trigger_mode'] = trigger_mode
         alert_datetimes_df['alert_metric'] = alert_metric
         alert_datetimes_df['alert_metric_mode'] = alert_metric_mode
@@ -482,6 +484,8 @@ def main(
     alert_datetimes_df['top_critical_landslide_path_ids'] = None
     if top_k_paths_per_activation > 0:
         for idx, al_row in alert_datetimes_df.iterrows():
+            if idx % 50 == 0:
+                logger.info(f"Finding top {top_k_paths_per_activation} critical landslide paths for event {idx + 1} of {len(alert_datetimes_df)}...")
             active_pixels = al_row['activated_pixels']
             curr_top_paths = []
             for _, ap_row in active_pixels.iterrows():
@@ -498,6 +502,15 @@ def main(
             curr_top_paths = list(set(curr_top_paths))
             alert_datetimes_df.at[idx, 'top_critical_landslide_path_ids'] = curr_top_paths
 
+    # Extract all unique top critical landslide path IDs
+    all_top_paths = set()
+    for paths in alert_datetimes_df['top_critical_landslide_path_ids']:
+        if paths is not None:
+            all_top_paths.update(paths)
+    all_top_paths = list(all_top_paths)
+
+    # Extract the corresponding rows from landslide_paths_df
+    critical_paths_df = landslide_paths_df[landslide_paths_df['path_id'].isin(all_top_paths)].copy()
     
     OUT_ALERT_DIR = os.path.join(env.folders['outputs']['tables']['path'], 'attention_pixels_alerts')
     if not os.path.isdir(OUT_ALERT_DIR):
@@ -507,6 +520,7 @@ def main(
     columns_to_export = [col for col in alert_datetimes_df.columns if col != 'activated_pixels']
     alert_datetimes_df[columns_to_export].to_csv(os.path.join(OUT_ALERT_DIR, 'activation_datetimes.csv'), index=False)
     alert_thr_df.to_csv(os.path.join(OUT_ALERT_DIR, DEFAULT_ALERT_THR_FILE[trigger_mode]), index=True)
+    critical_paths_df.to_csv(os.path.join(OUT_ALERT_DIR, 'critical_landslide_paths.csv'), index=False)
 
     alert_vars = {
         'attention_pixels':attention_pixels_df, 
