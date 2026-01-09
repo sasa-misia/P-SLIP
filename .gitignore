@@ -1,5 +1,4 @@
-src/config/version.txt
-.vscode
-.github
 **/__pycache__/
 **/__temp.py
+.vscode
+src/config/version.txt
