@@ -231,7 +231,7 @@ def _check_libraries(required_file: str = LIBRARIES_CONFIG['required_file'],
     logger = logging.getLogger(__name__)
     logger.info("Checking required and optional libraries...")
 
-    config_dir = Path(__file__).parent.parent
+    config_dir = Path(__file__).parent.parent.parent
 
     def _parse_libs(file_path: Path) -> list[str]:
         with open(file_path, 'r') as f:

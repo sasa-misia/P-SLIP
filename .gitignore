@@ -1,6 +1,5 @@
-_old
+src/config/version.txt
 .vscode
-**/__pycache__/
-config/version.txt
-**/__temp.py
 .github
+**/__pycache__/
+**/__temp.py
