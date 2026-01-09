@@ -211,19 +211,24 @@ The main function orchestrates the complete time-series analysis process:
 
 ```mermaid
 graph TD
-    A[Start m05b] --> B[Validate Inputs]
-    B --> C[Load Environment]
-    C --> D[Load Time-Series Data]
-    D --> E[Process Numeric Ranges]
-    E --> F[Compute Statistics]
-    F --> G[Calculate Moving Averages]
+    %% Time-Sensitive Analysis Flow
+    A["Start m05b<br/>📊 Time Analysis"] --> B["Validate Inputs<br/>✅ Check parameters"]
+    B --> C["Load Environment<br/>⚙️ Analysis config"]
+    C --> D["Load Time-Series Data<br/>⏰ From m04c PKL"]
+    D --> E["Process Numeric Ranges<br/>📏 Min/max validation"]
+    E --> F["Compute Statistics<br/>📈 Count, quantiles, noise"]
+    F --> G["Calculate Moving Averages<br/>📊 Simple/weighted/hull/adaptive"]
     G --> H{Export to CSV?}
-    H -->|Yes| I[Export Statistics]
-    I --> J[Export Time-Series with MA]
-    H -->|No| K[Skip Export]
-    J --> L[Update PKL File]
+    H -->|Yes| I["Export Statistics<br/>📄 Summary tables"]
+    I --> J["Export Time-Series with MA<br/>📄 Per-station CSV"]
+    H -->|No| K["Skip Export<br/>➖ Keep in memory"]
+    J --> L["Update PKL File<br/>💾 Enhanced {type}_vars.pkl"]
     K --> L
-    L --> M[Return Enhanced Variables]
+    L --> M["Return Enhanced Variables<br/>📦 Stats + MA arrays"]
+    
+    %% Styling
+    style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style M fill:#e1f5fe,stroke:#01579b,stroke-width:2px
 ```
 
 ## Inputs and Parameters

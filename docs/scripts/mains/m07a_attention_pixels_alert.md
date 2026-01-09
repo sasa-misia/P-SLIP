@@ -175,29 +175,34 @@ The main function orchestrates the complete alert system:
 
 ```mermaid
 graph TD
-    A[Start m07a] --> B[Load Environment & Paths]
-    B --> C[Identify Attention Pixels]
-    C --> D[Get Pixel Coordinates]
-    D --> E[Associate Rain Stations]
+    %% Attention Pixels Alert Flow
+    A["Start m07a<br/>⚠️ Alert System"] --> B["Load Environment & Paths<br/>🛤️ Landslide paths data"]
+    B --> C["Identify Attention Pixels<br/>🎯 High-risk locations"]
+    C --> D["Get Pixel Coordinates<br/>📍 lon/lat arrays"]
+    D --> E["Associate Rain Stations<br/>⏰ Nearest rainfall gauge"]
     E --> F{Trigger Mode?}
-    F -->|rainfall-threshold| G[Load Rainfall Data]
+    F -->|rainfall-threshold| G["Load Rainfall Data<br/>🌧️ Time-series"]
     G --> H{Thresholds Provided?}
-    H -->|No| I[Generate Default Thresholds]
-    H -->|Yes| J[Load Custom Thresholds]
-    I --> K[Detect Threshold Exceedances]
+    H -->|No| I["Generate Default Thresholds<br/>📊 Auto-calibrate"]
+    H -->|Yes| J["Load Custom Thresholds<br/>⚙️ User-defined"]
+    I --> K["Detect Threshold Exceedances<br/>⚠️ Identify events"]
     J --> K
-    K --> L[Group into Events]
-    L --> M[Identify Activated Pixels]
+    K --> L["Group into Events<br/>📅 Temporal clustering"]
+    L --> M["Identify Activated Pixels<br/>🚨 Risk pixels"]
     M --> N{Find Critical Paths?}
-    N -->|Yes| O[Rank Paths by Realism]
-    N -->|No| P[Skip Path Ranking]
-    O --> Q[Export Results]
+    N -->|Yes| O["Rank Paths by Realism<br/>📈 Quality scores"]
+    N -->|No| P["Skip Path Ranking<br/>➖ No path analysis"]
+    O --> Q["Export Results<br/>📄 alerts.csv, risk maps"]
     P --> Q
-    Q --> R[Save Alert Variables]
-    R --> S[Return Alert Data]
+    Q --> R["Save Alert Variables<br/>💾 alert_vars.pkl"]
+    R --> S["Return Alert Data<br/>📦 Event metadata"]
     
-    F -->|safety-factor| T[Not Implemented Error]
+    F -->|safety-factor| T["Not Implemented Error<br/>❌ Future feature"]
     F -->|machine-learning| T
+    
+    %% Styling
+    style A fill:#fff9c4,stroke:#f57f17,stroke-width:3px
+    style Q fill:#fff9c4,stroke:#f57f17,stroke-width:2px
     T --> S
 ```
 

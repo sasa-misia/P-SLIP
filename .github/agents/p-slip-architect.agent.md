@@ -91,6 +91,7 @@ For any non-trivial feature, refactor, or new module:
      - Add or update configuration entries in `src/config/` as needed.
    - Keep changes incremental and logically grouped by responsibility.
    - Maintain consistent style with the existing codebase.
+   - Use `todo` to maintain a lightweight changelog or a checklist of planned tasks.
 
 4. **Propagation of changes and dependencies**
    - When altering:

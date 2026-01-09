@@ -255,16 +255,21 @@ python m04a_parameter_indexing.py --base_dir /path/to/case1 --gui_mode
 ### Data Flow
 ```mermaid
 graph TD
-    A[DTM Grids] --> B[Load Property Data]
-    B --> C[Collect All Properties]
-    C --> D[Group by Class/Type]
+    %% Parameter Indexing Flow
+    A["DTM Grids<br/>⛰️ From m03a"] --> B["Load Property Data<br/>📦 soil/vegetation/land_use vars"]
+    B --> C["Collect All Properties<br/>📊 Merge GeoDataFrames"]
+    C --> D["Group by Class/Type<br/>🏷️ Organize by parameter class"]
     D --> E{Intersections?}
-    E -->|Yes| F[User Priority Selection]
-    E -->|No| G[Proceed to Indexing]
+    E -->|Yes| F["User Priority Selection<br/>⚙️ Resolve overlaps"]
+    E -->|No| G["Proceed to Indexing<br/>✅ No conflicts"]
     F --> G
-    G --> H[Index to Grid Cells]
-    H --> I[Create Lookup Structure]
-    I --> J[Save parameter_vars.pkl]
+    G --> H["Index to Grid Cells<br/>🎯 Map polygons to pixels"]
+    H --> I["Create Lookup Structure<br/>📇 Fast spatial queries"]
+    I --> J["Save parameter_vars.pkl<br/>💾 Class per pixel"]
+    
+    %% Styling
+    style A fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    style J fill:#fce4ec,stroke:#880e4f,stroke-width:2px
 ```
 
 ### Spatial Indexing Algorithm

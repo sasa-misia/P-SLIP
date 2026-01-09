@@ -139,25 +139,32 @@ This is the core function that orchestrates environment initialization:
 
 ```mermaid
 graph TD
-    A[Start m00a_env_init] --> B{CLI args provided?}
-    B -->|Yes| C[Parse arguments]
-    B -->|No| D[Interactive prompts]
+    %% Initialization Flow
+    A["Start m00a_env_init<br/>🏗️ Environment Setup"] --> B{CLI args provided?}
+    B -->|Yes| C["Parse arguments<br/>📝 Load base_dir, env_filename"]
+    B -->|No| D["Interactive prompts<br/>💬 Ask user for inputs"]
     C --> E{env_filename provided?}
     D --> E
-    E -->|Custom| F[Validate JSON format]
-    E -->|Default| G[Use ENVIRONMENT_FILENAME]
+    E -->|Custom| F["Validate JSON format<br/>✅ Check file structure"]
+    E -->|Default| G["Use ENVIRONMENT_FILENAME<br/>📄 Default: environment.json"]
     F --> H{Environment exists?}
     G --> H
-    H -->|Yes| I[Load with get_analysis_environment()]
+    H -->|Yes| I["Load with get_analysis_environment()<br/>📂 Restore existing state"]
     H -->|No| J{allow_creation?}
-    J -->|Yes| K[Prompt for case_name if needed]
-    J -->|No| L[Raise FileNotFoundError]
-    K --> M[Create with create_analysis_environment()]
-    M --> N[Build folder structure]
-    M --> O[Generate default CSVs]
-    M --> P[Save to JSON]
-    I --> Q[Update paths if needed]
-    Q --> R[Setup logger]
+    J -->|Yes| K["Prompt for case_name if needed<br/>🏷️ Set analysis name"]
+    J -->|No| L["Raise FileNotFoundError<br/>❌ Stop execution"]
+    K --> M["Create with create_analysis_environment()<br/>🏗️ Build new environment"]
+    M --> N["Build folder structure<br/>📁 Create inputs/, outputs/, etc."]
+    M --> O["Generate default CSVs<br/>📋 parameter_classes.csv, etc."]
+    M --> P["Save to JSON<br/>💾 Write environment.json"]
+    I --> Q["Update paths if needed<br/>🔄 Refresh folder locations"]
+    Q --> R["Setup logger<br/>📝 Initialize logging system"]
+    
+    %% Styling
+    style A fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    style M fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    style I fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style R fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
     P --> R
     R --> S[Report hardware/memory]
     S --> T[Return AnalysisEnvironment]

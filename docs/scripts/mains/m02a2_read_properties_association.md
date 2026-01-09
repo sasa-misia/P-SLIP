@@ -313,18 +313,23 @@ python m02a2_read_properties_association.py --base_dir /path/to/case1 --source_t
 ### Data Flow
 ```mermaid
 graph TD
-    A[Property Data from m02a1] --> B[Load Association CSV]
-    B --> C[Load Standard Classes]
-    C --> D[Load Parameter Classes]
-    D --> E[Map Standard Classes]
-    E --> F[Map Parameter Classes]
-    F --> G[Validate Mappings]
+    %% Property Association Flow
+    A["Property Data from m02a1<br/>📦 {type}_vars.pkl"] --> B["Load Association CSV<br/>📋 user_control/{type}_association.csv"]
+    B --> C["Load Standard Classes<br/>📊 Classification schema"]
+    C --> D["Load Parameter Classes<br/>⚙️ Physical parameters"]
+    D --> E["Map Standard Classes<br/>🏷️ Assign class IDs"]
+    E --> F["Map Parameter Classes<br/>🔢 Link to properties"]
+    F --> G["Validate Mappings<br/>✅ Check completeness"]
     G --> H{Errors?}
-    H -->|Yes| I[Report Errors]
-    H -->|No| J[Update Property DF]
-    J --> K[Link Parameter Files]
-    K --> L[Save Enhanced Data]
-    L --> M[Update Environment]
+    H -->|Yes| I["Report Errors<br/>❌ Missing classes/files"]
+    H -->|No| J["Update Property DF<br/>➕ Add class columns"]
+    J --> K["Link Parameter Files<br/>🔗 Reference CSV paths"]
+    K --> L["Save Enhanced Data<br/>💾 Updated {type}_vars.pkl"]
+    L --> M["Update Environment<br/>⚙️ Register associations"]
+    
+    %% Styling
+    style A fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    style L fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
 ```
 
 ### Error Handling

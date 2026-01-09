@@ -217,19 +217,24 @@ python m01a_study_area.py --base_dir /path/to/case1 --source_mode user_bbox
 ### Data Flow
 ```mermaid
 graph TD
-    A[User Input] --> B{Source Mode}
-    B -->|user_bbox| C[Manual Coordinates]
-    B -->|geo_file| D[Vector File]
-    B -->|reference_points| E[Points CSV]
-    C --> F[Rectangle Polygon]
-    D --> G[Union Polygons]
-    E --> H[Convex Hull + Buffer]
-    F --> I[CRS Detection]
+    %% Study Area Definition Flow
+    A["User Input<br/>🗺️ Source Selection"] --> B{Source Mode}
+    B -->|user_bbox| C["Manual Coordinates<br/>📍 Enter bbox corners"]
+    B -->|geo_file| D["Vector File<br/>📦 Load shapefile/GeoJSON"]
+    B -->|reference_points| E["Points CSV<br/>📊 Reference locations"]
+    C --> F["Rectangle Polygon<br/>⬜ Create from bbox"]
+    D --> G["Union Polygons<br/>🔗 Merge geometries"]
+    E --> H["Convex Hull + Buffer<br/>🛡️ Generate boundary"]
+    F --> I["CRS Detection<br/>🎯 Identify projection"]
     G --> I
     H --> I
-    I --> J[Project to UTM]
-    J --> K[Extract Extremes]
-    K --> L[study_area_vars.pkl]
+    I --> J["Project to UTM<br/>🔄 Convert to meters"]
+    J --> K["Extract Extremes<br/>📏 Get bounds, center"]
+    K --> L["study_area_vars.pkl<br/>💾 Save geometry, metadata"]
+    
+    %% Styling
+    style A fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    style L fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
 ```
 
 ### Error Handling

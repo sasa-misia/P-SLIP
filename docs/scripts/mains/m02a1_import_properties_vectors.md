@@ -292,19 +292,24 @@ python m02a1_import_properties_vectors.py --base_dir /path/to/case1 --source_typ
 ### Data Flow
 ```mermaid
 graph TD
-    A[Study Area Polygon] --> B[Select Source Type]
-    B --> C[Choose Vector File]
-    C --> D[Select Attribute Field]
-    D --> E[Load Geometry]
-    E --> F[Clip to Study Area]
+    %% Property Import Flow
+    A["Study Area Polygon<br/>🗺️ From m01a"] --> B["Select Source Type<br/>📦 soil/vegetation/land_use"]
+    B --> C["Choose Vector File<br/>📂 Select shapefile/GeoJSON"]
+    C --> D["Select Attribute Field<br/>🏷️ Choose classification column"]
+    D --> E["Load Geometry<br/>📐 Read vector data"]
+    E --> F["Clip to Study Area<br/>✂️ Intersect polygons"]
     F --> G{Simplify?}
-    G -->|Points > Limit| H[Simplify Polygons]
-    G -->|Within Limit| I[Keep Original]
-    H --> J[Add Metadata Columns]
+    G -->|Points > Limit| H["Simplify Polygons<br/>🔄 Reduce complexity"]
+    G -->|Within Limit| I["Keep Original<br/>✅ Preserve detail"]
+    H --> J["Add Metadata Columns<br/>📊 CRS, source info"]
     I --> J
-    J --> K[Generate Association CSV]
-    K --> L[Save {type}_vars.pkl]
-    L --> M[Update Environment Config]
+    J --> K["Generate Association CSV<br/>📋 Template for mapping"]
+    K --> L["Save {type}_vars.pkl<br/>💾 Clipped GeoDataFrame"]
+    L --> M["Update Environment Config<br/>⚙️ Register input files"]
+    
+    %% Styling
+    style A fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    style L fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
 ```
 
 ### Error Handling

@@ -276,21 +276,26 @@ python m03a_dtm_base_grid.py --base_dir /path/to/case1 --apply_mask_to_raster
 ### Data Flow
 ```mermaid
 graph TD
-    A[Study Area Polygon] --> B[Select DTM Files]
-    B --> C[Load Georaster]
+    %% DTM Processing Flow
+    A["Study Area Polygon<br/>🗺️ From m01a"] --> B["Select DTM Files<br/>⛰️ Choose elevation rasters"]
+    B --> C["Load Georaster<br/>📐 Read GeoTIFF/ASC"]
     C --> D{Resample?}
-    D -->|Yes| E[Resample Raster]
-    D -->|No| F[Original Resolution]
-    E --> G[Convert Coordinates]
+    D -->|Yes| E["Resample Raster<br/>🔄 Adjust resolution"]
+    D -->|No| F["Original Resolution<br/>✅ Keep native grid"]
+    E --> G["Convert Coordinates<br/>🎯 To study area CRS"]
     F --> G
-    G --> H[Generate Mask Indices]
+    G --> H["Generate Mask Indices<br/>🎭 Create study area mask"]
     H --> I{Apply Mask?}
-    I -->|Yes| J[Mask Raster Data]
-    I -->|No| K[Keep Full Extent]
-    J --> L[Assemble DTM DF]
+    I -->|Yes| J["Mask Raster Data<br/>✂️ Crop to study area"]
+    I -->|No| K["Keep Full Extent<br/>🌐 Preserve context"]
+    J --> L["Assemble DTM DF<br/>📊 Elevation arrays"]
     K --> L
-    L --> M[Assemble ABG DF]
-    M --> N[Save dtm_vars.pkl]
+    L --> M["Assemble ABG DF<br/>📊 Base grid metadata"]
+    M --> N["Save dtm_vars.pkl<br/>💾 Grids, profile, mask"]
+    
+    %% Styling
+    style A fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style N fill:#fff3e0,stroke:#e65100,stroke-width:2px
 ```
 
 ### Error Handling

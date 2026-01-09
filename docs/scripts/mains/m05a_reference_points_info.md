@@ -168,26 +168,31 @@ The main function orchestrates the complete reference point enrichment process:
 
 ```mermaid
 graph TD
-    A[Start m05a] --> B[Load Environment]
-    B --> C[Load ABG Data]
-    C --> D[Select Reference Points File]
+    %% Reference Points Analysis Flow
+    A["Start m05a<br/>📍 Reference Points"] --> B["Load Environment<br/>⚙️ Analysis config"]
+    B --> C["Load ABG Data<br/>⛰️ Base grid metadata"]
+    C --> D["Select Reference Points File<br/>📊 CSV with lon/lat"]
     D --> E{Morphology Selected?}
-    E -->|Yes| F[Load Morphology Grids]
-    E -->|No| G[Skip Morphology]
+    E -->|Yes| F["Load Morphology Grids<br/>📐 Slopes, curvatures"]
+    E -->|No| G["Skip Morphology<br/>➖ No morphology data"]
     F --> H{Parameters Selected?}
     G --> H
-    H -->|Yes| I[Load Parameter Grids]
-    H -->|No| J[Skip Parameters]
+    H -->|Yes| I["Load Parameter Grids<br/>🏷️ Soil/vegetation classes"]
+    H -->|No| J["Skip Parameters<br/>➖ No parameter data"]
     I --> K{Time Sensitive Selected?}
     J --> K
-    K -->|Yes| L[Load Station Data]
-    K -->|No| M[Skip Time Sensitive]
-    L --> N[Convert to Projected CRS]
+    K -->|Yes| L["Load Station Data<br/>⏰ Rainfall/temperature"]
+    K -->|No| M["Skip Time Sensitive<br/>➖ No time data"]
+    L --> N["Convert to Projected CRS<br/>🔄 For accurate distances"]
     M --> N
-    N --> O[Process Each Reference Point]
-    O --> P[Find Closest Grid Cell]
-    P --> Q[Extract Morphology Values]
-    Q --> R[Extract Parameter Values]
+    N --> O["Process Each Reference Point<br/>🔄 Iterate through points"]
+    O --> P["Find Closest Grid Cell<br/>🎯 Spatial indexing"]
+    P --> Q["Extract Morphology Values<br/>📈 Slope, aspect, curvature"]
+    Q --> R["Extract Parameter Values<br/>🏷️ Soil/veg properties"]
+    
+    %% Styling
+    style A fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    style R fill:#fce4ec,stroke:#880e4f,stroke-width:2px
     R --> S[Find Nearest Station]
     S --> T{More Points?}
     T -->|Yes| O

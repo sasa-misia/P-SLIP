@@ -459,22 +459,27 @@ python m04d_landslides_paths.py --base_dir /path/to/case1 --method gradient --fl
 ### Data Flow
 ```mermaid
 graph TD
-    A[DTM Grids] --> B[Load Starting Points]
-    B --> C[Coordinate Transformation]
-    C --> D[Select Routing Method]
-    D -->|Gradient| E[Continuous Gradient Following]
-    D -->|D8-Flow| F[Discrete 8-Direction Routing]
-    D -->|Slope-Compatible| G[Multi-Path Exploration]
-    E --> H[Path Quality Assessment]
+    %% Landslide Paths Flow
+    A["DTM Grids<br/>⛰️ From m03a"] --> B["Load Starting Points<br/>📍 Landslide initiation"]
+    B --> C["Coordinate Transformation<br/>🔄 To projected CRS"]
+    C --> D["Select Routing Method<br/>🛤️ Gradient/D8/Slope-Compatible"]
+    D -->|Gradient| E["Continuous Gradient Following<br/>📐 Steepest descent"]
+    D -->|D8-Flow| F["Discrete 8-Direction Routing<br/>🎯 Cardinal directions"]
+    D -->|Slope-Compatible| G["Multi-Path Exploration<br/>🌐 Multiple scenarios"]
+    E --> H["Path Quality Assessment<br/>✅ Slope, deviation checks"]
     F --> H
     G --> H
     H --> I{Memory Limit?}
-    I -->|Yes| J[Limit Paths]
-    I -->|No| K[Continue Generation]
-    J --> L[Assemble Path Dataset]
+    I -->|Yes| J["Limit Paths<br/>⚠️ Stop generation"]
+    I -->|No| K["Continue Generation<br/>✅ Process all"]
+    J --> L["Assemble Path Dataset<br/>📊 Paths, metadata"]
     K --> L
-    L --> M[Calculate Quality Metrics]
-    M --> N[Save landslide_paths_vars.pkl]
+    L --> M["Calculate Quality Metrics<br/>📈 Realism scores"]
+    M --> N["Save landslide_paths_vars.pkl<br/>💾 Path arrays, indices"]
+    
+    %% Styling
+    style A fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style N fill:#fff3e0,stroke:#e65100,stroke-width:2px
 ```
 
 ### Algorithm Details

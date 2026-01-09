@@ -437,22 +437,27 @@ python m04c_import_time_sensitive_data.py --base_dir /path/to/case1 --source_typ
 ### Data Flow
 ```mermaid
 graph TD
-    A[Study Area] --> B[Select Source Mode]
-    B -->|Station| C[Load Gauge Info]
-    B -->|Satellite| D[Load Raster Data]
-    C --> E[Select Data Files]
+    %% Time-Sensitive Data Import Flow
+    A["Study Area<br/>🗺️ From m01a"] --> B["Select Source Mode<br/>⏰ Station or Satellite"]
+    B -->|Station| C["Load Gauge Info<br/>📊 Station metadata"]
+    B -->|Satellite| D["Load Raster Data<br/>🛰️ Gridded observations"]
+    C --> E["Select Data Files<br/>📂 CSV/time-series files"]
     D --> E
-    E --> F[Load Time-Series Data]
-    F --> G[Validate & Clean]
-    G --> H[Fill Temporal Gaps]
+    E --> F["Load Time-Series Data<br/>📅 Read measurements"]
+    F --> G["Validate & Clean<br/>✅ Range checks, outliers"]
+    G --> H["Fill Temporal Gaps<br/>🔧 Interpolation"]
     H --> I{Multiple Stations?}
-    I -->|Yes| J[Spatial Interpolation]
-    I -->|No| K[Single Station Processing]
-    J --> L[Temporal Alignment]
+    I -->|Yes| J["Spatial Interpolation<br/>🗺️ IDW/kriging/RBF"]
+    I -->|No| K["Single Station Processing<br/>✅ Direct use"]
+    J --> L["Temporal Alignment<br/>🕐 Consistent time index"]
     K --> L
-    L --> M[Aggregate if Needed]
-    M --> N[Assemble Data Structure]
-    N --> O[Save {type}_vars.pkl]
+    L --> M["Aggregate if Needed<br/>📊 Resampling"]
+    M --> N["Assemble Data Structure<br/>📦 Organize by station"]
+    N --> O["Save {type}_vars.pkl<br/>💾 Time-series dict"]
+    
+    %% Styling
+    style A fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    style O fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
 ```
 
 ### Processing Pipeline

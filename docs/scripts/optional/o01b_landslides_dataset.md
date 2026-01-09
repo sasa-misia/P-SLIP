@@ -164,30 +164,35 @@ The main function orchestrates the complete landslide dataset creation:
 
 ```mermaid
 graph TD
-    A[Start o01b] --> B[Load Environment]
-    B --> C[Load Reference Points CSV]
-    C --> D[Validate Required Columns]
-    D --> E[Convert to Projected CRS]
+    %% Landslide Dataset Generation Flow
+    A["Start o01b<br/>📦 Landslide Dataset"] --> B["Load Environment<br/>⚙️ Analysis config"]
+    B --> C["Load Reference Points CSV<br/>📍 Landslide locations"]
+    C --> D["Validate Required Columns<br/>✅ Check lon, lat, id"]
+    D --> E["Convert to Projected CRS<br/>🔄 For accurate buffering"]
     E --> F{Source Files Exist?}
-    F -->|Yes| G[Build File Mapper]
-    F -->|No| H[Skip File Mapper]
-    G --> I[Load Source Shapefiles]
-    H --> J[Create Synthetic Polygons Only]
-    I --> K[Create Landslide Polygons]
+    F -->|Yes| G["Build File Mapper<br/>📂 Link IDs to shapefiles"]
+    F -->|No| H["Skip File Mapper<br/>➖ Synthetic only"]
+    G --> I["Load Source Shapefiles<br/>📐 Real landslide polygons"]
+    H --> J["Create Synthetic Polygons Only<br/>🔄 Buffered points"]
+    I --> K["Create Landslide Polygons<br/>🔄 Process each point"]
     J --> K
     K --> L{Real Polygon Found?}
-    L -->|Yes| M[Use Real Geometry]
-    L -->|No| N[Create Buffered Polygon]
-    M --> O[Calculate Area]
+    L -->|Yes| M["Use Real Geometry<br/>✅ From source file"]
+    L -->|No| N["Create Buffered Polygon<br/>🛡️ Default radius"]
+    M --> O["Calculate Area<br/>📏 In square meters"]
     N --> O
     O --> P{More Landslides?}
     P -->|Yes| K
     P -->|No| Q{Write Output File?}
-    Q -->|Yes| R[Write Shapefile]
-    Q -->|No| S[Skip File Writing]
-    R --> T[Save to PKL]
+    Q -->|Yes| R["Write Shapefile<br/>📄 Export GeoDataFrame"]
+    Q -->|No| S["Skip File Writing<br/>➖ Keep in memory"]
+    R --> T["Save to PKL<br/>💾 landslide_vars.pkl"]
     S --> T
-    T --> U[Return Landslide Variables]
+    T --> U["Return Landslide Variables<br/>📦 Polygons, metadata"]
+    
+    %% Styling
+    style A fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    style U fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
 ```
 
 ## Inputs and Parameters

@@ -285,20 +285,25 @@ python m04b_morphological_grids.py --base_dir /path/to/case1 --gui_mode
 ### Data Flow
 ```mermaid
 graph TD
-    A[DTM from m03a] --> B[Load Elevation Grids]
-    B --> C[Calculate Slope]
-    B --> D[Calculate Aspect]
-    B --> E[Calculate Profile Curvature]
-    B --> F[Calculate Planform Curvature]
-    B --> G[Calculate Twisting Curvature]
-    C --> H[Assemble Angles DF]
+    %% Morphological Analysis Flow
+    A["DTM from m03a<br/>⛰️ Elevation grids"] --> B["Load Elevation Grids<br/>📐 Read raster arrays"]
+    B --> C["Calculate Slope<br/>📈 Gradient magnitude"]
+    B --> D["Calculate Aspect<br/>🧭 Direction (degrees)"]
+    B --> E["Calculate Profile Curvature<br/>📉 Parallel to slope"]
+    B --> F["Calculate Planform Curvature<br/>📊 Perpendicular to slope"]
+    B --> G["Calculate Twisting Curvature<br/>🌀 Terrain complexity"]
+    C --> H["Assemble Angles DF<br/>📊 Slope + Aspect arrays"]
     D --> H
-    E --> I[Assemble Curvatures DF]
+    E --> I["Assemble Curvatures DF<br/>📊 Profile + Planform + Twist"]
     F --> I
     G --> I
-    H --> J[Memory Report]
+    H --> J["Memory Report<br/>💾 RAM usage summary"]
     I --> J
-    J --> K[Save morphology_vars.pkl]
+    J --> K["Save morphology_vars.pkl<br/>💾 Grids, metadata"]
+    
+    %% Styling
+    style A fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    style K fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
 ```
 
 ### Algorithm Details

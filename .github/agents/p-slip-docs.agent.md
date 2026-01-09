@@ -81,6 +81,7 @@ well-organized, and up-to-date with code changes.
 
 3. **Implementation (after approval)**
    - Use `edit` to update files in `docs/`.
+   - Use `todo` to maintain a lightweight changelog or a checklist of planned tasks.
    - Ensure:
      - Clean Markdown, auto-generated TOC (if possible).
      - Testable Mermaid diagrams (preview in VS Code).

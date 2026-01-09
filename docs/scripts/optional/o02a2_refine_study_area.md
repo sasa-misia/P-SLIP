@@ -133,26 +133,31 @@ The main function orchestrates the complete study area refinement process:
 
 ```mermaid
 graph TD
-    A[Start o02a2] --> B[Validate Source Type]
-    B --> C[Load Environment]
-    C --> D[Load Study Area Variables]
-    D --> E[Construct Property Filename]
+    %% Study Area Refinement Flow
+    A["Start o02a2<br/>🗺️ Refine Study Area"] --> B["Validate Source Type<br/>✅ soil/vegetation/land_use"]
+    B --> C["Load Environment<br/>⚙️ Analysis config"]
+    C --> D["Load Study Area Variables<br/>📦 study_area_vars.pkl"]
+    D --> E["Construct Property Filename<br/>📂 {type}_vars.pkl"]
     E --> F{File Exists?}
-    F -->|Yes| G[Load Property Data]
+    F -->|Yes| G["Load Property Data<br/>📐 GeoDataFrame"]
     F -->|No| H{Multiple Matches?}
-    H -->|One| I[Use Matching File]
-    H -->|None| J[Raise FileNotFoundError]
-    H -->|Multiple| K[Prompt User Selection]
+    H -->|One| I["Use Matching File<br/>✅ Auto-select"]
+    H -->|None| J["Raise FileNotFoundError<br/>❌ Missing data"]
+    H -->|Multiple| K["Prompt User Selection<br/>💬 Choose file"]
     I --> G
     K --> G
-    G --> L[Select Classes to Remove]
-    L --> M[Subtract Polygons from Study Area]
+    G --> L["Select Classes to Remove<br/>🏷️ Choose polygons"]
+    L --> M["Subtract Polygons from Study Area<br/>✂️ Geometric operation"]
     M --> N{Valid Result?}
-    N -->|Yes| O[Update Study Area Tracking]
-    N -->|No| P[Raise Validation Error]
-    O --> Q[Update Configuration]
-    Q --> R[Save Updated Variables]
-    R --> S[Return Refined Study Area]
+    N -->|Yes| O["Update Study Area Tracking<br/>📝 Log removed regions"]
+    N -->|No| P["Raise Validation Error<br/>❌ Invalid geometry"]
+    O --> Q["Update Configuration<br/>⚙️ Register changes"]
+    Q --> R["Save Updated Variables<br/>💾 study_area_vars.pkl"]
+    R --> S["Return Refined Study Area<br/>🗺️ Cleaned polygon"]
+    
+    %% Styling
+    style A fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    style S fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
 ```
 
 ## Inputs and Parameters
