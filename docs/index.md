@@ -50,16 +50,16 @@ P-SLIP is a **Python-based Landslide Susceptibility Tool** that processes geospa
 
 ```mermaid
 graph TB
-    A[🎯 m00a: Environment Init<br/>Create analysis structure] --> B[🗺️ m01a: Study Area<br/>Define analysis boundaries]
-    B --> C[📦 m02a1/2: Properties<br/>Import soil, vegetation, land use]
-    B --> D[⛰️ m03a: DTM Grid<br/>Process elevation data]
-    D --> E[🏷️ m04a: Parameter Indexing<br/>Attribute soil/veg classes]
-    D --> F[📐 m04b: Morphology<br/>Slopes, curvatures, aspects]
-    D --> G[⏰ m04c: Time-Sensitive Data<br/>Rainfall, temperature]
-    D --> H[🛤️ m04d: Flow Paths<br/>Upstream/downstream routing]
-    E --> I[📍 m05a: Reference Points<br/>Monitoring locations]
-    G --> J[📊 m05b: Time Analysis<br/>Interpolation, events]
-    H --> K[⚠️ m07a: Alerts<br/>Attention pixels]
+    A["🎯 m00a: Environment Init<br/>Create analysis structure"] --> B["🗺️ m01a: Study Area<br/>Define analysis boundaries"]
+    B --> C["📦 m02a1/2: Properties<br/>Import soil, vegetation, land use"]
+    B --> D["⛰️ m03a: DTM Grid<br/>Process elevation data"]
+    D --> E["🏷️ m04a: Parameter Indexing<br/>Attribute soil/veg classes"]
+    D --> F["📐 m04b: Morphology<br/>Slopes, curvatures, aspects"]
+    D --> G["⏰ m04c: Time-Sensitive Data<br/>Rainfall, temperature"]
+    D --> H["🛤️ m04d: Flow Paths<br/>Upstream/downstream routing"]
+    E --> I["📍 m05a: Reference Points<br/>Monitoring locations"]
+    G --> J["📊 m05b: Time Analysis<br/>Interpolation, events"]
+    H --> K["⚠️ m07a: Alerts<br/>Attention pixels"]
     
     style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     style B fill:#f3e5f5,stroke:#4a148c,stroke-width:2px

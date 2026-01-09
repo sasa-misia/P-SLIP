@@ -215,12 +215,12 @@ The folder structure evolves through the sequential execution of P-SLIP scripts:
 
 ```mermaid
 graph TD
-    A[m00a_env_init.py<br/>Creates base structure] --> B[m01a_study_area.py<br/>Populates study_area/]
-    B --> C[m02a1_import_properties_vectors.py<br/>Populates soil/, vegetation/, etc.]
-    C --> D[m03a_dtm_base_grid.py<br/>Processes dtm/ files]
-    D --> E[m04a-m04d scripts<br/>Generate variables/ files]
-    E --> F[m05a-m05b scripts<br/>Process time-series data]
-    F --> G[m07a_attention_pixels_alert.py<br/>Generates outputs/]
+    A["m00a_env_init.py<br/>Creates base structure"] --> B["m01a_study_area.py<br/>Populates study_area/"]
+    B --> C["m02a1_import_properties_vectors.py<br/>Populates soil/, vegetation/, etc."]
+    C --> D["m03a_dtm_base_grid.py<br/>Processes dtm/ files"]
+    D --> E["m04a-m04d scripts<br/>Generate variables/ files"]
+    E --> F["m05a-m05b scripts<br/>Process time-series data"]
+    F --> G["m07a_attention_pixels_alert.py<br/>Generates outputs/"]
     
     style A fill:#e1f5ff
     style B fill:#fff4e1

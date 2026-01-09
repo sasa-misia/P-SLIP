@@ -117,15 +117,15 @@ It is designed to eventually replace M-SLIP while maintaining compatibility with
 
 ```mermaid
 graph TD
-    A[🏗️ m00a: Environment Init<br/>📁 Creates analysis structure<br/>💾 Saves: env.pkl] --> B[🗺️ m01a: Study Area<br/>📍 Defines analysis bounds<br/>💾 Saves: study_area_vars.pkl]
-    B --> C[🏞️ m02a1/2: Properties<br/>📦 Imports vectors/rasters<br/>💾 Saves: {source_type}_vars.pkl]
-    B --> D[🏔️ m03a: DTM Grid<br/>📐 Creates base grids<br/>💾 Saves: dtm_vars.pkl]
+    A["🏗️ m00a: Environment Init<br/>📁 Creates analysis structure<br/>💾 Saves: env.pkl"] --> B["🗺️ m01a: Study Area<br/>📍 Defines analysis bounds<br/>💾 Saves: study_area_vars.pkl"]
+    B --> C["🏞️ m02a1/2: Properties<br/>📦 Imports vectors/rasters<br/>💾 Saves: {source_type}_vars.pkl"]
+    B --> D["🏔️ m03a: DTM Grid<br/>📐 Creates base grids<br/>💾 Saves: dtm_vars.pkl"]
     D --> E[📊 m04a: Parameter Indexing<br/>🔢 Assigns soil/veg params<br/>💾 Saves: parameter_vars.pkl]
     D --> F[⛰️ m04b: Morphology<br/>📈 Computes slopes/curvatures<br/>💾 Saves: morphology_vars.pkl]
-    D --> G[⏰ m04c: Time-Sensitive<br/>🌧️ Processes rainfall data<br/>💾 Saves: {ts_type}_vars.pkl]
+    D --> G["⏰ m04c: Time-Sensitive<br/>🌧️ Processes rainfall data<br/>💾 Saves: {ts_type}_vars.pkl"]
     D --> H[🛤️ m04d: Paths<br/>🧭 Generates flow paths<br/>💾 Saves: landslide_paths_vars.pkl]
     E --> I[📍 m05a: Reference Points<br/>🎯 Creates monitoring points<br/>📄 Outputs: ref_points.csv]
-    G --> J[📅 m05b: Time Analysis<br/>📊 Event detection<br/>💾 Updates: {ts_type}_vars.pkl]
+    G --> J["📅 m05b: Time Analysis<br/>📊 Event detection<br/>💾 Updates: {ts_type}_vars.pkl"]
     H --> K[🚨 m07a: Alerts<br/>⚠️ Attention pixels<br/>📄 Outputs: alerts.csv]
     
     style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px

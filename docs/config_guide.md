@@ -7,16 +7,16 @@ The `src/config/` directory contains core modules for environment management, de
 ```mermaid
 graph TB
     subgraph "src/config/"
-        A[analysis_init.py<br/>🔄 AnalysisEnvironment class<br/>Folder management, logging, persistence]
-        B[default_params.py<br/>📋 Constants & configurations<br/>Folder structure, file types, parameters]
-        C[version_writer.py<br/>📌 Version management<br/>Auto-generated version info]
-        D[version.txt<br/>🔢 Version number<br/>Project version tracking]
+        A["analysis_init.py<br/>🔄 AnalysisEnvironment class<br/>Folder management, logging, persistence"]
+        B["default_params.py<br/>📋 Constants & configurations<br/>Folder structure, file types, parameters"]
+        C["version_writer.py<br/>📌 Version management<br/>Auto-generated version info"]
+        D["version.txt<br/>🔢 Version number<br/>Project version tracking"]
     end
     
     subgraph "Scripts & Tools"
-        E[m00a_env_init.py<br/>Initializes environment]
-        F[m01a-m07a scripts<br/>Use config modules]
-        G[psliptools library<br/>Imports configurations]
+        E["m00a_env_init.py<br/>Initializes environment"]
+        F["m01a-m07a scripts<br/>Use config modules"]
+        G["psliptools library<br/>Imports configurations"]
     end
     
     A --> E

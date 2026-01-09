@@ -27,40 +27,40 @@ Run scripts **in sequential order** from `m00a` to `m07a`. Each script loads pre
 ```mermaid
 graph TB
     %% Initialization Phase
-    m00a[m00a_env_init.py<br/>🏗️ Environment Initialization<br/>Outputs: analysis_environment.json] --> m01a
+    m00a["m00a_env_init.py<br/>🏗️ Environment Initialization<br/>Outputs: analysis_environment.json"] --> m01a
     
     %% Study Area Definition
-    m01a[m01a_study_area.py<br/>🗺️ Study Area Definition<br/>Outputs: study_area_vars.pkl<br/>Geometry, bounds, CRS] --> m02a1
+    m01a["m01a_study_area.py<br/>🗺️ Study Area Definition<br/>Outputs: study_area_vars.pkl<br/>Geometry, bounds, CRS"] --> m02a1
     m01a --> m03a
     
     %% Property Import Phase
-    m02a1[m02a1_import_properties_vectors.py<br/>📦 Import Property Vectors<br/>Outputs: {source_type}_vars.pkl<br/>Soil, vegetation, land use] --> m02a2
-    m02a2[m02a2_read_properties_association.py<br/>🏷️ Property Association<br/>Outputs: updated {source_type}_vars.pkl<br/>Class mappings] --> m04a
+    m02a1["m02a1_import_properties_vectors.py<br/>📦 Import Property Vectors<br/>Outputs: {source_type}_vars.pkl<br/>Soil, vegetation, land use"] --> m02a2
+    m02a2["m02a2_read_properties_association.py<br/>🏷️ Property Association<br/>Outputs: updated {source_type}_vars.pkl<br/>Class mappings"] --> m04a
     
     %% DTM Processing Phase
-    m03a[m03a_dtm_base_grid.py<br/>⛰️ DTM Base Grid Setup<br/>Outputs: dtm_vars.pkl<br/>Elevation, grids, profile] --> m04a
+    m03a["m03a_dtm_base_grid.py<br/>⛰️ DTM Base Grid Setup<br/>Outputs: dtm_vars.pkl<br/>Elevation, grids, profile"] --> m04a
     m03a --> m04b
     m03a --> m04c
     m03a --> m04d
     
     %% Analysis Phase
-    m04a[m04a_parameter_indexing.py<br/>🏷️ Parameter Indexing<br/>Outputs: parameter_vars.pkl<br/>Soil/veg classes per pixel] --> m05a
+    m04a["m04a_parameter_indexing.py<br/>🏷️ Parameter Indexing<br/>Outputs: parameter_vars.pkl<br/>Soil/veg classes per pixel"] --> m05a
     
-    m04b[m04b_morphological_grids.py<br/>📐 Morphological Analysis<br/>Outputs: morphology_vars.pkl<br/>Slopes, aspects, curvatures] --> m05b
+    m04b["m04b_morphological_grids.py<br/>📐 Morphological Analysis<br/>Outputs: morphology_vars.pkl<br/>Slopes, aspects, curvatures"] --> m05b
     
-    m04c[m04c_import_time_sensitive_data.py<br/>⏰ Time-Sensitive Data<br/>Outputs: {ts_type}_vars.pkl<br/>Rainfall, temperature] --> m05b
+    m04c["m04c_import_time_sensitive_data.py<br/>⏰ Time-Sensitive Data<br/>Outputs: {ts_type}_vars.pkl<br/>Rainfall, temperature"] --> m05b
     
-    m04d[m04d_landslides_paths.py<br/>🛤️ Flow Path Generation<br/>Outputs: landslide_paths_vars.pkl<br/>Upstream/downstream routing] --> m07a
+    m04d["m04d_landslides_paths.py<br/>🛤️ Flow Path Generation<br/>Outputs: landslide_paths_vars.pkl<br/>Upstream/downstream routing"] --> m07a
     
     %% Final Analysis Phase
-    m05a[m05a_reference_points_info.py<br/>📍 Reference Points Analysis<br/>Outputs: ref_points.csv<br/>Point-based parameter extraction]
+    m05a["m05a_reference_points_info.py<br/>📍 Reference Points Analysis<br/>Outputs: ref_points.csv<br/>Point-based parameter extraction"]
     
-    m05b[m05b_time_sensitive_analysis.py<br/>📊 Time-Series Analysis<br/>Outputs: updated {ts_type}_vars.pkl<br/>Interpolation, events]
+    m05b["m05b_time_sensitive_analysis.py<br/>📊 Time-Series Analysis<br/>Outputs: updated {ts_type}_vars.pkl<br/>Interpolation, events"]
     
     %% Alert Generation
     m04b --> m07a
     m05b --> m07a
-    m07a[m07a_attention_pixels_alert.py<br/>⚠️ Attention Pixel Alerts<br/>Outputs: alerts.csv, risk_maps<br/>High-risk pixel identification]
+    m07a["m07a_attention_pixels_alert.py<br/>⚠️ Attention Pixel Alerts<br/>Outputs: alerts.csv, risk_maps<br/>High-risk pixel identification"]
     
     %% Styling
     style m00a fill:#e1f5fe,stroke:#01579b,stroke-width:3px

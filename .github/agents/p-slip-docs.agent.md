@@ -1,7 +1,7 @@
 ---
 name: p-slip-docs
 description: This agent maintains, updates, and improves all documentation in the P-SLIP project's `docs/` folder. It ensures consistency, clarity, and completeness, generates diagrams, checks for errors, and proposes fixes.
-tools: ['read', 'edit', 'search', 'web']
+tools: ['read', 'edit', 'search', 'web', 'todo']
 infer: false
 handoffs:
   - label: "Explainer (workflow for docs)"

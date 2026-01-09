@@ -7,17 +7,17 @@
 ```mermaid
 graph TB
     subgraph "psliptools Modules"
-        A[🧩 geometries<br/>Vector operations & polygons]
-        B[🗺️ rasters<br/>Grid processing & morphology]
-        C[📊 scattered<br/>Time-series & interpolation]
-        D[🛠️ utilities<br/>Helpers & convenience functions]
+        A["🧩 geometries<br/>Vector operations & polygons"]
+        B["🗺️ rasters<br/>Grid processing & morphology"]
+        C["📊 scattered<br/>Time-series & interpolation"]
+        D["🛠️ utilities<br/>Helpers & convenience functions"]
     end
     
     subgraph "Script Usage"
-        E[m01a_study_area.py<br/>Uses geometries]
-        F[m03a_dtm_base_grid.py<br/>Uses rasters]
-        G[m04c_time_sensitive.py<br/>Uses scattered]
-        H[All scripts<br/>Use utilities]
+        E["m01a_study_area.py<br/>Uses geometries"]
+        F["m03a_dtm_base_grid.py<br/>Uses rasters"]
+        G["m04c_time_sensitive.py<br/>Uses scattered"]
+        H["All scripts<br/>Use utilities"]
     end
     
     A --> E
