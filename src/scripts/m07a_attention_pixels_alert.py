@@ -7,7 +7,7 @@ import datetime as dt
 from collections import defaultdict
 
 # Importing necessary modules from main_modules
-from m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_warning, log_and_error, memory_report, obtain_config_idx_and_rel_filename
+from m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, obtain_config_idx_and_rel_filename
 logger = setup_logger(__name__)
 logger.info("=== Attention pixels analysis and alert ===")
 
@@ -43,7 +43,7 @@ POSSIBLE_TRIGGER_MODES = ['rainfall-threshold', 'safety-factor', 'machine-learni
 STRAIGHT_LABEL = 'straight_'
 MA_LABEL = 'mobile_average_'
 DEFAULT_THRESHOLD_PERC = {
-    'quantiles': 0.9975,
+    'quantiles': 0.96,
     'max-percentage': 0.75
 }
 DEFAULT_ALERT_THR_FILE = {
