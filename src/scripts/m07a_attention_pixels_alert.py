@@ -15,7 +15,6 @@ logger.info("=== Attention pixels analysis and alert ===")
 # Importing necessary modules from config
 from config import (
     AnalysisEnvironment,
-    REFERENCE_POINTS_FILENAME,
     SUPPORTED_FILE_TYPES,
     DYNAMIC_SUBFOLDERS
 )
@@ -39,6 +38,10 @@ from psliptools.scattered import (
     interpolate_scatter_to_scatter
 )
 
+from psliptools.models import (
+    run_slip_model
+)
+
 # %% === Helper functions
 LANDSLIDE_PATHS_FILENAME = "landslide_paths_vars.pkl"
 POSSIBLE_TRIGGER_MODES = ['rainfall-threshold', 'safety-factor', 'machine-learning']
@@ -46,15 +49,17 @@ POSSIBLE_SAFETY_FACTOR_MODELS = ['slip'] # TODO: Add more
 STRAIGHT_LABEL = 'straight_'
 MA_LABEL = 'mobile_average_'
 DEFAULT_THRESHOLD_PERC = {
-    'quantiles': 0.96,
-    'max-percentage': 0.75
+    'high-quantile': 0.96,
+    'low-quantile': 0.04,
+    'percentage-of-max': 0.75,
+    'percentage-of-min': 1.05
 }
 DEFAULT_ALERT_THR_FILE = {
     'rainfall-threshold': 'rainfall_alert_thresholds.csv', 
     'safety-factor': 'safety_factor_alert_thresholds.csv', 
     'machine-learning': 'machine_learning_alert_thresholds.csv'
 }
-REMOVE_OUTLIERS_IN_THRESHOLDS = True
+REMOVE_OUTLIERS_DURING_THRESHOLDS_DEFINITION = True
 
 if any([tm not in DEFAULT_ALERT_THR_FILE for tm in POSSIBLE_TRIGGER_MODES]):
     log_and_error(f"Missing default alert threshold file for some trigger modes: [{', '.join([tm for tm in POSSIBLE_TRIGGER_MODES if tm not in DEFAULT_ALERT_THR_FILE])}].", ValueError, logger)
@@ -64,7 +69,8 @@ def get_top_k_paths(
         dtm: int,
         idx_2d: tuple[int, int] | list[tuple[int, int]] | np.ndarray,
         k: int = 3,
-        separate_starting_points: bool = False
+        separate_starting_points: bool = False,
+        top_k_paths_similarity_tolerance = 1
     ) -> list[str]:
     """
     Return top-k path_ids (highest path_realism_score) passing through point_2d in given dtm.
@@ -72,8 +78,10 @@ def get_top_k_paths(
     Args:
         paths_df (pd.DataFrame): DataFrame containing landslide paths data.
         dtm (int): DTM value.
-        point_2d (tuple[int, int] | list[int] | np.ndarray): 2D index of the point.
+        idx_2d (tuple[int, int] | list[tuple[int, int]] | np.ndarray): 2D indices of the points.
         k (int, optional): Number of top paths to return (default is 3).
+        separate_starting_points (bool, optional): If True, return top-k paths for each found starting point (default is False).
+        top_k_paths_similarity_tolerance (float, optional): Tolerance for path similarity (0 to 1). 0 means no common points allowed (except starting point), 1 means identical paths allowed (default is 1).
 
     Returns:
         list[str]: List of top-k path_ids.
@@ -86,6 +94,8 @@ def get_top_k_paths(
         log_and_error("point_2d must be a tuple, list, or numpy array.", ValueError, logger)
     if k <= 0:
         log_and_error("k must be positive.", ValueError, logger)
+    if not (0 <= top_k_paths_similarity_tolerance <= 1):
+        log_and_error("top_k_paths_similarity_tolerance must be between 0 and 1.", ValueError, logger)
 
     idx_2d = np.atleast_1d(idx_2d)
     if idx_2d.shape[1] != 2:
@@ -99,40 +109,73 @@ def get_top_k_paths(
     # Vectorized check for intersection
     curr_df['is_candidate'] = curr_df['path_2D_idx'].apply(lambda x: bool(set(map(tuple, x)) & idx_2d_set))
     candidate_df = curr_df[curr_df['is_candidate']]
-    candidates = candidate_df[['path_realism_score', 'path_id', 'starting_point_id']].values.tolist()
+    candidates = candidate_df[['path_realism_score', 'path_id', 'starting_point_id', 'path_2D_idx']].values.tolist()
+
+    def calculate_similarity(path1_idx, path2_idx):
+        """Calculate similarity between two paths (excluding first point - starting point)."""
+        set1 = set(map(tuple, path1_idx[1:]))  # Exclude starting point
+        set2 = set(map(tuple, path2_idx[1:]))  # Exclude starting point
+        
+        if len(set1) == 0 or len(set2) == 0:
+            return 0.0
+        
+        intersection = len(set1 & set2)
+        min_length = min(len(set1), len(set2))
+        
+        return intersection / min_length if min_length > 0 else 0.0
+
+    def filter_by_similarity(candidates_list, k, tolerance):
+        """Filter candidates to ensure similarity is below tolerance."""
+        selected = []
+        
+        for score, pid, spid, path_idx in candidates_list:
+            # Check similarity with already selected paths
+            is_valid = True
+            for _, _, _, selected_path_idx in selected:
+                similarity = calculate_similarity(path_idx, selected_path_idx)
+                if similarity > tolerance:
+                    is_valid = False
+                    break
+            
+            if is_valid:
+                selected.append((score, pid, spid, path_idx))
+                if len(selected) >= k:
+                    break
+        
+        return selected
 
     if separate_starting_points:
         candidates_by_sp = defaultdict(list)
-        for score, pid, spid in candidates:
-            candidates_by_sp[spid].append((score, pid))
+        for score, pid, spid, path_idx in candidates:
+            candidates_by_sp[spid].append((score, pid, spid, path_idx))
         top_paths = []
         for spid, cands in candidates_by_sp.items():
             cands.sort(reverse=True, key=lambda x: x[0])
-            top_for_sp = [pid for _, pid in cands[:k]]
+            filtered = filter_by_similarity(cands, k, top_k_paths_similarity_tolerance)
+            top_for_sp = [pid for _, pid, spid, _ in filtered]
             top_paths.extend(top_for_sp + [None] * (k - len(top_for_sp)))
     else:
         candidates.sort(reverse=True, key=lambda x: x[0])
-        top_paths = [pid for _, pid, _ in candidates[:k]]
+        filtered = filter_by_similarity(candidates, k, top_k_paths_similarity_tolerance)
+        top_paths = [pid for _, pid, spid, _ in filtered]
         top_paths += [None] * (k - len(top_paths))
 
     return top_paths
 
 def get_attention_pixel_coordinates(
-        env: AnalysisEnvironment,
+        abg_df: pd.DataFrame,
         attention_pixels_df: pd.DataFrame
     ) -> list[np.ndarray]:
     """
     Get coordinates of attention pixels.
     
     Args:
-        env (AnalysisEnvironment): Analysis environment.
+        abg_df (pd.DataFrame): DataFrame containing Analysys Base Grid (ABG) data.
         attention_pixels_df (pd.DataFrame): DataFrame containing attention pixel data.
 
     Returns:
         np.ndarray: List of coordinates of attention pixels (each element contains an array of coordinates nx2: n points with longitude and latitude).
     """
-    abg_df = env.load_variable(variable_filename='dtm_vars.pkl')['abg']
-
     attention_coords = []
     for _, row in attention_pixels_df.iterrows():
         curr_dtm = row['dtm']
@@ -145,8 +188,6 @@ def get_attention_pixel_coordinates(
                 abg_df['latitude'][curr_dtm][curr_row_idx, curr_col_idx]
             ])
         )
-    
-    del abg_df
 
     return attention_coords
 
@@ -241,35 +282,13 @@ def get_station_pixels_association(
     
     return station_pixels_association
 
-def _format_iterable_with_tab(
-        iterable: list | np.ndarray | pd.Series | dict,
-        prefix: str = "\t"
-    ) -> str:
-    """
-    Convert ``iterable`` (list, np.ndarray, pd.Series, dict) to a string
-    where each element/value is on its own line and prefixed with ``prefix``.
-    For a pandas Series the index is included (``index: value``) just like
-    the default ``print(series)`` output.
-    """
-    if isinstance(iterable, dict):
-        lines = [f"{prefix}{k}: {v}" for k, v in iterable.items()]
-    elif isinstance(iterable, pd.Series):
-        # Preserve the index in the output
-        lines = [f"{prefix}{idx}: {val}" for idx, val in iterable.items()]
-    else:
-        # pandas Series, list, ndarray, etc.
-        # ``list(iterable)`` works for Series, ndarray and list alike
-        lines = [f"{prefix}{v}" for v in list(iterable)]
-    
-    return "\n".join(lines)
-
 def evaluate_safety_factors_on_attention_pixels(
         env: AnalysisEnvironment,
         attention_pixels_df: pd.DataFrame,
         parameter_class_association_df: pd.DataFrame,
-        rain_data: dict[str, pd.DataFrame],
+        rain_vars: dict[str, pd.DataFrame],
         model_name: str
-    ) -> pd.DataFrame:
+    ) -> dict[str, pd.DataFrame]:
     """
     Evaluate safety factors on attention pixels.
     
@@ -277,10 +296,11 @@ def evaluate_safety_factors_on_attention_pixels(
         env (AnalysisEnvironment): Analysis environment.
         attention_pixels_df (pd.DataFrame): DataFrame containing attention pixel data.
         parameter_class_association_df (pd.DataFrame): DataFrame containing parameter class association data.
+        rain_vars (dict[str, pd.DataFrame]): Dictionary containing rain data.
         model_name (str): Name of the model (e. g., "slip")
 
     Returns:
-        pd.DataFrame: DataFrame containing attention pixels with their safety factor values.
+        dict: a dictionary containing multiple DataFrames based on the number of rows in attention_pixels_df. Inside each key, the dataframe has the history of FS.
     """
     if model_name not in POSSIBLE_SAFETY_FACTOR_MODELS:
         log_and_error(f"Invalid model_name: [{model_name}]. Must be one of {POSSIBLE_SAFETY_FACTOR_MODELS}.", ValueError, logger)
@@ -305,7 +325,6 @@ def evaluate_safety_factors_on_attention_pixels(
     beta_slope = slope_df['slope'].apply(lambda x: np.cos(np.radians(x))).to_list()
 
     # Add data to attention_pixels_df
-    curr_parameter_csv_path = None
     attention_pixels_df['slope'] = None
     for ap_idx, ap_row in attention_pixels_df.iterrows():
         ap_slope = slope_df['slope'].loc[ap_row['dtm']][ap_row['2D_idx'][:,0], ap_row['2D_idx'][:,1]]
@@ -338,12 +357,13 @@ def evaluate_safety_factors_on_attention_pixels(
         
         del par_grids_dict
 
+        fs_history_dict = {}
         for ap_idx, ap_row in attention_pixels_df.iterrows():
             interp_rain_history = []
-            for r_idx, r_row in rain_data['data']['cumulative_rain'].iterrows():
+            for r_idx, r_row in rain_vars['data']['cumulative_rain'].iterrows():
                 curr_interp_rain = interpolate_scatter_to_scatter(
-                    x_in=rain_data['stations']['longitude'],
-                    y_in=rain_data['stations']['latitude'],
+                    x_in=rain_vars['stations']['longitude'],
+                    y_in=rain_vars['stations']['latitude'],
                     data_in=r_row,
                     x_out=ap_row['coordinates'][:,0],
                     y_out=ap_row['coordinates'][:,1],
@@ -354,7 +374,7 @@ def evaluate_safety_factors_on_attention_pixels(
 
                 interp_rain_history.append(curr_interp_rain)
             
-            curr_rain_data_df = rain_data['datetimes'].copy()
+            curr_rain_data_df = rain_vars['datetimes'].copy()
             curr_rain_data_df['rain'] = interp_rain_history
             
             curr_fs_history_df = run_slip_model(
@@ -369,13 +389,158 @@ def evaluate_safety_factors_on_attention_pixels(
                 soil_porosity=ap_row['n'],
                 lambda_slip=0.4,
                 alpha_slip=3.4,
-                rain_history=curr_rain_data_df
+                instability_depth=1.2,
+                soil_saturation=0.8,
+                rain_history=curr_rain_data_df,
+                predisposing_time_window=pd.Timedelta(days=30)
             )
 
-            attention_pixels_df.at[ap_idx, 'safety_factor'] = curr_fs_history_df # Maybe not a brillant idea to store a df into a df... Work on it!
+            fs_history_dict[ap_idx] = curr_fs_history_df # Index is the same as attention_pixels_df index
 
     else:
         log_and_error(f"Model [{model_name}] not implemented yet. Please contact the developers.", NotImplementedError, logger)
+    
+    return fs_history_dict
+
+def get_alert_datetimes_per_attention_area(
+        alert_metric_history_dict: dict[str, pd.DataFrame],
+        alert_metric_col: str,
+        attention_pixels_df: pd.DataFrame,
+        alert_thresholds_df: pd.DataFrame,
+        trigger_mode: str,
+        alert_metric: str,
+        alert_metric_mode: str,
+        events_time_tolerance: pd.Timedelta,
+        landslide_paths_df: pd.DataFrame,
+        top_k_paths_per_activation: int,
+        top_k_paths_similarity_tolerance: float
+    ) -> dict[str, pd.DataFrame]:
+    alert_datetimes_dict = {}
+    for aa, data_hist_df in alert_metric_history_dict.items():
+        data_stacked_vals = np.vstack(data_hist_df[alert_metric_col])
+        if data_stacked_vals.ndim != 2:
+            log_and_error(f"Invalid data_stacked_vals shape: {data_stacked_vals.shape}. Please contact the developers.", ValueError, logger)
+        
+        if trigger_mode in ['rainfall-threshold', 'machine-learning']:
+            alert_mask = data_stacked_vals >= alert_thresholds_df.loc[aa, 'threshold']
+        elif trigger_mode == 'safety-factor':
+            alert_mask = data_stacked_vals <= alert_thresholds_df.loc[aa, 'threshold']
+        else:
+            log_and_error(f"Invalid trigger_mode during creation of alerts: [{trigger_mode}]. Please contact the developers.", ValueError, logger)
+        
+        alert_rows = alert_mask.any(axis=1)
+        alert_mask_only_activated = alert_mask[alert_rows, :]
+
+        curr_alert_datetimes_df = data_hist_df.loc[alert_rows, ['start_date', 'end_date']].copy().reset_index(drop=True)
+
+        # Group datetimes into events based on events_time_tolerance using 'start_date'
+        curr_alert_datetimes_df = curr_alert_datetimes_df.sort_values('start_date')
+        event_labels = []
+        current_event = 0
+        last_date = None
+        for ad_idx, ad_row in curr_alert_datetimes_df.iterrows():
+            dt = ad_row['start_date']
+            if last_date is None or (dt - last_date) > events_time_tolerance:
+                current_event += 1
+            event_labels.append(f'rt{current_event}')
+            last_date = dt
+        curr_alert_datetimes_df['event'] = event_labels
+
+        logger.info(f"Number of events detected with tolerance [{events_time_tolerance}]: {len(curr_alert_datetimes_df['event'].unique())} (alert_area {aa} of {len(alert_metric_history_dict)})")
+
+        curr_alert_datetimes_df['trigger_mode'] = trigger_mode
+        curr_alert_datetimes_df['alert_metric'] = alert_metric
+        curr_alert_datetimes_df['alert_metric_mode'] = alert_metric_mode
+        curr_alert_datetimes_df['activated_pixels_dtm_file_id'] = attention_pixels_df.loc[aa, 'dtm_file_id']
+
+        # Pre-allocate lists for better performance
+        activated_pixels_2D_idx_list = []
+        activated_pixels_coordinates_list = []
+        for act_mask in alert_mask_only_activated:
+            activated_pixels_2D_idx_list.append(attention_pixels_df.loc[aa, '2D_idx'][act_mask, :])
+            activated_pixels_coordinates_list.append(attention_pixels_df.loc[aa, 'coordinates'][act_mask, :])
+        
+        curr_alert_datetimes_df['activated_pixels_2D_idx'] = activated_pixels_2D_idx_list
+        curr_alert_datetimes_df['activated_pixels_coordinates'] = activated_pixels_coordinates_list
+
+        # Extract top-k critical landslide paths for each alert
+        curr_alert_datetimes_df['top_critical_landslide_path_ids'] = None
+        if top_k_paths_per_activation > 0:
+            curr_dtm = int(attention_pixels_df.loc[aa, 'dtm'])
+            
+            # Pre-filter paths for current DTM
+            curr_dtm_paths = landslide_paths_df[landslide_paths_df['path_dtm'] == curr_dtm].copy()
+            
+            # Pre-compute path sets (excluding first point) for similarity calculation
+            path_sets_cache = {}
+            for _, path_row in curr_dtm_paths.iterrows():
+                path_idx = path_row['path_2D_idx']
+                path_sets_cache[path_row['path_id']] = set(map(tuple, path_idx[1:]))
+            
+            # Group paths by starting point for faster lookup
+            paths_by_sp = defaultdict(list)
+            for _, path_row in curr_dtm_paths.iterrows():
+                paths_by_sp[path_row['starting_point_id']].append({
+                    'path_id': path_row['path_id'],
+                    'score': path_row['path_realism_score'],
+                    'path_2D_idx': path_row['path_2D_idx'],
+                    'path_set': path_sets_cache[path_row['path_id']]
+                })
+            
+            # Sort each starting point's paths by score once
+            for sp_id in paths_by_sp:
+                paths_by_sp[sp_id].sort(key=lambda x: x['score'], reverse=True)
+            
+            # Process each alert
+            top_paths_list = []
+            for ad_idx, activated_idx in enumerate(activated_pixels_2D_idx_list):
+                if ad_idx % 100 == 0:
+                    logger.info(f"Finding top {top_k_paths_per_activation} critical landslide paths for event {ad_idx + 1} of {len(curr_alert_datetimes_df)} (alert_area n.: {aa} of {len(alert_metric_history_dict)})...")
+                
+                # Create set of activated pixels for fast lookup
+                activated_set = set(map(tuple, activated_idx))
+                
+                # Find candidate paths that intersect with activated pixels
+                candidates_by_sp = defaultdict(list)
+                for sp_id, sp_paths in paths_by_sp.items():
+                    for path_info in sp_paths:
+                        # Check intersection with activated pixels
+                        path_points_set = set(map(tuple, path_info['path_2D_idx']))
+                        if path_points_set & activated_set:
+                            candidates_by_sp[sp_id].append(path_info)
+                
+                # Select top-k paths per starting point with similarity filtering
+                selected_paths = []
+                for sp_id, candidates in candidates_by_sp.items():
+                    sp_selected = []
+                    for candidate in candidates:
+                        # Check similarity with already selected paths from this SP
+                        is_valid = True
+                        for selected in sp_selected:
+                            # Calculate similarity (excluding starting point)
+                            intersection = len(candidate['path_set'] & selected['path_set'])
+                            min_length = min(len(candidate['path_set']), len(selected['path_set']))
+                            similarity = intersection / min_length if min_length > 0 else 0.0
+                            
+                            if similarity > top_k_paths_similarity_tolerance:
+                                is_valid = False
+                                break
+                        
+                        if is_valid:
+                            sp_selected.append(candidate)
+                            if len(sp_selected) >= top_k_paths_per_activation:
+                                break
+                    
+                    selected_paths.extend([p['path_id'] for p in sp_selected])
+                
+                # Remove duplicates and store
+                top_paths_list.append(list(set(selected_paths)) if selected_paths else [])
+            
+            curr_alert_datetimes_df['top_critical_landslide_path_ids'] = top_paths_list
+        
+        alert_datetimes_dict[aa] = curr_alert_datetimes_df
+    
+    return alert_datetimes_dict
 
 # %% === Main function
 def main(
@@ -383,9 +548,9 @@ def main(
         gui_mode: bool=False,
         trigger_mode: str='rainfall-threshold', # or 'safety-factor' or 'machine-learning'
         alert_thresholds: float | list[float] | np.ndarray | pd.Series=None, # values and measure units depend on trigger mode
-        default_thr_mode: str='quantiles', # or 'max-percentage'
         events_time_tolerance: dt.timedelta | pd.Timedelta=dt.timedelta(days=5),
-        top_k_paths_per_activation: int=5
+        top_k_paths_per_activation: int=5,
+        top_k_paths_similarity_tolerance: float=0.5 # 0 (no point in common, except for start) to 1 (all points in common)
     ) -> dict[str, object]:
     """Main function to analyze and alert on attention pixels."""
 
@@ -394,8 +559,6 @@ def main(
         log_and_error(f"Invalid trigger_mode: [{trigger_mode}]. Must be one of {POSSIBLE_TRIGGER_MODES}.", ValueError, logger)
     if not alert_thresholds is None and not isinstance(alert_thresholds, (float, list, np.ndarray, pd.Series)):
         log_and_error(f"Invalid alert_thresholds: [{alert_thresholds}]. Must be a float, list, np.ndarray, or pd.Series.", ValueError, logger)
-    if not default_thr_mode in DEFAULT_THRESHOLD_PERC.keys():
-        log_and_error(f"Invalid default_thresholds: [{default_thr_mode}]. Must be one of {list(DEFAULT_THRESHOLD_PERC.keys())}.", ValueError, logger)
     if not isinstance(events_time_tolerance, (dt.timedelta, pd.Timedelta)):
         log_and_error(f"Invalid events_time_tolerance: [{events_time_tolerance}]. Must be a dt.timedelta or pd.Timedelta.", ValueError, logger)
     if not isinstance(top_k_paths_per_activation, int):
@@ -408,11 +571,16 @@ def main(
 
     landslide_paths_df = landslide_paths_vars['paths_df']
 
-    dtm_file_id_df = env.load_variable(variable_filename='dtm_vars.pkl')['dtm']['file_id']
+    dtm_vars = env.load_variable(variable_filename='dtm_vars.pkl')
+
+    dtm_file_id_df = dtm_vars['dtm']['file_id']
+    abg_df = dtm_vars['abg']
+
+    del dtm_vars # It can be heavy to keep in memory on very large areas
 
     # Create a dataframe with every dtm, starting_point_id, and their attention pixels
     unique_combos = landslide_paths_df[['path_dtm', 'starting_point_id']].drop_duplicates().sort_values(['path_dtm', 'starting_point_id'])
-    ap_w_spid_list = []
+    attention_pixels_list = []
     for _, row in unique_combos.iterrows():
         curr_dtm = int(row['path_dtm'])
         curr_dtm_file_id = dtm_file_id_df[curr_dtm]
@@ -420,15 +588,20 @@ def main(
         curr_paths = landslide_paths_df[(landslide_paths_df['path_dtm'] == curr_dtm) & (landslide_paths_df['starting_point_id'] == curr_spid)]
         all_points = np.vstack(curr_paths['path_2D_idx'].values)
         unique_pts = np.unique(all_points, axis=0)
-        ap_w_spid_list.append({
+        attention_pixels_list.append({
             'dtm': curr_dtm,
             'dtm_file_id': curr_dtm_file_id,
             'starting_point_id': curr_spid,
             '2D_idx': unique_pts
         })
-    attention_pixels_df = pd.DataFrame(ap_w_spid_list)
-    attention_pixels_df['coordinates'] = get_attention_pixel_coordinates(env, attention_pixels_df)
+    
+    attention_pixels_df = pd.DataFrame(attention_pixels_list)
+    attention_pixels_df.index.name = 'attention_area'
+    attention_pixels_df['coordinates'] = get_attention_pixel_coordinates(abg_df, attention_pixels_df)
 
+    del abg_df # It can be heavy to keep in memory on very large areas
+    
+    # =============== Alerts by rainfall-threshold ===============
     if trigger_mode == 'rainfall-threshold':
         rel_filename, _, _, _ = get_rain_info(env, gui_mode)
         
@@ -476,195 +649,145 @@ def main(
         else:
             log_and_error(f"Invalid alert metric mode: {alert_metric_mode}", ValueError, logger)
         
-        # Create mask for outliers using IQR method
-        outlier_mask = pd.DataFrame(False, index=alert_metric_data.index, columns=alert_metric_data.columns)
-        if REMOVE_OUTLIERS_IN_THRESHOLDS:
-            qlw_sta = alert_metric_data.quantile(q=0.01, axis=0)
-            qhg_sta = alert_metric_data.quantile(q=0.99, axis=0)
-            iqr_sta = qhg_sta - qlw_sta
-            lower_bound = qlw_sta - 1.5 * iqr_sta
-            upper_bound = qhg_sta + 1.5 * iqr_sta
-            outlier_mask = (alert_metric_data < lower_bound) | (alert_metric_data > upper_bound)
-        
-        alert_mtr_sta_max = alert_metric_data.max(axis=0)
-        if alert_mtr_sta_max.isna().any():
-            log_and_error(f"Some alert metric data is empty: {alert_mtr_sta_max[alert_mtr_sta_max.isna()]}", ValueError, logger)
-        
-        if default_thr_mode == 'max-percentage':
-            def_alert_thresholds = DEFAULT_THRESHOLD_PERC[default_thr_mode] * alert_metric_data.where(~outlier_mask).max(axis=0)
-        elif default_thr_mode == 'quantiles':
-            def_alert_thresholds = alert_metric_data.where(~outlier_mask).quantile(DEFAULT_THRESHOLD_PERC[default_thr_mode], axis=0)
-        else:
-            log_and_error(f"Default threshold mode not implemented: {default_thr_mode}. Contact the developer.", ValueError, logger)
-        
-        if alert_thresholds is None:
-            info_alert_threshold_prompt = (
-                f'Info for alert threshold: \n'
-                f'\t- max values of {alert_metric} are \n{_format_iterable_with_tab(alert_mtr_sta_max, prefix="\t\t")};\n'
-                f'\t- default values for alert thresholds are \n{_format_iterable_with_tab(def_alert_thresholds, prefix="\t\t")};'
-            )
-            if alert_metric_mode.startswith(MA_LABEL):
-                info_alert_threshold_prompt += f'\n\t- m.a. delta time is {rain_vars["mobile_averages"]["window_delta_time"]};'
-            
-            if gui_mode:
-                log_and_error("GUI mode not implemented yet.", NotImplementedError, logger)
-            else:
-                print(info_alert_threshold_prompt)
+        alert_metric_col = alert_metric + '_' + alert_metric_mode
+        default_thr_mode = 'high-quantile'
 
-                def_alert_df = pd.DataFrame({
-                    'station': alert_mtr_sta_max.index.tolist(),
-                    f'max_{alert_metric}_[{alert_metric_mode}]': alert_mtr_sta_max.tolist(),
-                    'threshold': def_alert_thresholds.tolist()
-                })
+        alert_metric_history_dict = {}
+        log_and_error(f"Trigger mode {trigger_mode} is not implemented yet.", NotImplementedError, logger)
 
-                def_alert_df_path = os.path.join(env.folders['user_control']['path'], DEFAULT_ALERT_THR_FILE[trigger_mode])
-                if os.path.isfile(def_alert_df_path):
-                    overwrite = input(f"File {def_alert_df_path} already exists. Overwrite with default? [y/n]: ")
-                    if overwrite.lower() == 'y':
-                        def_alert_df.to_csv(def_alert_df_path, index=False)
-                    else:
-                        print(f"File {def_alert_df_path} not overwritten.")
-                else:
-                    def_alert_df.to_csv(def_alert_df_path, index=False)
-
-                alert_thresholds_path = select_file_prompt(
-                    base_dir=env.folders['user_control']['path'], 
-                    usr_prompt=f'Select file with alert thresholds (default: {DEFAULT_ALERT_THR_FILE[trigger_mode]}): ', 
-                    src_ext=SUPPORTED_FILE_TYPES['table'],
-                    default_file=DEFAULT_ALERT_THR_FILE[trigger_mode]
-                )
-
-                alert_thresholds = read_generic_csv(alert_thresholds_path, index_col='station').loc[:, 'threshold']
-        else:
-            if not isinstance(alert_thresholds, pd.Series):
-                alert_thresholds = pd.Series(alert_thresholds, index=unique_rain_station_names)
-        
-        if not isinstance(alert_thresholds, pd.Series):
-            log_and_error("Alert thresholds, at this point, must be a pandas Series! Please contact the developer.", ValueError, logger)
-        alert_thresholds.loc[unique_rain_station_names]
-        
-        # Convert alert_thresholds to DataFrame with additional columns
-        alert_thr_df = pd.DataFrame({
-            'alert_metric': alert_metric,
-            'alert_metric_mode': alert_metric_mode,
-            'alert_metric_delta_time': alert_metric_dt_str,
-            'max': alert_mtr_sta_max,
-            'threshold': alert_thresholds
-        })
-        alert_thr_df.index.name = 'station'
-        
-        alert_mask = alert_metric_data >= alert_thr_df['threshold']
-
-        alert_datetimes_df = rain_vars['datetimes'].loc[alert_mask.any(axis=1)].copy().reset_index()
-        alert_datetimes_df['trigger_mode'] = trigger_mode
-        alert_datetimes_df['alert_metric'] = alert_metric
-        alert_datetimes_df['alert_metric_mode'] = alert_metric_mode
-        alert_datetimes_df['alert_metric_delta_time'] = alert_metric_dt_str
-        
-        # Group datetimes into events based on events_time_tolerance using 'start_date'
-        alert_datetimes_df = alert_datetimes_df.sort_values('start_date')
-        event_labels = []
-        current_event = 0
-        last_date = None
-        for idx, row in alert_datetimes_df.iterrows():
-            dt = row['start_date']
-            if last_date is None or (dt - last_date) > events_time_tolerance:
-                current_event += 1
-            event_labels.append(f'rt{current_event}')
-            last_date = dt
-        alert_datetimes_df['event'] = event_labels
-
-        logger.info(f"Number of events detected with tolerance [{events_time_tolerance}]: {len(alert_datetimes_df['event'].unique())}")
-
-        activated_station_lists = [
-            alert_mask.loc[row_mask, alert_mask.loc[row_mask]].index.tolist()
-            for row_mask in alert_mask[alert_mask.any(axis=1)].index
-        ]
-        alert_datetimes_df['activated_stations'] = activated_station_lists
-        
-        alert_datetimes_df['activated_pixels'] = None
-        alert_datetimes_df['geo_coordinates'] = None
-        for idx, curr_row in alert_datetimes_df.iterrows():
-            curr_stations = curr_row['activated_stations']
-            dtm_points = {}
-            for curr_sta in curr_stations:
-                sta_df = station_pixels_association[curr_sta]
-                for _, pix_row in sta_df.iterrows():
-                    curr_dtm = pix_row['dtm']
-                    curr_2d_idx = pix_row['2D_idx']
-                    curr_coords = pix_row['coordinates']
-                    if curr_dtm not in dtm_points:
-                        dtm_points[curr_dtm] = []
-                    dtm_points[curr_dtm].append((curr_2d_idx, curr_coords))
-            # Aggregate and unique per DTM
-            activated_pixels_list = []
-            for dtm, points_list in dtm_points.items():
-                all_points = np.vstack([p for p, _ in points_list])
-                all_coords = np.vstack([c for _, c in points_list])
-                unique_indices = np.unique(all_points, axis=0, return_index=True)[1]
-                unique_points = all_points[unique_indices]
-                unique_coords = all_coords[unique_indices]
-                activated_pixels_list.append({'dtm': dtm, 'activated_points': unique_points, 'coordinates': unique_coords})
-            alert_datetimes_df.at[idx, 'activated_pixels'] = pd.DataFrame(activated_pixels_list)
-            alert_datetimes_df.at[idx, 'geo_coordinates'] = np.concatenate([x['coordinates'] for x in activated_pixels_list], axis=0)
-
-        alert_thr_dict = {
-            trigger_mode: alert_thr_df
-        }
-
+    # =============== Alerts by safety-factor ===============
     elif trigger_mode == 'safety-factor':
-        model_name = 'slip' # TODO: Add more safety-factor models
+        alert_metric = 'safety-factor'
+        alert_metric_col = 'fs'
+        alert_metric_mode = 'slip' # TODO: Add more safety-factor models
+        default_thr_mode = 'low-quantile'
 
-        if model_name not in POSSIBLE_SAFETY_FACTOR_MODELS:
-            log_and_error(f"Invalid model_name: [{model_name}]. Must be one of {POSSIBLE_SAFETY_FACTOR_MODELS}.", ValueError, logger)
+        if alert_metric_mode not in POSSIBLE_SAFETY_FACTOR_MODELS:
+            log_and_error(f"Invalid model_name: [{alert_metric_mode}]. Must be one of {POSSIBLE_SAFETY_FACTOR_MODELS}.", ValueError, logger)
         
         parameter_vars = env.load_variable(variable_filename='parameter_vars.pkl')
 
         rel_filename, _, _, _ = get_rain_info(env, gui_mode)
         rain_vars = env.load_variable(variable_filename=f'{rel_filename}_vars.pkl')
 
-        fs_df = evaluate_safety_factors_on_attention_pixels(
+        alert_metric_history_dict = evaluate_safety_factors_on_attention_pixels( # It will have same number of rows as attention_pixels_df
             env=env,
             attention_pixels_df=attention_pixels_df,
             parameter_class_association_df = parameter_vars['association_df'],
-            rain_data=rain_vars,
-            model_name=model_name
+            rain_vars=rain_vars,
+            model_name=alert_metric_mode
         )
 
-        log_and_error(f"Trigger mode {trigger_mode} is not implemented yet.", NotImplementedError, logger)
-
+    # =============== Alerts by machine-learning ===============
     elif trigger_mode == 'machine-learning':
         log_and_error(f"Trigger mode {trigger_mode} is not implemented yet.", NotImplementedError, logger)
     
+    # =============== Unknown trigger mode ===============
     else:
         log_and_error(f"Trigger mode not recognized or not implemented: {trigger_mode}.", ValueError, logger)
 
-    alert_datetimes_df['top_critical_landslide_path_ids'] = None
-    if top_k_paths_per_activation > 0:
-        for idx, al_row in alert_datetimes_df.iterrows():
-            if idx % 50 == 0:
-                logger.info(f"Finding top {top_k_paths_per_activation} critical landslide paths for event {idx + 1} of {len(alert_datetimes_df)}...")
-            active_pixels = al_row['activated_pixels']
-            curr_top_paths = []
-            for _, ap_row in active_pixels.iterrows():
-                curr_active_dtm = int(ap_row['dtm'])
-                curr_active_2d_idx = ap_row['activated_points']
-                curr_top_paths.extend(get_top_k_paths(
-                    paths_df=landslide_paths_df,
-                    dtm=curr_active_dtm,
-                    idx_2d=curr_active_2d_idx,
-                    k=top_k_paths_per_activation,
-                    separate_starting_points=True
-                ))
-            curr_top_paths = [x for x in curr_top_paths if x is not None]
-            curr_top_paths = list(set(curr_top_paths))
-            alert_datetimes_df.at[idx, 'top_critical_landslide_path_ids'] = curr_top_paths
+    
+    # Statistics of alert metric data
+    alert_metric_statistics = []
+    for aa, hist_df in alert_metric_history_dict.items():
+        # Create mask for outliers using IQR method
+        curr_data_stacked = np.vstack(hist_df[alert_metric_col])
+        outlier_and_nan_mask = np.zeros(curr_data_stacked.shape, dtype=bool)
+        if REMOVE_OUTLIERS_DURING_THRESHOLDS_DEFINITION:
+            lower_quantile = np.nanquantile(curr_data_stacked, q=0.1)
+            higher_quantile = np.nanquantile(curr_data_stacked, q=0.9)
+            iqr = higher_quantile - lower_quantile
+            lower_bound = lower_quantile - 1.5 * iqr
+            upper_bound = higher_quantile + 1.5 * iqr
+            outlier_and_nan_mask = (curr_data_stacked < lower_bound) | (curr_data_stacked > upper_bound)
+        
+        if default_thr_mode == 'percentage-of-min':
+            def_alert_threshold = DEFAULT_THRESHOLD_PERC[default_thr_mode] * np.nanmin(curr_data_stacked)
+        elif default_thr_mode == 'percentage-of-max':
+            def_alert_threshold = DEFAULT_THRESHOLD_PERC[default_thr_mode] * np.nanmax(curr_data_stacked)
+        elif default_thr_mode in ['high-quantile', 'low-quantile']:
+            masked_data = curr_data_stacked[~outlier_and_nan_mask]
+            def_alert_threshold = np.nanquantile(masked_data, q=DEFAULT_THRESHOLD_PERC[default_thr_mode])
+        else:
+            log_and_error(f"Default threshold mode not recognized: {default_thr_mode}. Contact the developer.", ValueError, logger)
+        
+        alert_metric_statistics.append({
+            'attention_area': aa,
+            'starting_point_id': attention_pixels_df.at[aa, 'starting_point_id'],
+            'metric': alert_metric,
+            'metric_mode': alert_metric_mode,
+            'mean': np.nanmean(curr_data_stacked),
+            'std': np.nanstd(curr_data_stacked),
+            'max': np.nanmax(curr_data_stacked),
+            'min': np.nanmin(curr_data_stacked),
+            'default-threshold': def_alert_threshold,
+        })
+
+    alert_metric_statistics_df = pd.DataFrame(alert_metric_statistics).set_index('attention_area')
+
+    # Definition of alert thresholds
+    if alert_thresholds is None:
+        if gui_mode:
+            log_and_error("GUI mode not implemented yet.", NotImplementedError, logger)
+        else:
+            print(f'Helpful info about alert threshold: \n\n{alert_metric_statistics_df}')
+
+            def_alert_df = alert_metric_statistics_df.copy()
+            def_alert_df['threshold'] = def_alert_df['default-threshold']
+
+            def_alert_df_path = os.path.join(env.folders['user_control']['path'], DEFAULT_ALERT_THR_FILE[trigger_mode])
+            if os.path.isfile(def_alert_df_path):
+                overwrite = input(f"File {def_alert_df_path} already exists. Overwrite with default? [y/n]: ")
+                if overwrite.lower() == 'y':
+                    def_alert_df.to_csv(def_alert_df_path, index=True)
+                else:
+                    print(f"File {def_alert_df_path} not overwritten.")
+            else:
+                def_alert_df.to_csv(def_alert_df_path, index=True)
+
+            alert_thresholds_path = select_file_prompt(
+                base_dir=env.folders['user_control']['path'], 
+                usr_prompt=f'Select file with alert thresholds (default: {DEFAULT_ALERT_THR_FILE[trigger_mode]}): ', 
+                src_ext=SUPPORTED_FILE_TYPES['table'],
+                default_file=DEFAULT_ALERT_THR_FILE[trigger_mode]
+            )
+
+            alert_thresholds = read_generic_csv(alert_thresholds_path, index_col='attention_area').loc[:, 'threshold']
+    else:
+        if not isinstance(alert_thresholds, pd.Series):
+            alert_thresholds = np.atleast_1d(alert_thresholds)
+            if alert_thresholds.size != len(attention_pixels_df) and alert_thresholds.size == 1:
+                alert_thresholds = np.repeat(alert_thresholds, len(attention_pixels_df))
+            alert_thresholds = pd.Series(alert_thresholds, index=pd.Index(attention_pixels_df.index, name='attention_area'), name='threshold')
+    
+    if not isinstance(alert_thresholds, pd.Series):
+        log_and_error("Alert thresholds, at this point, must be a pandas Series! Please contact the developer.", ValueError, logger)
+    alert_thresholds = alert_thresholds.loc[attention_pixels_df.index]
+    
+    # Convert alert_thresholds to DataFrame with additional columns
+    alert_thresholds_df = alert_metric_statistics_df.copy()
+    alert_thresholds_df['threshold'] = alert_thresholds
+    
+    alert_datetimes_dict = get_alert_datetimes_per_attention_area(
+        alert_metric_history_dict=alert_metric_history_dict,
+        alert_metric_col=alert_metric_col,
+        attention_pixels_df=attention_pixels_df,
+        alert_thresholds_df=alert_thresholds_df,
+        trigger_mode=trigger_mode,
+        alert_metric=alert_metric,
+        alert_metric_mode=alert_metric_mode,
+        events_time_tolerance=events_time_tolerance,
+        landslide_paths_df=landslide_paths_df,
+        top_k_paths_per_activation=top_k_paths_per_activation,
+        top_k_paths_similarity_tolerance=top_k_paths_similarity_tolerance
+    )
 
     # Extract all unique top critical landslide path IDs
     all_top_paths = set()
-    for paths in alert_datetimes_df['top_critical_landslide_path_ids']:
-        if paths is not None:
-            all_top_paths.update(paths)
+    for aa, ad_df in alert_datetimes_dict.items():
+        for paths in ad_df['top_critical_landslide_path_ids']:
+            if paths is not None:
+                all_top_paths.update(paths)
     all_top_paths = list(all_top_paths)
 
     # Extract the corresponding rows from landslide_paths_df
@@ -674,16 +797,21 @@ def main(
     if not os.path.isdir(OUT_ALERT_DIR):
         os.makedirs(OUT_ALERT_DIR)
 
-    attention_pixels_df.to_csv(os.path.join(OUT_ALERT_DIR, 'attention_pixels.csv'), index=False)
-    columns_to_export = [col for col in alert_datetimes_df.columns if col != 'activated_pixels']
-    alert_datetimes_df[columns_to_export].to_csv(os.path.join(OUT_ALERT_DIR, 'activation_datetimes.csv'), index=False)
-    alert_thr_df.to_csv(os.path.join(OUT_ALERT_DIR, DEFAULT_ALERT_THR_FILE[trigger_mode]), index=True)
+    attention_pixels_df.to_csv(os.path.join(OUT_ALERT_DIR, 'attention_pixels.csv'), index=True)
+    alert_thresholds_df.to_csv(os.path.join(OUT_ALERT_DIR, DEFAULT_ALERT_THR_FILE[trigger_mode]), index=True)
     critical_paths_df.to_csv(os.path.join(OUT_ALERT_DIR, 'critical_landslide_paths.csv'), index=False)
 
+    OUT_ALERT_DIR_AD = os.path.join(OUT_ALERT_DIR, 'activation_datetimes')
+    OUT_ALERT_DIR_MH = os.path.join(OUT_ALERT_DIR, 'activation_metric_history')
+    for aa in attention_pixels_df.index:
+        alert_datetimes_dict[aa].to_csv(os.path.join(OUT_ALERT_DIR_AD, f'activation_datetimes_aa_{aa}.csv'), index=False)
+        alert_metric_history_dict[aa].to_csv(os.path.join(OUT_ALERT_DIR_MH, f'activation_metric_history_aa_{aa}.csv'), index=False)
+
     alert_vars = {
-        'attention_pixels':attention_pixels_df, 
-        'activation_datetimes': alert_datetimes_df, 
-        'alert_thresholds': alert_thr_dict
+        'attention_pixels_df': attention_pixels_df, 
+        'alert_thresholds_df': alert_thresholds_df,
+        'alert_datetimes_dict': alert_datetimes_dict,
+        'alert_metric_history_dict': alert_metric_history_dict
     }
 
     env.save_variable(variable_to_save=alert_vars, variable_filename='alert_vars.pkl')
@@ -695,18 +823,36 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze and alert on attention pixels.")
     parser.add_argument("--base_dir", type=str, help="Base directory for analysis")
     parser.add_argument("--gui_mode", action="store_true", help="Run in GUI mode")
-    parser.add_argument("--trigger_mode", type=str, default='rainfall-threshold', help="Trigger mode")
-    parser.add_argument("--alert_thresholds", type=str, default=None, help="Alert thresholds")
-    parser.add_argument("--default_thr_mode", type=str, default=None, help="Default threshold mode")
-    parser.add_argument("--events_time_tolerance", type=dt.timedelta, default=dt.timedelta(days=5), help="Events time tolerance")
+    parser.add_argument("--trigger_mode", type=str, default='rainfall-threshold', help="Trigger mode (rainfall-threshold, safety-factor, machine-learning)")
+    parser.add_argument("--alert_thresholds", type=str, default=None, help="Alert thresholds (comma-separated values or path to CSV file)")
+    parser.add_argument("--events_time_tolerance", type=str, default='5d', help="Events time tolerance (e.g., '5d' for 5 days, '2h' for 2 hours)")
+    parser.add_argument("--top_k_paths_per_activation", type=int, default=5, help="Number of top critical paths to extract per activation")
+    parser.add_argument("--top_k_paths_similarity_tolerance", type=float, default=0.5, help="Similarity tolerance for top-k paths (0 to 1)")
     
     args = parser.parse_args()
+    
+    # Parse events_time_tolerance
+    events_time_tolerance = pd.Timedelta(args.events_time_tolerance)
+    
+    # Parse alert_thresholds if provided
+    alert_thresholds = None
+    if args.alert_thresholds is not None:
+        if os.path.isfile(args.alert_thresholds):
+            # Load from CSV file
+            alert_thresholds = read_generic_csv(args.alert_thresholds, index_col='attention_area').loc[:, 'threshold']
+        else:
+            # Parse as comma-separated values
+            try:
+                alert_thresholds = [float(x.strip()) for x in args.alert_thresholds.split(',')]
+            except ValueError:
+                log_and_error(f"Invalid alert_thresholds format: {args.alert_thresholds}", ValueError, logger)
     
     alert_vars = main(
         base_dir=args.base_dir,
         gui_mode=args.gui_mode,
         trigger_mode=args.trigger_mode,
-        alert_thresholds=args.alert_thresholds,
-        default_thr_mode=args.default_thr_mode,
-        events_time_tolerance=args.events_time_tolerance
+        alert_thresholds=alert_thresholds,
+        events_time_tolerance=events_time_tolerance,
+        top_k_paths_per_activation=args.top_k_paths_per_activation,
+        top_k_paths_similarity_tolerance=args.top_k_paths_similarity_tolerance
     )

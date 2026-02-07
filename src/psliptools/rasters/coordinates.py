@@ -9,7 +9,7 @@ import pyproj
 import shapely
 import scipy.spatial
 
-# %% Function to generate fake x and y grids
+# %% === Function to generate fake x and y grids
 def generate_fake_xy_grids(
         grid_shape: tuple[int, int]
     ) -> tuple[np.ndarray, np.ndarray]:

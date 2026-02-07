@@ -11,7 +11,7 @@ from config import (
     AnalysisEnvironment
 )
 
-# # Importing necessary modules from psliptools
+# Importing necessary modules from psliptools
 # from psliptools.rasters import (
 # )
 
@@ -22,6 +22,9 @@ from config import (
 # )
 
 # from psliptools.scattered import (
+# )
+
+# from psliptools.models import (
 # )
 
 # %% === Helper functions
