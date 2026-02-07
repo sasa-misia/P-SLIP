@@ -8,6 +8,7 @@ from collections import defaultdict
 
 # Importing necessary modules from main_modules
 from m00a_env_init import get_or_create_analysis_environment, setup_logger, log_and_error, obtain_config_idx_and_rel_filename
+from m05a_reference_points_info import get_parameters_csv_paths, get_parameters_grids
 logger = setup_logger(__name__)
 logger.info("=== Attention pixels analysis and alert ===")
 
@@ -19,7 +20,7 @@ from config import (
     DYNAMIC_SUBFOLDERS
 )
 
-# # Importing necessary modules from psliptools
+# Importing necessary modules from psliptools
 # from psliptools.rasters import (
 # )
 
@@ -34,12 +35,14 @@ from psliptools.utilities import (
 # )
 
 from psliptools.scattered import (
-    get_closest_point_id
+    get_closest_point_id,
+    interpolate_scatter_to_scatter
 )
 
 # %% === Helper functions
 LANDSLIDE_PATHS_FILENAME = "landslide_paths_vars.pkl"
 POSSIBLE_TRIGGER_MODES = ['rainfall-threshold', 'safety-factor', 'machine-learning']
+POSSIBLE_SAFETY_FACTOR_MODELS = ['slip'] # TODO: Add more
 STRAIGHT_LABEL = 'straight_'
 MA_LABEL = 'mobile_average_'
 DEFAULT_THRESHOLD_PERC = {
@@ -147,6 +150,38 @@ def get_attention_pixel_coordinates(
 
     return attention_coords
 
+def get_rain_info(
+        env: AnalysisEnvironment,
+        gui_mode: bool
+    ) -> tuple[str, str, str, str]:
+    """
+    Get information about the rain source.
+    
+    Args:
+        env (AnalysisEnvironment): Analysis environment.
+        gui_mode (bool): Whether to run in GUI mode.
+
+    Returns:
+        tuple[str, str, str, str]: Tuple containing relative filename of file with rain data, source type, source subtype, and source mode.
+    """
+    if gui_mode:
+        log_and_error("GUI mode not implemented yet.", NotImplementedError, logger)
+    else:
+        source_type = 'rain'
+        source_subtype = select_from_list_prompt(
+            obj_list=DYNAMIC_SUBFOLDERS,
+            usr_prompt='Select the source subtype: ',
+            allow_multiple=False
+        )[0]
+    
+    env, idx_config, rel_filename = obtain_config_idx_and_rel_filename(env, source_type, source_subtype)
+
+    source_mode = env.config['inputs'][source_type][idx_config]['settings']['source_mode']
+    if not source_mode == 'station':
+        log_and_error("Invalid source mode. Must be 'station'", ValueError, logger)
+    
+    return rel_filename, source_type, source_subtype, source_mode
+
 def get_rain_station_ids(
         attention_coords: list[np.ndarray],
         stations_df: pd.DataFrame
@@ -228,6 +263,120 @@ def _format_iterable_with_tab(
     
     return "\n".join(lines)
 
+def evaluate_safety_factors_on_attention_pixels(
+        env: AnalysisEnvironment,
+        attention_pixels_df: pd.DataFrame,
+        parameter_class_association_df: pd.DataFrame,
+        rain_data: dict[str, pd.DataFrame],
+        model_name: str
+    ) -> pd.DataFrame:
+    """
+    Evaluate safety factors on attention pixels.
+    
+    Args:
+        env (AnalysisEnvironment): Analysis environment.
+        attention_pixels_df (pd.DataFrame): DataFrame containing attention pixel data.
+        parameter_class_association_df (pd.DataFrame): DataFrame containing parameter class association data.
+        model_name (str): Name of the model (e. g., "slip")
+
+    Returns:
+        pd.DataFrame: DataFrame containing attention pixels with their safety factor values.
+    """
+    if model_name not in POSSIBLE_SAFETY_FACTOR_MODELS:
+        log_and_error(f"Invalid model_name: [{model_name}]. Must be one of {POSSIBLE_SAFETY_FACTOR_MODELS}.", ValueError, logger)
+    
+    slope_df = env.load_variable(variable_filename='morphology_vars.pkl')['angles_df'].loc[:, ['slope', 'no_data']]
+
+    # Extract base grids shapes
+    base_grids_shapes = []
+    for _, row in slope_df.iterrows():
+        base_grids_shapes.append(row['slope'].shape)
+    
+    # Extract parameter csv path(s) to use
+    par_csv_paths = get_parameters_csv_paths(
+        env=env, 
+        association_df=parameter_class_association_df
+    )
+
+    # Apply filter to slope arrays: set values < 0 to 0, and no_data to 0
+    slope_df['slope'] = slope_df.apply(lambda row: np.where((row['slope'] < 0) | (row['slope'] == row['no_data']), 0, row['slope']), axis=1)
+
+    # Calculate cosine of slope angles (convert degrees to radians), because is the beta without vegetation
+    beta_slope = slope_df['slope'].apply(lambda x: np.cos(np.radians(x))).to_list()
+
+    # Add data to attention_pixels_df
+    curr_parameter_csv_path = None
+    attention_pixels_df['slope'] = None
+    for ap_idx, ap_row in attention_pixels_df.iterrows():
+        ap_slope = slope_df['slope'].loc[ap_row['dtm']][ap_row['2D_idx'][:,0], ap_row['2D_idx'][:,1]]
+        attention_pixels_df.at[ap_idx, 'slope'] = ap_slope
+    
+    del slope_df
+    
+    if model_name == 'slip':
+        required_parameters = ['GS', 'c', 'cr', 'phi', 'kt', 'beta', 'A', 'n']
+
+        par_grids_dict = get_parameters_grids(
+            association_df=parameter_class_association_df,
+            selectd_parameters=required_parameters,
+            shapes=base_grids_shapes,
+            parameters_csv_paths=par_csv_paths,
+            class_column='class_id',
+            out_type='float16',
+            no_data=[2.7, 5, 0, 20, 0.001, 1, 80, 0.3]
+        )
+
+        par_grids_dict['beta'] = [x * y for x, y in zip(par_grids_dict['beta'], beta_slope)]
+
+        del beta_slope
+
+        for par in required_parameters:
+            attention_pixels_df[par] = None
+            for ap_idx, ap_row in attention_pixels_df.iterrows():
+                ap_par = par_grids_dict[par][ap_row['dtm']][ap_row['2D_idx'][:,0], ap_row['2D_idx'][:,1]]
+                attention_pixels_df.at[ap_idx, par] = ap_par
+        
+        del par_grids_dict
+
+        for ap_idx, ap_row in attention_pixels_df.iterrows():
+            interp_rain_history = []
+            for r_idx, r_row in rain_data['data']['cumulative_rain'].iterrows():
+                curr_interp_rain = interpolate_scatter_to_scatter(
+                    x_in=rain_data['stations']['longitude'],
+                    y_in=rain_data['stations']['latitude'],
+                    data_in=r_row,
+                    x_out=ap_row['coordinates'][:,0],
+                    y_out=ap_row['coordinates'][:,1],
+                    interpolation_method='nearest', 
+                    fill_value=0,
+                    exclude_nans=True
+                )
+
+                interp_rain_history.append(curr_interp_rain)
+            
+            curr_rain_data_df = rain_data['datetimes'].copy()
+            curr_rain_data_df['rain'] = interp_rain_history
+            
+            curr_fs_history_df = run_slip_model(
+                slope=ap_row['slope'],
+                soil_specific_gravity=ap_row['GS'],
+                soil_cohesion=ap_row['c'],
+                root_cohesion=ap_row['cr'],
+                soil_friction=ap_row['phi'],
+                soil_drainage=ap_row['kt'],
+                infiltration_coefficient=ap_row['beta'],
+                A_slip=ap_row['A'],
+                soil_porosity=ap_row['n'],
+                lambda_slip=0.4,
+                alpha_slip=3.4,
+                rain_history=curr_rain_data_df
+            )
+
+            attention_pixels_df.at[ap_idx, 'safety_factor'] = curr_fs_history_df # Maybe not a brillant idea to store a df into a df... Work on it!
+
+    else:
+        log_and_error(f"Model [{model_name}] not implemented yet. Please contact the developers.", NotImplementedError, logger)
+
 # %% === Main function
 def main(
         base_dir: str=None,
@@ -259,38 +408,29 @@ def main(
 
     landslide_paths_df = landslide_paths_vars['paths_df']
 
-    initial_dtms = np.sort(landslide_paths_df['path_dtm'].unique())
-    dtm_unique_points: list[np.ndarray] = []
-    for curr_dtm in initial_dtms:
-        curr_dtm_paths_df = landslide_paths_df[landslide_paths_df['path_dtm'] == curr_dtm]
-        
-        all_point_arrays = np.vstack(curr_dtm_paths_df['path_2D_idx'].values)  # (N, 2)
-        unique_pts = np.unique(all_point_arrays, axis=0)
-        dtm_unique_points.append(unique_pts)
-    
-    attention_pixels_df = pd.DataFrame({
-        'dtm': initial_dtms,
-        '2D_idx': dtm_unique_points
-    })
+    dtm_file_id_df = env.load_variable(variable_filename='dtm_vars.pkl')['dtm']['file_id']
 
+    # Create a dataframe with every dtm, starting_point_id, and their attention pixels
+    unique_combos = landslide_paths_df[['path_dtm', 'starting_point_id']].drop_duplicates().sort_values(['path_dtm', 'starting_point_id'])
+    ap_w_spid_list = []
+    for _, row in unique_combos.iterrows():
+        curr_dtm = int(row['path_dtm'])
+        curr_dtm_file_id = dtm_file_id_df[curr_dtm]
+        curr_spid = row['starting_point_id']
+        curr_paths = landslide_paths_df[(landslide_paths_df['path_dtm'] == curr_dtm) & (landslide_paths_df['starting_point_id'] == curr_spid)]
+        all_points = np.vstack(curr_paths['path_2D_idx'].values)
+        unique_pts = np.unique(all_points, axis=0)
+        ap_w_spid_list.append({
+            'dtm': curr_dtm,
+            'dtm_file_id': curr_dtm_file_id,
+            'starting_point_id': curr_spid,
+            '2D_idx': unique_pts
+        })
+    attention_pixels_df = pd.DataFrame(ap_w_spid_list)
     attention_pixels_df['coordinates'] = get_attention_pixel_coordinates(env, attention_pixels_df)
 
     if trigger_mode == 'rainfall-threshold':
-        if gui_mode:
-            log_and_error("GUI mode not implemented yet.", NotImplementedError, logger)
-        else:
-            source_type = 'rain'
-            source_subtype = select_from_list_prompt(
-                obj_list=DYNAMIC_SUBFOLDERS,
-                usr_prompt='Select the source subtype: ',
-                allow_multiple=False
-            )[0]
-        
-        env, idx_config, rel_filename = obtain_config_idx_and_rel_filename(env, source_type, source_subtype)
-
-        source_mode = env.config['inputs'][source_type][idx_config]['settings']['source_mode']
-        if not source_mode == 'station':
-            log_and_error("Invalid source mode. Must be 'station'", ValueError, logger)
+        rel_filename, _, _, _ = get_rain_info(env, gui_mode)
         
         rain_vars = env.load_variable(variable_filename=f"{rel_filename}_vars.pkl")
         straight_data_dt = rain_vars['datetimes']['start_date'].diff().mean()
@@ -473,6 +613,24 @@ def main(
         }
 
     elif trigger_mode == 'safety-factor':
+        model_name = 'slip' # TODO: Add more safety-factor models
+
+        if model_name not in POSSIBLE_SAFETY_FACTOR_MODELS:
+            log_and_error(f"Invalid model_name: [{model_name}]. Must be one of {POSSIBLE_SAFETY_FACTOR_MODELS}.", ValueError, logger)
+        
+        parameter_vars = env.load_variable(variable_filename='parameter_vars.pkl')
+
+        rel_filename, _, _, _ = get_rain_info(env, gui_mode)
+        rain_vars = env.load_variable(variable_filename=f'{rel_filename}_vars.pkl')
+
+        fs_df = evaluate_safety_factors_on_attention_pixels(
+            env=env,
+            attention_pixels_df=attention_pixels_df,
+            parameter_class_association_df = parameter_vars['association_df'],
+            rain_data=rain_vars,
+            model_name=model_name
+        )
+
         log_and_error(f"Trigger mode {trigger_mode} is not implemented yet.", NotImplementedError, logger)
 
     elif trigger_mode == 'machine-learning':

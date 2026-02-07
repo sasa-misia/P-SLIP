@@ -17,8 +17,8 @@ def get_closest_point_id(
     Get the index of the point in a list of points that is closest to a given coordinate.
 
     Args:
-        x (float | np.ndarray): The longitude(s) or projected x(s) of the coordinate(s), which is used to find the closest point to x_list and y_list.
-        y (float | np.ndarray): The latitude(s) or projected y(s) of the coordinate(s), which is used to find the closest point to x_list and y_list.
+        x (float | np.ndarray): The longitude(s) or projected x(s) of the coordinate(s), which is used to find the closest point to x_ref and y_ref.
+        y (float | np.ndarray): The latitude(s) or projected y(s) of the coordinate(s), which is used to find the closest point to x_ref and y_ref.
         x_ref (list | np.ndarray | pd.Series): The longitude or projected x list of points based on which the distance is calculated.
         y_ref (list | np.ndarray | pd.Series): The latitude or projected y list of points based on which the distance is calculated.
 
@@ -62,7 +62,8 @@ def interpolate_scatter_to_scatter(
         x_out: np.ndarray | pd.Series | list[float | int],
         y_out: np.ndarray | pd.Series | list[float | int],
         interpolation_method: str='nearest',
-        fill_value: float | int=np.nan
+        fill_value: float | int=np.nan,
+        exclude_nans: bool=False
     ) -> np.ndarray:
     """
     Interpolate values from unstructured scatter data to unstructured scatter data.
@@ -103,6 +104,14 @@ def interpolate_scatter_to_scatter(
         raise ValueError('x_out and y_out must have the same size!')
     
     data_out = np.full(x_out.shape, fill_value, dtype=float)
+
+    if exclude_nans:
+        x_in = x_in[~np.isnan(data_in)]
+        y_in = y_in[~np.isnan(data_in)]
+        data_in = data_in[~np.isnan(data_in)]
+
+        if x_in.size == 0:
+            return data_out
 
     # Check for minimum points for linear and cubic methods
     if x_in.size < 3 and interpolation_method in ['linear', 'cubic']:

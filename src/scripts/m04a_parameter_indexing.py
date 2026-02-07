@@ -61,15 +61,15 @@ def get_raw_associated_df(
                 is_prop_df_in_association_df = compare_dataframes_columns(
                     dataframe1=curr_prop_df,
                     dataframe2=association_df,
-                    columns_df1=['class_name', 'parameter_class'],
-                    columns_df2=['class_name', 'parameter_class'],
+                    columns_df1=['class_name', 'parameter_class_id'],
+                    columns_df2=['class_name', 'parameter_class_id'],
                     row_order=False
                 )
 
                 if not is_prop_df_in_association_df.all():
                     log_and_error(f"Property dataframe must be updated to match the association dataframe. Please run the association script first.", ValueError, logger)
                 
-                curr_associated_df = curr_prop_df.loc[curr_prop_df['parameter_class'].notna(), :].loc[:, ['class_name', 'geometry', 'parameter_class']]
+                curr_associated_df = curr_prop_df.loc[curr_prop_df['parameter_class_id'].notna(), :].loc[:, ['class_name', 'geometry', 'parameter_class_id']]
                 curr_associated_df['type'] = curr_par_type
                 curr_associated_df['subtype'] = curr_par_subtype
                 raw_associated_df = pd.concat([raw_associated_df, curr_associated_df], axis=0, ignore_index=True)
@@ -87,10 +87,10 @@ def group_associated_df(
 
     It is important to maintain these three parameters because type and subtype 
     are used to give the file to pick (each property may have a different filename),
-    while parameter_class gives the class to pick from that specific file.
+    while parameter_class_id gives the class to pick from that specific file.
     """
     grouped_df_w_subtype = raw_associated_df.groupby(
-        ['parameter_class', 'type', 'subtype'], 
+        ['parameter_class_id', 'type', 'subtype'], 
         as_index=False
     ).agg(
         {
@@ -100,7 +100,7 @@ def group_associated_df(
     )
 
     grouped_df_no_subtype = raw_associated_df.loc[raw_associated_df['subtype'].isna(), :].groupby(
-        ['parameter_class', 'type'], 
+        ['parameter_class_id', 'type'], 
         as_index=False
     ).agg(
         {

@@ -22,33 +22,37 @@ def get_angles_and_curvatures(
     angles_dict = []
     curvatures_dict = []
     for (_, abg_row), (_, dtm_row) in zip(abg_df.iterrows(), dtm_df.iterrows()):
+        no_data = dtm_row['profile']['nodata']
+
+        logger.info(f"Processing slope and aspect from file {dtm_row['file_id']}...")
         curr_slope, curr_aspect = generate_slope_and_aspect_rasters(
             dtm=dtm_row['elevation'], 
             lon=abg_row['longitude'], 
             lat=abg_row['latitude'],
-            out_type='float32',
-            no_data=dtm_row['raster_profile']['nodata']
+            out_type='float16',
+            no_data=no_data
         )
 
+        logger.info(f"Processing curvatures from file {dtm_row['file_id']}...")
         curr_prof, curr_plan, curr_twist = generate_curvature_rasters(
             dtm=dtm_row['elevation'], 
             lon=abg_row['longitude'], 
             lat=abg_row['latitude'],
-            out_type='float32',
-            no_data=dtm_row['raster_profile']['nodata']
+            out_type='float16',
+            no_data=no_data
         )
 
         angles_dict.append({
-            'file_id': dtm_row['file_id'],
             'slope': curr_slope,
             'aspect': curr_aspect,
+            'no_data': no_data
         })
 
         curvatures_dict.append({
-            'file_id': dtm_row['file_id'],
             'profile': curr_prof,
             'planform': curr_plan,
-            'twisting': curr_twist
+            'twisting': curr_twist,
+            'no_data': no_data
         })
     
     angles_df = pd.DataFrame(angles_dict)
@@ -76,12 +80,12 @@ def main(
     angles_df, curvatures_df = get_angles_and_curvatures(abg_df, dtm_df)
 
     morphology_vars = {
-        'angles': angles_df,
-        'curvatures': curvatures_df
+        'angles_df': angles_df,
+        'curvatures_df': curvatures_df
     }
 
     logger.info("Morphological grids created.")
-    env.save_variable(variable_to_save=morphology_vars, variable_filename='morphology_vars.pkl')
+    env.save_variable(variable_to_save=morphology_vars, variable_filename='morphology_vars.pkl', compression='gzip')
 
     return morphology_vars
 

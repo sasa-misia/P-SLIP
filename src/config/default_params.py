@@ -200,30 +200,30 @@ PARAMETER_CLASS_NAME_MAPPER = {
     'units':[
         'uom',
         {
-            0: {'GS':'-', 'gd':'kN/m3', 'c':'kPa', 'cr':'kPa', 'phi':'deg', 'kt':'m/h', 'beta':'-', 'A':'-',  'lambda':'-', 'n':'-',  'E':'MPa',  'ni':'-',  'info':'Unit of measurement'},
+            0: {'GS':'-', 'gd':'kN/m3', 'c':'kPa', 'cr':'kPa', 'phi':'deg', 'kt':'m/h', 'beta':'-', 'A':'-', 'n':'-',  'E':'MPa',  'ni':'-',  'info':'Unit of measurement'},
         }
     ],
     'soil': [
         'slp',
         {
-            1: {'GS':2.65, 'gd':16.5, 'c':0,   'cr':0, 'phi':32, 'kt':1e-2, 'beta':0, 'A':40,  'lambda':0.4, 'n':0.4,  'E':20,  'ni':0.30, 'info':'Loose sandy soils - High permeability, no cohesion'},
-            2: {'GS':2.67, 'gd':18.0, 'c':0,   'cr':0, 'phi':38, 'kt':5e-3, 'beta':0, 'A':40,  'lambda':0.4, 'n':0.35, 'E':60,  'ni':0.25, 'info':'Dense sandy soils - Medium permeability, no cohesion'},
-            3: {'GS':2.65, 'gd':17.5, 'c':5,   'cr':0, 'phi':18, 'kt':1e-3, 'beta':0, 'A':80,  'lambda':0.4, 'n':0.45, 'E':20,  'ni':0.35, 'info':'Loamy soils - Moderate cohesion, mixed grain size'},
-            4: {'GS':2.68, 'gd':18.0, 'c':10,  'cr':0, 'phi':22, 'kt':5e-4, 'beta':0, 'A':80,  'lambda':0.4, 'n':0.48, 'E':15,  'ni':0.30, 'info':'Silty soils - Low permeability, moderate cohesion'},
-            5: {'GS':2.70, 'gd':15.0, 'c':15,  'cr':0, 'phi':20, 'kt':1e-4, 'beta':0, 'A':100, 'lambda':0.4, 'n':0.52, 'E':10,  'ni':0.35, 'info':'Normally-consolidated clayey soils - High plasticity and soft'},
-            6: {'GS':2.72, 'gd':19.0, 'c':25,  'cr':0, 'phi':25, 'kt':5e-5, 'beta':0, 'A':100, 'lambda':0.4, 'n':0.45, 'E':30,  'ni':0.30, 'info':'Over-consolidated clayey soils - Preloaded, higher strength and stiffer'},
-            7: {'GS':2.65, 'gd':25.0, 'c':3e4, 'cr':0, 'phi':35, 'kt':1e-3, 'beta':0, 'A':0,   'lambda':0.4, 'n':0.25, 'E':1e4, 'ni':0.20, 'info':'Rocky soils - Fractured rock with soil matrix or compacted rock'},
-            8: {'GS':2.60, 'gd':18.0, 'c':0,   'cr':0, 'phi':40, 'kt':2e-2, 'beta':0, 'A':0,   'lambda':0.4, 'n':0.3,  'E':120, 'ni':0.27, 'info':'Gravel soils - Coarse-grained, high permeability'}
+            1: {'GS':2.65, 'gd':16.5, 'c':0,   'cr':0, 'phi':32, 'kt':1e-2, 'beta':1, 'A':40,  'n':0.4,  'E':20,  'ni':0.30, 'info':'Loose sandy soils - High permeability, no cohesion'},
+            2: {'GS':2.67, 'gd':18.0, 'c':0,   'cr':0, 'phi':38, 'kt':5e-3, 'beta':1, 'A':40,  'n':0.35, 'E':60,  'ni':0.25, 'info':'Dense sandy soils - Medium permeability, no cohesion'},
+            3: {'GS':2.65, 'gd':17.5, 'c':5,   'cr':0, 'phi':18, 'kt':1e-3, 'beta':1, 'A':80,  'n':0.45, 'E':20,  'ni':0.35, 'info':'Loamy soils - Moderate cohesion, mixed grain size'},
+            4: {'GS':2.68, 'gd':18.0, 'c':10,  'cr':0, 'phi':22, 'kt':5e-4, 'beta':1, 'A':80,  'n':0.48, 'E':15,  'ni':0.30, 'info':'Silty soils - Low permeability, moderate cohesion'},
+            5: {'GS':2.70, 'gd':15.0, 'c':15,  'cr':0, 'phi':20, 'kt':1e-4, 'beta':1, 'A':100, 'n':0.52, 'E':10,  'ni':0.35, 'info':'Normally-consolidated clayey soils - High plasticity and soft'},
+            6: {'GS':2.72, 'gd':19.0, 'c':25,  'cr':0, 'phi':25, 'kt':5e-5, 'beta':1, 'A':100, 'n':0.45, 'E':30,  'ni':0.30, 'info':'Over-consolidated clayey soils - Preloaded, higher strength and stiffer'},
+            7: {'GS':2.65, 'gd':25.0, 'c':3e4, 'cr':0, 'phi':35, 'kt':1e-3, 'beta':1, 'A':0,   'n':0.25, 'E':1e4, 'ni':0.20, 'info':'Rocky soils - Fractured rock with soil matrix or compacted rock'},
+            8: {'GS':2.60, 'gd':18.0, 'c':0,   'cr':0, 'phi':40, 'kt':2e-2, 'beta':1, 'A':0,   'n':0.3,  'E':120, 'ni':0.27, 'info':'Gravel soils - Coarse-grained, high permeability'}
         }
     ],
     'vegetation': [
         'vgp',
         {
-            1: {'GS':0, 'gd':0, 'c':0,  'cr':2,  'phi':0, 'kt':0, 'beta':0.5, 'A':0, 'lambda':0, 'n':0, 'E':0, 'ni':0, 'info':'Grass - Shallow roots, low cohesion contribution'},
-            2: {'GS':0, 'gd':0, 'c':0,  'cr':5,  'phi':0, 'kt':0, 'beta':0.6, 'A':0, 'lambda':0, 'n':0, 'E':0, 'ni':0, 'info':'Bushes - Moderate root cohesion, medium depth'},
-            3: {'GS':0, 'gd':0, 'c':0,  'cr':10, 'phi':0, 'kt':0, 'beta':0.6, 'A':0, 'lambda':0, 'n':0, 'E':0, 'ni':0, 'info':'Beech trees - Deciduous trees, moderate root strength'},
-            4: {'GS':0, 'gd':0, 'c':0,  'cr':15, 'phi':0, 'kt':0, 'beta':0.6, 'A':0, 'lambda':0, 'n':0, 'E':0, 'ni':0, 'info':'Firs - Coniferous trees, strong root system'},
-            5: {'GS':0, 'gd':0, 'c':0,  'cr':20, 'phi':0, 'kt':0, 'beta':0.6, 'A':0, 'lambda':0, 'n':0, 'E':0, 'ni':0, 'info':'Oaks - Deep rooting, high cohesion contribution'}
+            1: {'GS':0, 'gd':0, 'c':0,  'cr':2,  'phi':0, 'kt':0, 'beta':0.5, 'A':0, 'n':0, 'E':0, 'ni':0, 'info':'Grass - Shallow roots, low cohesion contribution'},
+            2: {'GS':0, 'gd':0, 'c':0,  'cr':5,  'phi':0, 'kt':0, 'beta':0.6, 'A':0, 'n':0, 'E':0, 'ni':0, 'info':'Bushes - Moderate root cohesion, medium depth'},
+            3: {'GS':0, 'gd':0, 'c':0,  'cr':10, 'phi':0, 'kt':0, 'beta':0.6, 'A':0, 'n':0, 'E':0, 'ni':0, 'info':'Beech trees - Deciduous trees, moderate root strength'},
+            4: {'GS':0, 'gd':0, 'c':0,  'cr':15, 'phi':0, 'kt':0, 'beta':0.6, 'A':0, 'n':0, 'E':0, 'ni':0, 'info':'Firs - Coniferous trees, strong root system'},
+            5: {'GS':0, 'gd':0, 'c':0,  'cr':20, 'phi':0, 'kt':0, 'beta':0.6, 'A':0, 'n':0, 'E':0, 'ni':0, 'info':'Oaks - Deep rooting, high cohesion contribution'}
         }
     ]
 }

@@ -48,13 +48,13 @@ Map imported property classes (land use, soil, etc.) to standardized parameter c
 - **Function**: `class_association()` performs the mapping logic
 - **Standard Class Mapping**:
   - Reads association CSV
-  - Maps property `class_name` to `standard_class`
+  - Maps property `class_name` to `standard_class_id`
   - Validates against standard classes file
   - Updates property DataFrame
 
 - **Parameter Class Mapping**:
   - Reads parameter association CSV
-  - Maps `standard_class` to `parameter_class`
+  - Maps `standard_class_id` to `parameter_class_id`
   - Validates against parameter classes file
   - Updates property DataFrame
 
@@ -125,15 +125,15 @@ Map imported property classes (land use, soil, etc.) to standardized parameter c
 
 **Association CSV** (`user_control/{source_type}_{subtype}_association.csv`):
 ```csv
-class_name,label,standard_class,parameter_class,info
+class_name,label,standard_class_id,parameter_class_id,info
 forest,forest,FOREST,VEG_TYPE_A,High vegetation cover
 urban,urban,URBAN,INFRA_TYPE_B,Residential areas
 agriculture,agriculture,AGRICULTURE,VEG_TYPE_C,Cropland
 ```
 - **Required Columns**: `class_name`, `label`
-- **Optional Columns**: `standard_class`, `parameter_class`, `info`
+- **Optional Columns**: `standard_class_id`, `parameter_class_id`, `info`
 - **Effect**: User-defined mapping from original classes to standardized system
-- **Usage**: Fill in `standard_class` and `parameter_class` columns manually
+- **Usage**: Fill in `standard_class_id` and `parameter_class_id` columns manually
 
 **Standard Classes File** (`user_control/standard_classes.csv`):
 ```csv
@@ -190,8 +190,8 @@ SOIL_TYPE_C,Soil Type C,soil_parameters.csv
 **Enhanced GeoDataFrame Structure**:
 - `class_name`: Original attribute values (unchanged)
 - `label`: User-friendly labels (unchanged)
-- `standard_class`: Mapped standard class ID (updated)
-- `parameter_class`: Mapped parameter class ID (updated)
+- `standard_class_id`: Mapped standard class ID (updated)
+- `parameter_class_id`: Mapped parameter class ID (updated)
 - `info`: Additional metadata (updated if provided)
 - `geometry`: Shapely polygon geometries (unchanged)
 

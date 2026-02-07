@@ -37,15 +37,14 @@ from psliptools.scattered import (
 
 # %% === Helper functions and global variables
 MORPHOLOGY_NAMES = ['elevation', 'slope', 'aspect', 'profile_curvature', 'planform_curvature', 'twisting_curvature']
-PARAMETER_NAMES = ['GS', 'gd', 'c', 'cr', 'phi', 'kt', 'beta', 'A', 'lambda', 'n', 'E', 'ni']
+PARAMETER_NAMES = ['GS', 'gd', 'c', 'cr', 'phi', 'kt', 'beta', 'A', 'n', 'E', 'ni']
 TIME_SENSITIVE_NAMES = ['nearest_rain_station']
 
-def get_paths_and_shapes(
+def get_parameters_csv_paths(
         env: AnalysisEnvironment, 
-        association_df: pd.DataFrame,
-        abg_df: pd.DataFrame
-    ) -> tuple[list | str, list[tuple[int, int]]]:
-    """Helper function to get paths and shapes"""
+        association_df: pd.DataFrame
+    ) -> list | str:
+    """Helper function to get the parameters csv paths"""
     parameters_csv_path = []
     for _, row in association_df.iterrows():
         poly_type = row['type']
@@ -60,12 +59,18 @@ def get_paths_and_shapes(
         
     if len(set(parameters_csv_path)) == 1:
         parameters_csv_path = parameters_csv_path[0]
-    
-    abg_shapes = []
-    for _, row in abg_df.iterrows():
-        abg_shapes.append(row['longitude'].shape)
 
-    return parameters_csv_path, abg_shapes
+    return parameters_csv_path
+
+def get_base_grids_shape(
+        abg_df: pd.DataFrame
+    ) -> list[tuple[int, int]]:
+    """Helper function to get base grids shape"""
+    base_grids_shapes = []
+    for _, row in abg_df.iterrows():
+        base_grids_shapes.append(row['longitude'].shape)
+
+    return base_grids_shapes
 
 def get_morphology_grids(
         env: AnalysisEnvironment,
@@ -79,10 +84,10 @@ def get_morphology_grids(
         dtm_df = env.load_variable(variable_filename='dtm_vars.pkl')['dtm']
     
     if any(x in selected_morphology for x in ['slope', 'aspect']):
-        angles_df = env.load_variable(variable_filename='morphology_vars.pkl')['angles']
+        angles_df = env.load_variable(variable_filename='morphology_vars.pkl')['angles_df']
     
     if any(x in selected_morphology for x in ['profile_curvature', 'planform_curvature', 'twisting_curvature']):
-        curvatures_df = env.load_variable(variable_filename='morphology_vars.pkl')['curvatures']
+        curvatures_df = env.load_variable(variable_filename='morphology_vars.pkl')['curvatures_df']
 
     morph_grids = {morph: [] for morph in selected_morphology}
     for morph in morph_grids.keys():
@@ -106,27 +111,37 @@ def get_morphology_grids(
 def get_parameters_grids(
         association_df: pd.DataFrame,
         selectd_parameters: list[str],
-        shapes: list[tuple[int, int]],
-        parameters_csv_paths: str | list[str], 
-        clases_column: str='class_id',
-        out_type: str='float32',
-        no_data: float | int | str=0
+        shapes: list[tuple[int, int]], # Same len as the number of your analysis base grids
+        parameters_csv_paths: str | list[str], # In case of list, same len as association_df (axis 1)
+        class_column: str = 'class_id',
+        out_type: str | list[str] = 'float16', # In case of list, same len as selectd_parameters
+        no_data: float | int | str | list[float | int | str] = 0 # In case of list, same len as selectd_parameters
     ) -> dict[str, list[np.ndarray]]:
     """Helper function to get parameters grids"""
     if not all([x in PARAMETER_NAMES for x in selectd_parameters]):
         log_and_error(f"Please select one or more of the following parameters: {PARAMETER_NAMES}", ValueError, logger)
+
+    if not isinstance(out_type, list):
+        out_type = [out_type] * len(selectd_parameters)
+    if not isinstance(no_data, list):
+        no_data = [no_data] * len(selectd_parameters)
+
+    if len(out_type) != len(selectd_parameters):
+        log_and_error(f"Please provide {len(selectd_parameters)} out_type values.", ValueError, logger)
+    if len(no_data) != len(selectd_parameters):
+        log_and_error(f"Please provide {len(selectd_parameters)} no_data values.", ValueError, logger)
     
     par_grids = {par: [] for par in selectd_parameters}
-    for par in par_grids.keys():
+    for idx, par in enumerate(par_grids.keys()):
         par_grids[par] = generate_grids_from_indices(
             indices=association_df['abg_idx_1d'],
-            classes=association_df['parameter_class'],
+            classes=association_df['parameter_class_id'],
             shapes=shapes,
             csv_paths=parameters_csv_paths,
             csv_parameter_column=par,
-            csv_classes_column=clases_column,
-            out_type=out_type,
-            no_data=no_data
+            csv_classes_column=class_column,
+            out_type=out_type[idx],
+            no_data=no_data[idx]
         )
 
     return par_grids
@@ -335,14 +350,15 @@ def main(
     else:
         logger.info("Extracting parameters grids...")
         association_df = env.load_variable(variable_filename='parameter_vars.pkl')['association_df']
-        parameters_csv_path, abg_shapes = get_paths_and_shapes(env, association_df, abg_df)
+        parameters_csv_path = get_parameters_csv_paths(env, association_df)
+        abg_shapes = get_base_grids_shape(abg_df)
 
         par_grids = get_parameters_grids(
             association_df=association_df,
             selectd_parameters=parameters,
             shapes=abg_shapes,
             parameters_csv_paths=parameters_csv_path,
-            clases_column='class_id',
+            class_column='class_id',
             out_type=out_type,
             no_data=no_parameter_data
         )

@@ -80,8 +80,8 @@ def main(
 
     logger.info(f"Properties loaded for {source_type}.")
     prop_df['label'] = prop_df['class_name']
-    prop_df['standard_class'] = None
-    prop_df['parameter_class'] = None
+    prop_df['standard_class_id'] = None
+    prop_df['parameter_class_id'] = None
     prop_df['info'] = None
 
     # Write the DataFrame to a CSV file excluding the 'geometry' column

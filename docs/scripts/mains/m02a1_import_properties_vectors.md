@@ -53,8 +53,8 @@ Import and process vector-based property data (land use, soil types, vegetation,
 #### Step 5: Data Frame Enhancement
 - **Adds Columns**:
   - `label`: Copy of class names for user reference
-  - `standard_class`: Empty (to be filled in m02a2)
-  - `parameter_class`: Empty (to be filled in m02a2)
+  - `standard_class_id`: Empty (to be filled in m02a2)
+  - `parameter_class_id`: Empty (to be filled in m02a2)
   - `info`: Empty (for additional metadata)
 - **Effect**: Prepares structure for parameter association workflow
 
@@ -153,16 +153,16 @@ Import and process vector-based property data (land use, soil types, vegetation,
 **GeoDataFrame Structure**:
 - `class_name`: Original attribute values from selected field
 - `label`: Copy of class_name for user reference
-- `standard_class`: Empty (reserved for m02a2)
-- `parameter_class`: Empty (reserved for m02a2)
+- `standard_class_id`: Empty (reserved for m02a2)
+- `parameter_class_id`: Empty (reserved for m02a2)
 - `info`: Empty (reserved for additional metadata)
 - `geometry`: Shapely polygon geometries (clipped to study area)
 
 ### Secondary Output
 **`{source_type}_{subtype}_association.csv`** (in `user_control/`):
 - **Purpose**: Template for parameter association
-- **Columns**: `class_name`, `label`, `standard_class`, `parameter_class`, `info`
-- **Usage**: User manually fills in standard_class and parameter_class mappings
+- **Columns**: `class_name`, `label`, `standard_class_id`, `parameter_class_id`, `info`
+- **Usage**: User manually fills in standard_class_id and parameter_class_id mappings
 - **Effect**: Enables parameter assignment in m02a2
 
 ### Effect on Downstream Scripts

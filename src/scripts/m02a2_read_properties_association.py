@@ -107,8 +107,8 @@ def main(
     prop_vars = env.load_variable(variable_filename=f'{rel_filename}_vars.pkl')
     prop_df = prop_vars['prop_df']
 
-    prop_df, standard_exists = class_association(prop_df, association_df, 'standard_class', 'standard_class', standard_classes_df)
-    prop_df, parameter_exists = class_association(prop_df, association_df, 'parameter_class', 'parameter_class', parameter_classes_df)
+    prop_df, standard_exists = class_association(prop_df, association_df, 'standard_class_id', 'standard_class_id', standard_classes_df)
+    prop_df, parameter_exists = class_association(prop_df, association_df, 'parameter_class_id', 'parameter_class_id', parameter_classes_df)
 
     prop_vars['prop_df'] = prop_df
 
