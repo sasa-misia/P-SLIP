@@ -125,7 +125,7 @@ graph TB
 |--------|---------|------------|---------------|---------|
 | **[m05a_reference_points_info](scripts/mains/m05a_reference_points_info.md)** | Extract parameter values at reference points | `reference_points.csv` | m04a, m03a | `ref_points.csv` (point data) |
 | **[m05b_time_sensitive_analysis](scripts/mains/m05b_time_sensitive_analysis.md)** | Time-series statistics, mobile averages, events | Time-series data | m04c | Updated `{ts_type}_vars.pkl` (processed) |
-| **[m07a_attention_pixels_alert](scripts/mains/m07a_attention_pixels_alert.md)** | Identify high-risk pixels, generate alerts | Thresholds CSV, morphology/path data | m04d, m04c, m04b | `alerts.csv`, risk maps |
+| **[m07a_attention_pixels_alert](scripts/mains/m07a_attention_pixels_alert.md)** | Identify high-risk pixels, generate alerts (rainfall/safety-factor) | Thresholds CSV, path data, rain data, parameters (for FS) | m04d, m04c, (m04a for FS mode) | `alert_vars.pkl`, multiple CSVs in subfolders |
 
 ## 🛠️ Optional Scripts
 
@@ -183,7 +183,10 @@ Scripts can be re-run individually if inputs change:
 python m04b_morphological_grids.py --base_dir /path/to/analysis
 
 # Example: Update alerts with new thresholds
-python m07a_attention_pixels_alert.py --base_dir /path/to/analysis --thresholds new_thresholds.csv
+python m07a_attention_pixels_alert.py --base_dir /path/to/analysis --alert_thresholds new_thresholds.csv
+
+# Example: Run alerts with safety-factor mode
+python m07a_attention_pixels_alert.py --base_dir /path/to/analysis --trigger_mode safety-factor
 ```
 
 ### 📁 Input Data Requirements

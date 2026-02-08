@@ -54,6 +54,7 @@ STOP_REASONS = {
     'opposite': 'greater_than_tolerance_opposite_flow', 
     'max_steps': 'max_runout', 
     'max_paths': 'partial_because_max_paths_exceeded',
+    'low_realism': 'low_partial_realism_score',
     'complete': 'completed'
 }
 
@@ -269,6 +270,7 @@ def generate_slope_compatible_paths(
         invalid_steps_tolerance: int,
         maximum_paths: int=MAXIMUM_COMPATIBLE_PATHS,
         allow_low_slope_opposite_flow: bool=False,
+        min_partial_realism_score: float=None,
         verbose: bool=False
     ) -> list[tuple[np.ndarray, np.ndarray, int, str, np.ndarray, np.ndarray]]:
     """
@@ -286,6 +288,7 @@ def generate_slope_compatible_paths(
         invalid_steps_tolerance (int): The maximum number of invalid steps in the path.
         maximum_paths (int, optional): The maximum number of paths to generate. Defaults to 50000.
         allow_low_slope_opposite_flow (bool, optional): Whether to allow low slope in opposite flow direction. Defaults to False.
+        min_partial_realism_score (float, optional): Minimum partial realism score to continue path exploration. If None, no early stopping based on score. Defaults to None.
         verbose (bool, optional): Whether to print progress updates. Defaults to False.
 
     Returns:
@@ -383,6 +386,37 @@ def generate_slope_compatible_paths(
             continue
         # ------------------------------------------------------------------------------------------------
 
+        # --- early termination: low partial realism score ----------
+        if min_partial_realism_score is not None and steps >= max(4, invalid_steps_tolerance):
+            # TODO: Check and test in different senarios!
+            # Calculate partial realism score (simplified version without path_length and stop_penalty)
+            valid_steps_ratio = np.mean(curr_valid) if len(curr_valid) > 0 else 0
+            avg_deviation = np.mean(curr_deviation) if len(curr_deviation) > 0 else 0
+            
+            # Calculate average slope from current path
+            if len(curr_coords) > 1:
+                curr_coords_array = np.array(curr_coords)
+                diff_xy = np.diff(curr_coords_array[:, 0:2], axis=0)
+                diff_z = np.diff(curr_coords_array[:, 2], axis=0)
+                path_step_plane_length = np.sqrt(np.sum(diff_xy ** 2, axis=1))
+                path_step_slope_degrees = np.rad2deg(np.arctan2(diff_z, path_step_plane_length))
+                avg_slope = np.mean(path_step_slope_degrees)
+            else:
+                avg_slope = 0
+            
+            # Slope penalty: penalize if average slope is below min_slope (converted back to degrees)
+            min_slope_degrees = np.rad2deg(np.arctan(min_slope))
+            average_slope_penalty = min(60, max(0, (min_slope_degrees - abs(avg_slope)) * 5))
+            
+            # Partial realism score (max 70 instead of 100, as we don't have path_length bonus and stop_penalty)
+            partial_realism_score = max(0, (valid_steps_ratio * 70) - (avg_deviation * 5) - average_slope_penalty)
+            
+            if partial_realism_score < min_partial_realism_score:
+                paths.append((np.array(curr_coords), np.array(curr_idx), steps, STOP_REASONS['low_realism'], np.array(curr_deviation), np.array(curr_valid)))
+                if verbose:
+                    print(f"Path n. {len(paths)} has low partial realism score ({partial_realism_score:.1f} < {min_partial_realism_score}); stopped at step: {steps} ...")
+                continue
+        # -----------------------------------------------------------
 
         # Directions: 0=E, 45=SE, 90=S, 135=SW, 180=W, 225=NW, 270=N, 315=NE
         if (slopes_df.index == ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']).all():
@@ -613,6 +647,7 @@ def main(
                 invalid_steps_tolerance=invalid_steps_tolerance,
                 maximum_paths=MAXIMUM_COMPATIBLE_PATHS,
                 allow_low_slope_opposite_flow=False,
+                min_partial_realism_score=min_realism_score,  # Use min_realism_score as threshold for partial score
                 verbose=False
             )
 
@@ -668,7 +703,7 @@ def main(
                 path_length = path_plane_progressive_length[-1]
                 if stop_reason in [STOP_REASONS['loop'], STOP_REASONS['edge']]:
                     stop_penalty = 3
-                elif stop_reason in [STOP_REASONS['opposite'], STOP_REASONS['invalid']]:
+                elif stop_reason in [STOP_REASONS['opposite'], STOP_REASONS['invalid'], STOP_REASONS['low_realism']]:
                     stop_penalty = 2
                 elif stop_reason in [STOP_REASONS['max_steps'], STOP_REASONS['max_paths']]:
                     stop_penalty = 1

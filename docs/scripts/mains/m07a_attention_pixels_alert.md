@@ -9,11 +9,12 @@ This script implements a comprehensive alert system for landslide susceptibility
 The script provides a sophisticated early warning system that:
 
 - **Identifies attention pixels**: All grid cells that lie on potential landslide paths
-- **Associates monitoring stations**: Links each attention pixel to nearest rain stations
-- **Detects threshold exceedances**: Monitors time-series data against user-defined thresholds
+- **Associates monitoring stations**: Links each attention pixel to nearest rain/data stations
+- **Evaluates trigger conditions**: Supports multiple trigger modes (rainfall-threshold, safety-factor, machine-learning)
+- **Detects threshold exceedances**: Monitors time-series data or computed metrics against user-defined thresholds
 - **Groups events**: Combines consecutive exceedances into discrete alert events
-- **Identifies critical paths**: Ranks landslide paths by risk for each alert event
-- **Exports comprehensive results**: Generates detailed CSV reports and saves analysis state
+- **Identifies critical paths**: Ranks landslide paths by risk for each alert event (with similarity filtering)
+- **Exports comprehensive results**: Generates detailed CSV reports in organized folder structure and saves analysis state
 
 ## Prerequisites
 
@@ -31,10 +32,11 @@ The script provides a sophisticated early warning system that:
 
 ### Optional Inputs
 
-- **Alert thresholds**: CSV file with station-specific thresholds (generated automatically if not provided)
-- **Trigger mode**: Method for triggering alerts (currently only 'rainfall-threshold' implemented)
-- **Event time tolerance**: Time window for grouping consecutive exceedances
+- **Alert thresholds**: CSV file with attention-area-specific thresholds (generated automatically if not provided)
+- **Trigger mode**: Method for triggering alerts (`'rainfall-threshold'`, `'safety-factor'`, or `'machine-learning'`)
+- **Event time tolerance**: Time window for grouping consecutive exceedances (supports string format like '5d', '2h')
 - **Top K paths**: Number of critical paths to identify per activation
+- **Path similarity tolerance**: Controls how similar top-k paths can be (0=no overlap, 1=identical allowed)
 
 ## Outputs
 
@@ -49,37 +51,48 @@ The script provides a sophisticated early warning system that:
 
 1. **`attention_pixels.csv`**: All grid cells on landslide paths
    - DTM index, 2D indices, coordinates
-   - Associated rain stations for each pixel
+   - Associated stations for each pixel
+   - Slope and geotechnical parameters (if safety-factor mode)
 
-2. **`activation_datetimes.csv`**: All alert events with details
+2. **`activation_datetimes/activation_datetimes_aa_{N}.csv`**: Alert events per attention area
    - Event timestamps and grouping
    - Trigger mode and metric information
-   - Activated stations and pixels
+   - Activated pixels and coordinates
    - Top critical landslide paths
 
 3. **`{trigger_mode}_alert_thresholds.csv`**: Threshold configuration
-   - Station-specific thresholds
+   - Attention-area-specific thresholds
    - Alert metric and mode
-   - Maximum observed values
+   - Statistical information (mean, std, max, min)
 
 4. **`critical_landslide_paths.csv`**: High-risk paths during alerts
    - Path IDs and characteristics
    - Realism scores and starting points
 
+5. **`activation_metric_history/activation_metric_history_aa_{N}.csv`**: Complete metric history per attention area
+   - Time-series of alert metric values
+   - Used for threshold calibration and analysis
+
 ## CLI Usage
 
 ```bash
-# Basic usage with interactive threshold setup
+# Basic usage with interactive threshold setup (rainfall-threshold mode)
 python m07a_attention_pixels_alert.py --base_dir /path/to/analysis
+
+# Use safety-factor trigger mode
+python m07a_attention_pixels_alert.py --base_dir /path/to/analysis --trigger_mode safety-factor
 
 # Use custom thresholds file
 python m07a_attention_pixels_alert.py --base_dir /path/to/analysis --alert_thresholds custom_thresholds.csv
 
-# Custom event grouping tolerance
-python m07a_attention_pixels_alert.py --base_dir /path/to/analysis --events_time_tolerance 3 --trigger_mode rainfall-threshold
+# Custom event grouping tolerance (string format)
+python m07a_attention_pixels_alert.py --base_dir /path/to/analysis --events_time_tolerance 3d --trigger_mode rainfall-threshold
 
 # Disable critical path identification
 python m07a_attention_pixels_alert.py --base_dir /path/to/analysis --top_k_paths_per_activation 0
+
+# Control path similarity filtering
+python m07a_attention_pixels_alert.py --base_dir /path/to/analysis --top_k_paths_similarity_tolerance 0.3
 ```
 
 ## Detailed Description
@@ -133,22 +146,24 @@ The main function orchestrates the complete alert system:
 
 ### Helper Functions
 
-#### `get_top_k_paths(paths_df, dtm, idx_2d, k=3, separate_starting_points=False)`
-- **Purpose**: Identifies top-k most realistic landslide paths passing through given pixels
+#### `get_top_k_paths(paths_df, dtm, idx_2d, k=3, separate_starting_points=False, top_k_paths_similarity_tolerance=1)`
+- **Purpose**: Identifies top-k most realistic landslide paths passing through given pixels, with similarity filtering
 - **Logic**:
   1. Filters paths by DTM and checks which pass through given 2D indices
   2. Ranks paths by `path_realism_score`
-  3. If `separate_starting_points=True`, selects top K paths from each starting point
-  4. Returns list of path IDs (padded with None if fewer than K paths found)
+  3. Applies similarity filtering to avoid selecting nearly-identical paths
+  4. If `separate_starting_points=True`, selects top K paths from each starting point
+  5. Returns list of path IDs (padded with None if fewer than K paths found)
+- **Similarity Calculation**: Compares path overlap (excluding starting point) using Jaccard-like metric
 - **Returns**: List of path IDs (strings)
 
-#### `get_attention_pixel_coordinates(env, attention_pixels_df)`
+#### `get_attention_pixel_coordinates(abg_df, attention_pixels_df)`
 - **Purpose**: Converts attention pixel indices to geographic coordinates
 - **Logic**:
-  1. Loads ABG (Aligned Base Grid) data
+  1. Uses ABG (Aligned Base Grid) data
   2. For each attention pixel, extracts coordinates from corresponding DTM
   3. Creates array of longitude/latitude coordinates
-- **Returns**: List of numpy arrays (one per DTM)
+- **Returns**: List of numpy arrays (one per attention area, shape nx2)
 
 #### `get_rain_station_ids(attention_coords, stations_df)`
 - **Purpose**: Associates each attention pixel with nearest rain station
@@ -166,10 +181,24 @@ The main function orchestrates the complete alert system:
   3. Creates DataFrame for each station with associated pixels
 - **Returns**: Dictionary `{station_name: pixels_dataframe}`
 
-#### `_format_iterable_with_tab(iterable, prefix="\t")`
-- **Purpose**: Formats iterables for user display with proper indentation
-- **Logic**: Converts lists, arrays, Series, or dicts to formatted strings
-- **Returns**: Formatted string
+#### `evaluate_safety_factors_on_attention_pixels(env, attention_pixels_df, parameter_class_association_df, rain_vars, model_name)`
+- **Purpose**: Evaluates safety factors (FS) on attention pixels using geotechnical models
+- **Logic**:
+  1. Loads slope and parameter grids (GS, c, cr, phi, kt, beta, A, n)
+  2. Interpolates rainfall data to attention pixel locations
+  3. Runs SLIP model (or other models) for each attention area
+  4. Returns time-series of FS values
+- **Returns**: Dictionary `{attention_area_idx: fs_history_dataframe}`
+
+#### `get_alert_datetimes_per_attention_area(alert_metric_history_dict, alert_metric_col, attention_pixels_df, alert_thresholds_df, trigger_mode, alert_metric, alert_metric_mode, events_time_tolerance, landslide_paths_df, top_k_paths_per_activation, top_k_paths_similarity_tolerance)`
+- **Purpose**: Identifies alert events from metric history and extracts critical paths
+- **Logic**:
+  1. Applies thresholds to metric history (>= for rainfall/ML, <= for safety-factor)
+  2. Groups exceedances into events based on time tolerance
+  3. Identifies activated pixels for each event
+  4. Extracts top-k critical landslide paths per event
+  5. Optimizes by caching path calculations for identical pixel sets
+- **Returns**: Dictionary `{attention_area_idx: alert_datetimes_dataframe}`
 
 ### Flow Diagram
 
@@ -182,6 +211,9 @@ graph TD
     D --> E["Associate Rain Stations<br/>⏰ Nearest rainfall gauge"]
     E --> F{Trigger Mode?}
     F -->|rainfall-threshold| G["Load Rainfall Data<br/>🌧️ Time-series"]
+    F -->|safety-factor| SF1["Load Parameters & Rain<br/>🏔️ Geotechnical data"]
+    SF1 --> SF2["Evaluate SLIP Model<br/>⚖️ Calculate FS history"]
+    SF2 --> H
     G --> H{Thresholds Provided?}
     H -->|No| I["Generate Default Thresholds<br/>📊 Auto-calibrate"]
     H -->|Yes| J["Load Custom Thresholds<br/>⚙️ User-defined"]
@@ -190,15 +222,17 @@ graph TD
     K --> L["Group into Events<br/>📅 Temporal clustering"]
     L --> M["Identify Activated Pixels<br/>🚨 Risk pixels"]
     M --> N{Find Critical Paths?}
-    N -->|Yes| O["Rank Paths by Realism<br/>📈 Quality scores"]
+    N -->|Yes| O["Rank Paths by Realism<br/>📈 Quality scores + similarity filter"]
     N -->|No| P["Skip Path Ranking<br/>➖ No path analysis"]
-    O --> Q["Export Results<br/>📄 alerts.csv, risk maps"]
+    O --> Q["Export Results<br/>📄 Multiple CSVs in subfolders"]
     P --> Q
     Q --> R["Save Alert Variables<br/>💾 alert_vars.pkl"]
     R --> S["Return Alert Data<br/>📦 Event metadata"]
     
-    F -->|safety-factor| T["Not Implemented Error<br/>❌ Future feature"]
-    F -->|machine-learning| T
+    F -->|safety-factor| SF1["Load Parameters & Rain<br/>🏔️ Geotechnical data"]
+    SF1 --> SF2["Evaluate SLIP Model<br/>⚖️ Calculate FS history"]
+    SF2 --> H
+    F -->|machine-learning| T["Not Implemented Error<br/>❌ Future feature"]
     
     %% Styling
     style A fill:#fff9c4,stroke:#f57f17,stroke-width:3px
@@ -214,11 +248,11 @@ graph TD
 |-----------|-------------|----------------|---------|---------|
 | `--base_dir` | Base directory for analysis | Valid path string | Loads environment from this directory | Current directory |
 | `--gui_mode` | Run in GUI mode | Flag (no value) | Not implemented yet | `False` |
-| `--trigger_mode` | Alert triggering method | `rainfall-threshold`, `safety-factor`, `machine-learning` | Selects trigger mode (only rainfall-threshold currently implemented) | `rainfall-threshold` |
-| `--alert_thresholds` | Custom thresholds file | File path or pandas Series | Uses custom thresholds instead of generating defaults | `None` |
-| `--default_thr_mode` | Default threshold mode | `quantiles`, `max-percentage` | Method for generating default thresholds | `quantiles` |
-| `--events_time_tolerance` | Event grouping tolerance | Python timedelta | Time window for grouping consecutive exceedances | `5 days` |
+| `--trigger_mode` | Alert triggering method | `rainfall-threshold`, `safety-factor`, `machine-learning` | Selects trigger mode (rainfall/safety-factor implemented) | `rainfall-threshold` |
+| `--alert_thresholds` | Custom thresholds file or values | File path, comma-separated floats, or pandas Series | Uses custom thresholds instead of generating defaults | `None` |
+| `--events_time_tolerance` | Event grouping tolerance | String like '5d', '2h' or timedelta | Time window for grouping consecutive exceedances | `5d` (5 days) |
 | `--top_k_paths_per_activation` | Critical paths per event | Integer ≥ 0 | Number of top paths to identify per alert event | `5` |
+| `--top_k_paths_similarity_tolerance` | Path similarity threshold | Float 0-1 | Controls path diversity (0=no overlap, 1=identical OK) | `0.5` |
 
 ### Configuration Constants
 
@@ -229,9 +263,13 @@ POSSIBLE_TRIGGER_MODES = [
     'machine-learning'
 ]
 
+POSSIBLE_SAFETY_FACTOR_MODELS = ['slip']  # Expandable for future models
+
 DEFAULT_THRESHOLD_PERC = {
-    'quantiles': 0.9975,      # 99.75th percentile
-    'max-percentage': 0.75    # 75% of maximum value
+    'high-quantile': 0.98,        # 98th percentile (for rainfall/ML)
+    'low-quantile': 0.02,         # 2nd percentile (for safety-factor)
+    'percentage-of-max': 0.75,    # 75% of maximum value
+    'percentage-of-min': 1.05     # 105% of minimum value
 }
 
 DEFAULT_ALERT_THR_FILE = {
@@ -240,7 +278,10 @@ DEFAULT_ALERT_THR_FILE = {
     'machine-learning': 'machine_learning_alert_thresholds.csv'
 }
 
-REMOVE_OUTLIERS_IN_THRESHOLDS = True  # Uses IQR method for outlier detection
+REMOVE_OUTLIERS_DURING_THRESHOLDS_DEFINITION = True  # Uses IQR method (1.5×IQR)
+
+STRAIGHT_LABEL = 'straight_'
+MA_LABEL = 'mobile_average_'
 ```
 
 ### Interactive Prompts
@@ -281,27 +322,31 @@ When CLI arguments are not provided:
 ### Threshold Management
 
 1. **Default Threshold Generation**:
-   - **Quantile Method**: Uses 99.75th percentile of historical data
-   - **Max-Percentage Method**: Uses 75% of maximum observed value
-   - **Outlier Removal**: Uses IQR method (1.5×IQR) to exclude outliers
-   - **Per-Station Thresholds**: Calculates individual thresholds for each station
+   - **High-Quantile Method**: Uses 98th percentile (for rainfall/ML triggers)
+   - **Low-Quantile Method**: Uses 2nd percentile (for safety-factor triggers)
+   - **Percentage-of-Max Method**: Uses 75% of maximum observed value
+   - **Percentage-of-Min Method**: Uses 105% of minimum observed value
+   - **Outlier Removal**: Uses IQR method (1.5×IQR) to exclude outliers before calculation
+   - **Per-Attention-Area Thresholds**: Calculates individual thresholds for each attention area
 
 2. **Threshold File Creation**:
-   - Generates CSV with station, max values, and default thresholds
-   - Saves to `user_control/` folder
+   - Generates CSV with attention area, statistics (mean, std, max, min), and default thresholds
+   - Saves to `user_control/` folder with trigger-mode-specific filename
    - User can edit and reuse custom thresholds
 
 3. **Threshold Application**:
-   - Loads thresholds as pandas Series indexed by station
-   - Applies thresholds to time-series data
+   - Loads thresholds as pandas Series indexed by attention area
+   - Applies thresholds to time-series data or computed metrics
    - Creates boolean mask of exceedances
 
 ### Alert Detection and Event Grouping
 
 1. **Threshold Exceedance Detection**:
-   - Compares time-series data against thresholds
+   - Compares time-series data or computed metrics against thresholds
+   - For rainfall/ML: triggers when metric >= threshold
+   - For safety-factor: triggers when FS <= threshold
    - Identifies all timestamps where threshold exceeded
-   - Records which stations exceeded thresholds
+   - Records which pixels/areas exceeded thresholds
 
 2. **Event Grouping**:
    - Groups consecutive exceedances within `events_time_tolerance`
@@ -317,9 +362,11 @@ When CLI arguments are not provided:
 ### Critical Path Identification
 
 1. **Path Ranking**:
-   - For each activated pixel, identifies passing landslide paths
+   - For each activated pixel set, identifies passing landslide paths
    - Ranks paths by `path_realism_score`
-   - Selects top K paths per starting point (if `separate_starting_points=True`)
+   - Applies similarity filtering to ensure path diversity
+   - Selects top K paths per starting point (`separate_starting_points=True` by default)
+   - Caches results for identical pixel sets to improve performance
 
 2. **Path Deduplication**:
    - Collects all unique critical paths across all events
@@ -333,10 +380,11 @@ When CLI arguments are not provided:
 
 ### Data Export and Storage
 
-1. **CSV Export**:
-   - **Attention pixels**: Complete list of at-risk locations
-   - **Activation datetimes**: Detailed event log with all metadata
-   - **Alert thresholds**: Threshold configuration for reproducibility
+1. **CSV Export** (organized in subfolders):
+   - **Attention pixels**: Complete list of at-risk locations with parameters
+   - **Activation datetimes** (per attention area): Detailed event log with all metadata
+   - **Activation metric history** (per attention area): Complete time-series for analysis
+   - **Alert thresholds**: Threshold configuration with statistics for reproducibility
    - **Critical paths**: High-risk landslide paths during alerts
 
 2. **PKL Storage**:
@@ -349,28 +397,39 @@ When CLI arguments are not provided:
 ```python
 from m07a_attention_pixels_alert import main
 import datetime as dt
+import pandas as pd
 
-# Run alert system with custom settings
+# Run alert system with rainfall-threshold mode
 alert_vars = main(
     base_dir="/path/to/analysis",
     trigger_mode="rainfall-threshold",
     events_time_tolerance=dt.timedelta(days=3),
-    top_k_paths_per_activation=10
+    top_k_paths_per_activation=10,
+    top_k_paths_similarity_tolerance=0.3
+)
+
+# Run with safety-factor mode
+alert_vars_sf = main(
+    base_dir="/path/to/analysis",
+    trigger_mode="safety-factor",
+    events_time_tolerance=pd.Timedelta(days=5),
+    top_k_paths_per_activation=5
 )
 
 # Access results
-attention_pixels = alert_vars['attention_pixels']
-activation_events = alert_vars['activation_datetimes']
-thresholds = alert_vars['alert_thresholds']
+attention_pixels_df = alert_vars['attention_pixels_df']
+alert_datetimes_dict = alert_vars['alert_datetimes_dict']
+thresholds_df = alert_vars['alert_thresholds_df']
 
-# Analyze specific event
-event_1 = activation_events[activation_events['event'] == 'rt1']
-print(f"Event rt1 activated {len(event_1['activated_pixels'].iloc[0])} pixels")
-print(f"Critical paths: {event_1['top_critical_landslide_path_ids'].iloc[0]}")
+# Analyze specific attention area
+aa_0_events = alert_datetimes_dict[0]
+print(f"Attention area 0 has {len(aa_0_events)} alert events")
+print(f"First event: {aa_0_events.iloc[0]['event']}")
+print(f"Activated pixels: {len(aa_0_events.iloc[0]['activated_pixels_2D_idx'])}")
+print(f"Critical paths: {aa_0_events.iloc[0]['top_critical_landslide_path_ids']}")
 
 # Check threshold configuration
-rain_thresholds = thresholds['rainfall-threshold']
-print(f"Station thresholds: {rain_thresholds['threshold'].to_dict()}")
+print(f"Thresholds per attention area:\n{thresholds_df[['threshold', 'mean', 'std']]}")
 ```
 
 ## Integration with Workflow
@@ -384,11 +443,13 @@ This script typically runs after:
 
 ### Use Cases
 
-- **Early warning systems**: Monitor rainfall against critical thresholds
+- **Early warning systems**: Monitor rainfall or safety factors against critical thresholds
 - **Event analysis**: Investigate historical landslide-triggering events
 - **Risk assessment**: Identify high-risk areas and critical paths
 - **Operational monitoring**: Real-time alert generation for landslide risk
-- **Scenario analysis**: Test different threshold configurations
+- **Scenario analysis**: Test different threshold configurations and trigger modes
+- **Geotechnical monitoring**: Track safety factor evolution with rainfall (SLIP model)
+- **Multi-modal alerts**: Combine rainfall-threshold and safety-factor triggers
 
 ### Output Usage
 
@@ -405,7 +466,7 @@ The alert system outputs are used for:
 
 1. **"Invalid trigger_mode"**:
    - Solution: Ensure trigger_mode is one of `POSSIBLE_TRIGGER_MODES`
-   - Note: Only `rainfall-threshold` is currently implemented
+   - Note: `rainfall-threshold` and `safety-factor` are implemented; `machine-learning` is not yet available
    
 2. **"GUI mode not implemented yet"**:
    - Solution: Run script in command-line mode (default)
@@ -417,10 +478,20 @@ The alert system outputs are used for:
    - Solution: Check time-series data completeness
    - Verify station names match between data and configuration
 
-5. **Memory issues with large datasets**:
+5. **"Model [X] not implemented yet"** (safety-factor mode):
+   - Solution: Currently only 'slip' model is available
+   - Check `POSSIBLE_SAFETY_FACTOR_MODELS` for supported models
+
+6. **Memory issues with large datasets**:
    - Solution: Reduce `top_k_paths_per_activation` parameter
    - Process fewer events at a time
    - Increase system RAM
+   - For safety-factor mode, process fewer attention areas at once
+
+7. **Slow performance during critical path identification**:
+   - Solution: Increase `top_k_paths_similarity_tolerance` (less filtering)
+   - Reduce `top_k_paths_per_activation`
+   - The script caches identical pixel sets to improve performance
 
 ### Debug Tips
 
