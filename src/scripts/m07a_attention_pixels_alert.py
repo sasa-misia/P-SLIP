@@ -49,8 +49,8 @@ POSSIBLE_SAFETY_FACTOR_MODELS = ['slip'] # TODO: Add more
 STRAIGHT_LABEL = 'straight_'
 MA_LABEL = 'mobile_average_'
 DEFAULT_THRESHOLD_PERC = {
-    'high-quantile': 0.96,
-    'low-quantile': 0.04,
+    'high-quantile': 0.98,
+    'low-quantile': 0.02,
     'percentage-of-max': 0.75,
     'percentage-of-min': 1.05
 }
@@ -359,6 +359,9 @@ def evaluate_safety_factors_on_attention_pixels(
 
         fs_history_dict = {}
         for ap_idx, ap_row in attention_pixels_df.iterrows():
+            if ap_idx % 10 == 0:
+                logger.info(f"Factor of safety calculations for attention area {ap_idx + 1} of {attention_pixels_df.shape[0]}...")
+
             interp_rain_history = []
             for r_idx, r_row in rain_vars['data']['cumulative_rain'].iterrows():
                 curr_interp_rain = interpolate_scatter_to_scatter(
@@ -415,6 +418,25 @@ def get_alert_datetimes_per_attention_area(
         top_k_paths_per_activation: int,
         top_k_paths_similarity_tolerance: float
     ) -> dict[str, pd.DataFrame]:
+    """
+    Get datetimes for alerts per attention area.
+
+    Args:
+        alert_metric_history_dict (dict[str, pd.DataFrame]): Dictionary with alert metric history per attention area.
+        alert_metric_col (str): Alert metric column.
+        attention_pixels_df (pd.DataFrame): Attention pixels dataframe.
+        alert_thresholds_df (pd.DataFrame): Alert thresholds dataframe.
+        trigger_mode (str): Trigger mode.
+        alert_metric (str): Alert metric.
+        alert_metric_mode (str): Alert metric mode.
+        events_time_tolerance (pd.Timedelta): Events time tolerance.
+        landslide_paths_df (pd.DataFrame): Landslide paths dataframe.
+        top_k_paths_per_activation (int): Top k paths per activation.
+        top_k_paths_similarity_tolerance (float): Top k paths similarity tolerance.
+
+    Returns:
+        dict[str, pd.DataFrame]: Dictionary with alert datetimes per attention area.
+    """
     alert_datetimes_dict = {}
     for aa, data_hist_df in alert_metric_history_dict.items():
         data_stacked_vals = np.vstack(data_hist_df[alert_metric_col])
@@ -438,8 +460,8 @@ def get_alert_datetimes_per_attention_area(
         event_labels = []
         current_event = 0
         last_date = None
-        for ad_idx, ad_row in curr_alert_datetimes_df.iterrows():
-            dt = ad_row['start_date']
+        for cad_idx, cad_row in curr_alert_datetimes_df.iterrows():
+            dt = cad_row['start_date']
             if last_date is None or (dt - last_date) > events_time_tolerance:
                 current_event += 1
             event_labels.append(f'rt{current_event}')
@@ -453,90 +475,43 @@ def get_alert_datetimes_per_attention_area(
         curr_alert_datetimes_df['alert_metric_mode'] = alert_metric_mode
         curr_alert_datetimes_df['activated_pixels_dtm_file_id'] = attention_pixels_df.loc[aa, 'dtm_file_id']
 
-        # Pre-allocate lists for better performance
-        activated_pixels_2D_idx_list = []
-        activated_pixels_coordinates_list = []
-        for act_mask in alert_mask_only_activated:
-            activated_pixels_2D_idx_list.append(attention_pixels_df.loc[aa, '2D_idx'][act_mask, :])
-            activated_pixels_coordinates_list.append(attention_pixels_df.loc[aa, 'coordinates'][act_mask, :])
-        
-        curr_alert_datetimes_df['activated_pixels_2D_idx'] = activated_pixels_2D_idx_list
-        curr_alert_datetimes_df['activated_pixels_coordinates'] = activated_pixels_coordinates_list
+        curr_alert_datetimes_df['activated_pixels_2D_idx'] = None
+        curr_alert_datetimes_df['activated_pixels_coordinates'] = None
+        for act_idx, act_mask in enumerate(alert_mask_only_activated):
+            curr_alert_datetimes_df.at[act_idx, 'activated_pixels_2D_idx'] = attention_pixels_df.loc[aa, '2D_idx'][act_mask, :]
+            curr_alert_datetimes_df.at[act_idx, 'activated_pixels_coordinates'] = attention_pixels_df.loc[aa, 'coordinates'][act_mask, :]
 
-        # Extract top-k critical landslide paths for each alert
+        # Extract top-k critical landslide paths for each alert (could be slow)
         curr_alert_datetimes_df['top_critical_landslide_path_ids'] = None
         if top_k_paths_per_activation > 0:
             curr_dtm = int(attention_pixels_df.loc[aa, 'dtm'])
-            
-            # Pre-filter paths for current DTM
-            curr_dtm_paths = landslide_paths_df[landslide_paths_df['path_dtm'] == curr_dtm].copy()
-            
-            # Pre-compute path sets (excluding first point) for similarity calculation
-            path_sets_cache = {}
-            for _, path_row in curr_dtm_paths.iterrows():
-                path_idx = path_row['path_2D_idx']
-                path_sets_cache[path_row['path_id']] = set(map(tuple, path_idx[1:]))
-            
-            # Group paths by starting point for faster lookup
-            paths_by_sp = defaultdict(list)
-            for _, path_row in curr_dtm_paths.iterrows():
-                paths_by_sp[path_row['starting_point_id']].append({
-                    'path_id': path_row['path_id'],
-                    'score': path_row['path_realism_score'],
-                    'path_2D_idx': path_row['path_2D_idx'],
-                    'path_set': path_sets_cache[path_row['path_id']]
-                })
-            
-            # Sort each starting point's paths by score once
-            for sp_id in paths_by_sp:
-                paths_by_sp[sp_id].sort(key=lambda x: x['score'], reverse=True)
-            
-            # Process each alert
-            top_paths_list = []
-            for ad_idx, activated_idx in enumerate(activated_pixels_2D_idx_list):
-                if ad_idx % 100 == 0:
-                    logger.info(f"Finding top {top_k_paths_per_activation} critical landslide paths for event {ad_idx + 1} of {len(curr_alert_datetimes_df)} (alert_area n.: {aa} of {len(alert_metric_history_dict)})...")
-                
-                # Create set of activated pixels for fast lookup
-                activated_set = set(map(tuple, activated_idx))
-                
-                # Find candidate paths that intersect with activated pixels
-                candidates_by_sp = defaultdict(list)
-                for sp_id, sp_paths in paths_by_sp.items():
-                    for path_info in sp_paths:
-                        # Check intersection with activated pixels
-                        path_points_set = set(map(tuple, path_info['path_2D_idx']))
-                        if path_points_set & activated_set:
-                            candidates_by_sp[sp_id].append(path_info)
-                
-                # Select top-k paths per starting point with similarity filtering
-                selected_paths = []
-                for sp_id, candidates in candidates_by_sp.items():
-                    sp_selected = []
-                    for candidate in candidates:
-                        # Check similarity with already selected paths from this SP
-                        is_valid = True
-                        for selected in sp_selected:
-                            # Calculate similarity (excluding starting point)
-                            intersection = len(candidate['path_set'] & selected['path_set'])
-                            min_length = min(len(candidate['path_set']), len(selected['path_set']))
-                            similarity = intersection / min_length if min_length > 0 else 0.0
-                            
-                            if similarity > top_k_paths_similarity_tolerance:
-                                is_valid = False
-                                break
-                        
-                        if is_valid:
-                            sp_selected.append(candidate)
-                            if len(sp_selected) >= top_k_paths_per_activation:
-                                break
-                    
-                    selected_paths.extend([p['path_id'] for p in sp_selected])
-                
-                # Remove duplicates and store
-                top_paths_list.append(list(set(selected_paths)) if selected_paths else [])
-            
-            curr_alert_datetimes_df['top_critical_landslide_path_ids'] = top_paths_list
+
+            for cad_idx, cad_row in curr_alert_datetimes_df.iterrows():
+                if cad_idx % 100 == 0:
+                    logger.info(f"Finding top {top_k_paths_per_activation} critical landslide paths for event {cad_idx + 1} of {len(curr_alert_datetimes_df)} (alert_area n.: {aa} of {len(alert_metric_history_dict)})...")
+
+                if cad_idx > 0 and np.array_equal(curr_alert_datetimes_df.at[cad_idx - 1, 'activated_pixels_2D_idx'], cad_row['activated_pixels_2D_idx']):
+                    curr_alert_datetimes_df.at[cad_idx, 'top_critical_landslide_path_ids'] = curr_alert_datetimes_df.loc[cad_idx - 1, 'top_critical_landslide_path_ids']
+                    continue # Already computed, no need to recompute
+
+                if cad_idx > 0:
+                    already_computed = curr_alert_datetimes_df.loc[0:(cad_idx - 1), 'activated_pixels_2D_idx'].apply(lambda arr: np.array_equal(arr, cad_row['activated_pixels_2D_idx']))
+                    if already_computed.any():
+                        old_idx = already_computed[already_computed].index[-1] # The last row that was equal
+                        curr_alert_datetimes_df.at[cad_idx, 'top_critical_landslide_path_ids'] = curr_alert_datetimes_df.loc[old_idx, 'top_critical_landslide_path_ids']
+                        continue # Already computed, no need to recompute
+
+                top_k_paths = get_top_k_paths(
+                    paths_df=landslide_paths_df,
+                    dtm=curr_dtm,
+                    idx_2d=attention_pixels_df.loc[aa, '2D_idx'],
+                    k=top_k_paths_per_activation,
+                    separate_starting_points=True,
+                    top_k_paths_similarity_tolerance=top_k_paths_similarity_tolerance
+                )
+
+                top_k_paths = [x for x in top_k_paths if x is not None]
+                curr_alert_datetimes_df.at[cad_idx, 'top_critical_landslide_path_ids'] = top_k_paths
         
         alert_datetimes_dict[aa] = curr_alert_datetimes_df
     
@@ -649,11 +624,24 @@ def main(
         else:
             log_and_error(f"Invalid alert metric mode: {alert_metric_mode}", ValueError, logger)
         
-        alert_metric_col = alert_metric + '_' + alert_metric_mode
+        alert_metric_col = alert_metric + '_' + alert_metric_mode + '_' + alert_metric_dt_str
         default_thr_mode = 'high-quantile'
 
         alert_metric_history_dict = {}
-        log_and_error(f"Trigger mode {trigger_mode} is not implemented yet.", NotImplementedError, logger)
+        for ap_idx, ap_row in attention_pixels_df.iterrows():
+            if ap_idx % 10 == 0:
+                logger.info(f"Extraction of data for attention area {ap_idx + 1} of {attention_pixels_df.shape[0]}...")
+
+            curr_rain_history_df = rain_vars['datetimes'].loc[:, ['start_date', 'end_date']]
+
+            stations_to_pick = ap_row['stations']
+
+            curr_rain_history_df[alert_metric_col] = None
+            for amd_idx, amd_rec in alert_metric_data.iterrows():
+                data_to_vectorize = amd_rec[stations_to_pick].to_numpy()
+                curr_rain_history_df.at[amd_idx, alert_metric_col] = data_to_vectorize
+            
+            alert_metric_history_dict[ap_idx] = curr_rain_history_df
 
     # =============== Alerts by safety-factor ===============
     elif trigger_mode == 'safety-factor':
@@ -694,17 +682,17 @@ def main(
         curr_data_stacked = np.vstack(hist_df[alert_metric_col])
         outlier_and_nan_mask = np.zeros(curr_data_stacked.shape, dtype=bool)
         if REMOVE_OUTLIERS_DURING_THRESHOLDS_DEFINITION:
-            lower_quantile = np.nanquantile(curr_data_stacked, q=0.1)
-            higher_quantile = np.nanquantile(curr_data_stacked, q=0.9)
+            lower_quantile = np.nanquantile(curr_data_stacked, q=0.01)
+            higher_quantile = np.nanquantile(curr_data_stacked, q=0.99)
             iqr = higher_quantile - lower_quantile
             lower_bound = lower_quantile - 1.5 * iqr
             upper_bound = higher_quantile + 1.5 * iqr
             outlier_and_nan_mask = (curr_data_stacked < lower_bound) | (curr_data_stacked > upper_bound)
         
         if default_thr_mode == 'percentage-of-min':
-            def_alert_threshold = DEFAULT_THRESHOLD_PERC[default_thr_mode] * np.nanmin(curr_data_stacked)
+            def_alert_threshold = np.nanmin(curr_data_stacked[~outlier_and_nan_mask]) * DEFAULT_THRESHOLD_PERC[default_thr_mode]
         elif default_thr_mode == 'percentage-of-max':
-            def_alert_threshold = DEFAULT_THRESHOLD_PERC[default_thr_mode] * np.nanmax(curr_data_stacked)
+            def_alert_threshold = np.nanmax(curr_data_stacked[~outlier_and_nan_mask]) * DEFAULT_THRESHOLD_PERC[default_thr_mode]
         elif default_thr_mode in ['high-quantile', 'low-quantile']:
             masked_data = curr_data_stacked[~outlier_and_nan_mask]
             def_alert_threshold = np.nanquantile(masked_data, q=DEFAULT_THRESHOLD_PERC[default_thr_mode])
@@ -802,7 +790,11 @@ def main(
     critical_paths_df.to_csv(os.path.join(OUT_ALERT_DIR, 'critical_landslide_paths.csv'), index=False)
 
     OUT_ALERT_DIR_AD = os.path.join(OUT_ALERT_DIR, 'activation_datetimes')
+    if not os.path.isdir(OUT_ALERT_DIR_AD):
+        os.makedirs(OUT_ALERT_DIR_AD)
     OUT_ALERT_DIR_MH = os.path.join(OUT_ALERT_DIR, 'activation_metric_history')
+    if not os.path.isdir(OUT_ALERT_DIR_MH):
+        os.makedirs(OUT_ALERT_DIR_MH)
     for aa in attention_pixels_df.index:
         alert_datetimes_dict[aa].to_csv(os.path.join(OUT_ALERT_DIR_AD, f'activation_datetimes_aa_{aa}.csv'), index=False)
         alert_metric_history_dict[aa].to_csv(os.path.join(OUT_ALERT_DIR_MH, f'activation_metric_history_aa_{aa}.csv'), index=False)
