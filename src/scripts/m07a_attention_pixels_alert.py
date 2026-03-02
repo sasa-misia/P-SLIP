@@ -20,8 +20,9 @@ from config import (
 )
 
 # Importing necessary modules from psliptools
-# from psliptools.rasters import (
-# )
+from psliptools.rasters import (
+    generate_gradient_rasters
+)
 
 from psliptools.utilities import (
     select_from_list_prompt,
@@ -162,8 +163,9 @@ def get_top_k_paths(
 
     return top_paths
 
-def get_attention_pixel_coordinates(
+def get_att_pixel_coords_and_elev(
         abg_df: pd.DataFrame,
+        dtm_df: pd.DataFrame,
         attention_pixels_df: pd.DataFrame
     ) -> list[np.ndarray]:
     """
@@ -171,17 +173,22 @@ def get_attention_pixel_coordinates(
     
     Args:
         abg_df (pd.DataFrame): DataFrame containing Analysys Base Grid (ABG) data.
+        dtm_df (pd.DataFrame): DataFrame containing Digital Terrain Model (DTM) data.
         attention_pixels_df (pd.DataFrame): DataFrame containing attention pixel data.
 
     Returns:
-        np.ndarray: List of coordinates of attention pixels (each element contains an array of coordinates nx2: n points with longitude and latitude).
+        tuple(list[np.ndarray], list[np.ndarray]): Tuple containing list of coordinates of attention pixels (each element contains an array of coordinates nx2: n points with longitude and latitude), and list of elevations of attention pixels.
     """
     attention_coords = []
-    for _, row in attention_pixels_df.iterrows():
+    attention_elevation = []
+    for idx, row in attention_pixels_df.iterrows():
+        logger.info(f"Extracting coordinates and elevation for attention area {idx} of {attention_pixels_df.shape[0]}...")
+
         curr_dtm = row['dtm']
         curr_2D_idx = row['2D_idx']
         curr_row_idx = curr_2D_idx[:,0]
         curr_col_idx = curr_2D_idx[:,1]
+
         attention_coords.append(
             np.column_stack([
                 abg_df['longitude'][curr_dtm][curr_row_idx, curr_col_idx], 
@@ -189,7 +196,61 @@ def get_attention_pixel_coordinates(
             ])
         )
 
-    return attention_coords
+        attention_elevation.append(
+            dtm_df['elevation'][curr_dtm][curr_row_idx, curr_col_idx]
+        )
+
+    return attention_coords, attention_elevation
+
+def get_att_pixel_gradients(
+        abg_df: pd.DataFrame,
+        dtm_df: pd.DataFrame,
+        attention_pixels_df: pd.DataFrame
+    ) -> list[np.ndarray]:
+    """
+    Get gradients of attention pixels.
+    
+    Args:
+        abg_df (pd.DataFrame): DataFrame containing Analysys Base Grid (ABG) data.
+        dtm_df (pd.DataFrame): DataFrame containing Digital Terrain Model (DTM) data.
+        attention_pixels_df (pd.DataFrame): DataFrame containing attention pixel data.
+
+    Returns:
+        tuple(list[np.ndarray], list[np.ndarray]): Tuple containing list of gradients of attention pixels (each element contains an array of gradients nx2: n points with longitude and latitude gradients).
+    """
+    gradient_df = pd.DataFrame(columns=['gradient_dz_dx', 'gradient_dz_dy'], index=dtm_df.index)
+
+    attention_grad_zx = []
+    attention_grad_zy = []
+    for idx, row in attention_pixels_df.iterrows():
+        logger.info(f"Extracting gradients for attention area {idx} of {attention_pixels_df.shape[0]}...")
+
+        curr_dtm = row['dtm']
+        curr_2D_idx = row['2D_idx']
+        curr_row_idx = curr_2D_idx[:,0]
+        curr_col_idx = curr_2D_idx[:,1]
+
+        if np.isnan(gradient_df.at[curr_dtm, 'gradient_dz_dx']).all() or np.isnan(gradient_df.at[curr_dtm, 'gradient_dz_dy']).all():
+            grad_zx, grad_zy = generate_gradient_rasters(
+                dtm=dtm_df['elevation'][curr_dtm],
+                lon=abg_df['longitude'][curr_dtm],
+                lat=abg_df['latitude'][curr_dtm],
+                out_type='float16',
+                no_data=np.nan
+            )
+
+            gradient_df.at[curr_dtm, 'gradient_dz_dx'] = grad_zx
+            gradient_df.at[curr_dtm, 'gradient_dz_dy'] = grad_zy
+
+        attention_grad_zx.append(
+            gradient_df['gradient_dz_dx'][curr_dtm][curr_row_idx, curr_col_idx]
+        )
+
+        attention_grad_zy.append(
+            gradient_df['gradient_dz_dy'][curr_dtm][curr_row_idx, curr_col_idx]
+        )
+
+    return attention_grad_zx, attention_grad_zy
 
 def get_rain_info(
         env: AnalysisEnvironment,
@@ -305,11 +366,11 @@ def evaluate_safety_factors_on_attention_pixels(
     if model_name not in POSSIBLE_SAFETY_FACTOR_MODELS:
         log_and_error(f"Invalid model_name: [{model_name}]. Must be one of {POSSIBLE_SAFETY_FACTOR_MODELS}.", ValueError, logger)
     
-    slope_df = env.load_variable(variable_filename='morphology_vars.pkl')['angles_df'].loc[:, ['slope', 'no_data']]
+    angles_df = env.load_variable(variable_filename='morphology_vars.pkl')['angles_df']
 
     # Extract base grids shapes
     base_grids_shapes = []
-    for _, row in slope_df.iterrows():
+    for _, row in angles_df.iterrows():
         base_grids_shapes.append(row['slope'].shape)
     
     # Extract parameter csv path(s) to use
@@ -319,18 +380,24 @@ def evaluate_safety_factors_on_attention_pixels(
     )
 
     # Apply filter to slope arrays: set values < 0 to 0, and no_data to 0
-    slope_df['slope'] = slope_df.apply(lambda row: np.where((row['slope'] < 0) | (row['slope'] == row['no_data']), 0, row['slope']), axis=1)
+    angles_df['slope'] = angles_df.apply(lambda row: np.where((row['slope'] < 0) | (row['slope'] == row['no_data']), 0, row['slope']), axis=1)
+
+    # Apply filter to aspect arrays: set no_data to nan
+    angles_df['aspect'] = angles_df.apply(lambda row: np.where((row['aspect'] == row['no_data']), np.nan, row['aspect']), axis=1)
 
     # Calculate cosine of slope angles (convert degrees to radians), because is the beta without vegetation
-    beta_slope = slope_df['slope'].apply(lambda x: np.cos(np.radians(x))).to_list()
+    beta_slope = angles_df['slope'].apply(lambda x: np.cos(np.radians(x))).to_list()
 
     # Add data to attention_pixels_df
     attention_pixels_df['slope'] = None
+    attention_pixels_df['aspect'] = None
     for ap_idx, ap_row in attention_pixels_df.iterrows():
-        ap_slope = slope_df['slope'].loc[ap_row['dtm']][ap_row['2D_idx'][:,0], ap_row['2D_idx'][:,1]]
+        ap_slope = angles_df['slope'].loc[ap_row['dtm']][ap_row['2D_idx'][:,0], ap_row['2D_idx'][:,1]]
+        ap_aspect = angles_df['aspect'].loc[ap_row['dtm']][ap_row['2D_idx'][:,0], ap_row['2D_idx'][:,1]]
         attention_pixels_df.at[ap_idx, 'slope'] = ap_slope
+        attention_pixels_df.at[ap_idx, 'aspect'] = ap_aspect
     
-    del slope_df
+    del angles_df
     
     if model_name == 'slip':
         required_parameters = ['GS', 'c', 'cr', 'phi', 'kt', 'beta', 'A', 'n']
@@ -550,6 +617,7 @@ def main(
 
     dtm_file_id_df = dtm_vars['dtm']['file_id']
     abg_df = dtm_vars['abg']
+    dtm_df = dtm_vars['dtm']
 
     del dtm_vars # It can be heavy to keep in memory on very large areas
 
@@ -572,9 +640,10 @@ def main(
     
     attention_pixels_df = pd.DataFrame(attention_pixels_list)
     attention_pixels_df.index.name = 'attention_area'
-    attention_pixels_df['coordinates'] = get_attention_pixel_coordinates(abg_df, attention_pixels_df)
+    attention_pixels_df['coordinates'], attention_pixels_df['elevation'] = get_att_pixel_coords_and_elev(abg_df, dtm_df, attention_pixels_df)
+    attention_pixels_df['gradient_dz_dx'], attention_pixels_df['gradient_dz_dy'] = get_att_pixel_gradients(abg_df, dtm_df, attention_pixels_df)
 
-    del abg_df # It can be heavy to keep in memory on very large areas
+    del abg_df, dtm_df # It can be heavy to keep in memory on very large areas
     
     # =============== Alerts by rainfall-threshold ===============
     if trigger_mode == 'rainfall-threshold':
@@ -660,7 +729,7 @@ def main(
 
         alert_metric_history_dict = evaluate_safety_factors_on_attention_pixels( # It will have same number of rows as attention_pixels_df
             env=env,
-            attention_pixels_df=attention_pixels_df,
+            attention_pixels_df=attention_pixels_df, # It will be updated in-place with new columns (slope, aspect, etc.)
             parameter_class_association_df = parameter_vars['association_df'],
             rain_vars=rain_vars,
             model_name=alert_metric_mode
